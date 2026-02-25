@@ -2,7 +2,7 @@ const PAGE_SIZE = 30;
 const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
-const WISHLIST_ADDED_CACHE_TTL_MS = 30 * 60 * 1000;
+const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TAG_SHOW_STEP = 12;
 
@@ -95,11 +95,9 @@ function getMetaTags(appId) {
 async function loadWishlistAddedMap() {
   const now = Date.now();
   const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
-  const cached = stored[WISHLIST_ADDED_CACHE_KEY];
-  if (cached && now - Number(cached.cachedAt || 0) < WISHLIST_ADDED_CACHE_TTL_MS) {
-    wishlistAddedMap = cached.map || {};
-    return;
-  }
+  const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+  const cachedMap = cached.map || {};
+  const lastFullSyncAt = Number(cached.lastFullSyncAt || 0);
 
   async function resolveSteamIdFromStoreHtml() {
     try {
@@ -108,47 +106,21 @@ async function loadWishlistAddedMap() {
         cache: "no-store"
       });
       const html = await response.text();
-      const match = html.match(/g_steamID\\s*=\\s*\"(\\d{10,20})\"/);
+      const match = html.match(/g_steamID\s*=\s*"(\d{10,20})"/);
       return match ? match[1] : "";
     } catch {
       return "";
     }
   }
 
-  try {
-    const userdataResponse = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
-      credentials: "include",
-      cache: "no-store"
-    });
-    const userdata = await userdataResponse.json();
-
-    const rgWishlistArray = Array.isArray(userdata?.rgWishlist)
-      ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
-      : [];
-
-    let steamId = String(
-      userdata?.steamid
-      || userdata?.strSteamId
-      || userdata?.str_steamid
-      || userdata?.webapi_token_steamid
-      || ""
-    ).trim();
-
-    if (!steamId) {
-      steamId = await resolveSteamIdFromStoreHtml();
+  async function fetchAddedTimestampsById(steamId, targetIds) {
+    const out = {};
+    const remaining = new Set(targetIds);
+    if (!steamId || remaining.size === 0) {
+      return out;
     }
 
-    if (!steamId) {
-      const fallback = {};
-      for (const appId of rgWishlistArray) {
-        fallback[appId] = 0;
-      }
-      wishlistAddedMap = fallback;
-      return;
-    }
-
-    const map = {};
-    for (let pageIndex = 0; pageIndex < 200; pageIndex += 1) {
+    for (let pageIndex = 0; pageIndex < 200 && remaining.size > 0; pageIndex += 1) {
       const wishlistResponse = await fetch(
         `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
         {
@@ -163,26 +135,90 @@ async function loadWishlistAddedMap() {
       }
 
       for (const [appId, value] of entries) {
+        if (!remaining.has(appId)) {
+          continue;
+        }
         const added = Number(value?.added || 0);
-        map[String(appId)] = added > 0 ? added : 0;
+        out[appId] = added > 0 ? added : 0;
+        remaining.delete(appId);
       }
     }
 
-    wishlistAddedMap = map;
-    if (Object.keys(wishlistAddedMap).length === 0 && rgWishlistArray.length > 0) {
-      for (const appId of rgWishlistArray) {
-        wishlistAddedMap[appId] = 0;
+    return out;
+  }
+
+  try {
+    const userdataResponse = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
+      credentials: "include",
+      cache: "no-store"
+    });
+    const userdata = await userdataResponse.json();
+    const nowIds = Array.isArray(userdata?.rgWishlist)
+      ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+
+    // If we couldn't load current wishlist, keep existing cache to avoid destructive overwrite.
+    if (nowIds.length === 0 && Object.keys(cachedMap).length > 0) {
+      wishlistAddedMap = { ...cachedMap };
+      return;
+    }
+
+    const nowSet = new Set(nowIds);
+    const cachedIds = Object.keys(cachedMap);
+    const cachedSet = new Set(cachedIds);
+
+    const addedIds = nowIds.filter((id) => !cachedSet.has(id));
+    const removedIds = cachedIds.filter((id) => !nowSet.has(id));
+
+    const nextMap = { ...cachedMap };
+    for (const id of removedIds) {
+      delete nextMap[id];
+    }
+    for (const id of addedIds) {
+      nextMap[id] = 0;
+    }
+
+    let steamId = String(
+      userdata?.steamid
+      || userdata?.strSteamId
+      || userdata?.str_steamid
+      || userdata?.webapi_token_steamid
+      || ""
+    ).trim();
+
+    const shouldRunDailyFullSync = now - lastFullSyncAt >= WISHLIST_FULL_SYNC_INTERVAL_MS;
+    const needsTimestampSync = addedIds.length > 0 || shouldRunDailyFullSync;
+    let nextLastFullSyncAt = lastFullSyncAt;
+
+    if (needsTimestampSync) {
+      if (!steamId) {
+        steamId = await resolveSteamIdFromStoreHtml();
+      }
+
+      if (steamId) {
+        const targetIds = shouldRunDailyFullSync ? nowIds : addedIds;
+        const addedById = await fetchAddedTimestampsById(steamId, targetIds);
+        for (const [appId, added] of Object.entries(addedById)) {
+          nextMap[appId] = Number(added || 0);
+        }
+      }
+
+      // Avoid retrying full sync on every render when Steam ID/timestamps are unavailable.
+      if (shouldRunDailyFullSync) {
+        nextLastFullSyncAt = now;
       }
     }
 
+    wishlistAddedMap = nextMap;
     await browser.storage.local.set({
       [WISHLIST_ADDED_CACHE_KEY]: {
         cachedAt: now,
+        lastFullSyncAt: nextLastFullSyncAt,
         map: wishlistAddedMap
       }
     });
   } catch {
-    wishlistAddedMap = {};
+    wishlistAddedMap = { ...cachedMap };
   }
 }
 
