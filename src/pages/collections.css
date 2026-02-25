@@ -1,0 +1,173 @@
+:root {
+  color-scheme: dark;
+  --bg: #0f1a29;
+  --panel: #1b2838;
+  --panel-2: #24384f;
+  --text: #d6e7f7;
+  --muted: #9ab8d3;
+  --accent: #66c0f4;
+  --danger: #a64d4d;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #172334, var(--bg));
+  color: var(--text);
+  font: 14px/1.4 "Segoe UI", Tahoma, sans-serif;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 12px;
+  background: rgba(18, 28, 42, 0.96);
+  border-bottom: 1px solid #2f445a;
+}
+
+.topbar h1 {
+  margin: 0 0 10px;
+  font-size: 20px;
+}
+
+.controls,
+.manage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 10px;
+}
+
+label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+input,
+select,
+button {
+  height: 32px;
+  border-radius: 4px;
+  border: 1px solid #2f445a;
+  background: #101822;
+  color: var(--text);
+  padding: 4px 8px;
+}
+
+button {
+  cursor: pointer;
+  background: #2d4d6b;
+}
+
+button:hover {
+  filter: brightness(1.08);
+}
+
+button.danger,
+.remove-btn {
+  background: var(--danger);
+}
+
+.status {
+  min-height: 16px;
+  margin: 0;
+  color: var(--muted);
+}
+
+main {
+  padding: 12px;
+}
+
+.cards {
+  display: grid;
+  gap: 10px;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 184px 1fr auto;
+  gap: 10px;
+  align-items: stretch;
+  border: 1px solid #2f445a;
+  background: var(--panel-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.cover-link,
+.cover {
+  width: 184px;
+  height: 69px;
+  display: block;
+}
+
+.cover {
+  object-fit: cover;
+  background: #0b141f;
+}
+
+.info {
+  padding: 8px 0;
+  min-width: 0;
+}
+
+.title {
+  color: #fff;
+  text-decoration: none;
+  font-size: 20px;
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  margin: 2px 0;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+}
+
+.empty {
+  margin: 14px 0;
+  color: var(--muted);
+}
+
+.hidden {
+  display: none;
+}
+
+.pager {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 760px) {
+  .card {
+    grid-template-columns: 1fr;
+  }
+
+  .cover-link,
+  .cover {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 184 / 69;
+  }
+
+  .actions {
+    padding-top: 0;
+  }
+}

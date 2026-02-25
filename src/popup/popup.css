@@ -1,0 +1,30 @@
+body {
+  margin: 0;
+  min-width: 260px;
+  background: #1b2838;
+  color: #fff;
+  font: 14px/1.4 "Segoe UI", Tahoma, sans-serif;
+}
+
+main {
+  padding: 12px;
+}
+
+h1 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+button {
+  width: 100%;
+  border: 1px solid #2f445a;
+  border-radius: 4px;
+  background: #2d4d6b;
+  color: #fff;
+  padding: 8px;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(1.08);
+}

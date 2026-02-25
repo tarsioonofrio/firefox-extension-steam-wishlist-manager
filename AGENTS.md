@@ -5,6 +5,8 @@
 - `src/background.js`: central state management (`browser.storage.local`) and message handlers.
 - `src/content/app-page.js`: UI/actions on Steam app pages (`/app/...`) for collection assignment.
 - `src/content/wishlist-page.js`: filtering and visual ordering logic on wishlist pages (`/wishlist/...`).
+- `src/pages/collections.html|css|js`: dedicated collections management page and Steam-like card list.
+- `src/popup/popup.html|css|js`: browser action popup that opens the collections page.
 - `src/styles/content.css`: shared styles for injected UI.
 - `README.md`: MVP usage notes and current limitations.
 - `logs/`: local runtime logs; ignored in git.

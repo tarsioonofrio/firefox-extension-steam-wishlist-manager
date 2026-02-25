@@ -59,9 +59,7 @@ Notes:
 
 - Sandbox-only behavior: the extension never writes to Steam wishlist.
 - Collection data is stored only in `browser.storage.local`.
-- A game can be added to a collection only if it is already in Steam wishlist.
-- If a game leaves your Steam wishlist, it is automatically removed from all local collections.
-- Host scope is limited to Steam app and wishlist pages.
+- Host scope is limited to Steam Store pages required by this project.
 
 ## Compatibility
 
@@ -81,19 +79,18 @@ Useful commands:
 
 ## Usage Flow
 
-1. Open a Steam app page (`/app/...`).
-2. If the game is in your Steam wishlist, `Add to Collection` is enabled.
-3. Choose collection and position (start/end), then save.
-4. Open Steam wishlist page (`/wishlist/...`) and use the `Collections` filter panel.
-5. Use `Manage Collections` (next to wishlist counter) to create/remove collections.
+1. Click the extension icon and choose `Open Collections Page`.
+2. On the collections page, create/select a collection.
+3. Browse collection cards with Steam-style layout (image on the left).
+4. Use search/sort/pagination and remove items from the selected collection.
+5. Click a card image/title to open the app page on Steam.
 
 ## Wishlist Validation Strategy
 
-- Primary source: `https://store.steampowered.com/dynamicstore/userdata/` (`rgWishlist`) from current logged-in session.
-- 60s local cache to reduce requests/CPU.
-- Cache is invalidated when wishlist UI state changes on app page.
-- Fallback: conservative UI-based check if `dynamicstore/userdata` is unavailable.
-- Collection pruning runs on wishlist page to remove any app no longer present in Steam wishlist.
+- The collections page fetches app details on demand from
+  `https://store.steampowered.com/api/appdetails` for price/discount/tag-like metadata.
+- Metadata is cached in local storage to reduce repeated requests.
+- Existing collection state remains local-only in extension storage.
 
 ## Troubleshooting
 
@@ -106,3 +103,4 @@ Useful commands:
 - `dynamicstore/userdata` is an internal Steam endpoint and may change.
 - Reordering/filtering is visual/local only; it does not modify Steam server-side order.
 - Storage is per Firefox profile unless sync/export is implemented.
+- Steam page content-script UI is currently disabled while the dedicated collections page is stabilized.

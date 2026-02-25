@@ -6,9 +6,14 @@
   "permissions": ["storage"],
   "host_permissions": [
     "*://store.steampowered.com/app/*",
+    "*://store.steampowered.com/api/*",
     "*://store.steampowered.com/wishlist*",
     "*://store.steampowered.com/wishlist/*"
   ],
+  "action": {
+    "default_title": "Steam Wishlist Collections Manager",
+    "default_popup": "src/popup/popup.html"
+  },
   "background": {
     "scripts": ["src/background.js"]
   },

@@ -27,6 +27,10 @@ function isTrustedSender(sender) {
     return false;
   }
 
+  if (/^(moz|chrome)-extension:\/\//.test(senderUrl)) {
+    return senderId === browser.runtime.id;
+  }
+
   return /^https:\/\/store\.steampowered\.com\/(app|wishlist)\//.test(senderUrl);
 }
 
