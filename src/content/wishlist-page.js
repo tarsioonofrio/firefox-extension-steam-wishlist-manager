@@ -1,4 +1,6 @@
-if (!window.location.pathname.startsWith("/wishlist")) {
+const ENABLE_WISHLIST_COLLECTIONS_UI = false;
+
+if (!window.location.pathname.startsWith("/wishlist") || !ENABLE_WISHLIST_COLLECTIONS_UI) {
   // Not a wishlist route.
 } else {
   const PANEL_ID = "swcm-wishlist-panel";
@@ -18,51 +20,70 @@ if (!window.location.pathname.startsWith("/wishlist")) {
   }
 
   function getRows() {
-    const primary = uniqueElements(
-      Array.from(document.querySelectorAll(".wishlist_row, div[id^='game_'], div[data-ds-appid]"))
+    const candidates = Array.from(
+      document.querySelectorAll(".wishlist_row_ctn, .wishlist_row, div[id^='game_'], [data-ds-appid], [data-app-id]")
     );
-    if (primary.length > 0) {
-      return primary;
-    }
 
-    const wishlistRoot = getListContainer() || document;
-    const links = Array.from(wishlistRoot.querySelectorAll("a[href*='/app/']"));
-    const fallbackRows = [];
+    const normalized = candidates
+      .map((row) =>
+        row.closest(".wishlist_row_ctn") ||
+        row.closest("div[id^='game_']") ||
+        row
+      );
 
-    for (const link of links) {
-      const row =
-        link.closest(".wishlist_row") ||
-        link.closest("div[id^='game_']") ||
-        link.closest("[data-ds-appid]") ||
-        link.closest(".wishlist_row_ctn") ||
-        link.closest(".Panel");
-      if (row) {
-        fallbackRows.push(row);
-      }
-    }
-
-    return uniqueElements(fallbackRows);
+    return uniqueElements(normalized);
   }
 
   function extractAppId(row) {
-    const byData = row.getAttribute("data-app-id") || row.getAttribute("data-ds-appid");
+    const byData =
+      row.getAttribute("data-app-id") ||
+      row.getAttribute("data-ds-appid") ||
+      row.getAttribute("data-appid");
     if (byData) {
       return String(byData);
     }
 
-    const idMatch = (row.id || "").match(/(\d+)/);
-    if (idMatch) {
-      return idMatch[1];
+    // Prefer app-like ids and keep a broad numeric fallback for Steam variants.
+    const strictIdMatch = (row.id || "").match(/(?:game|app|wishlist(?:_row)?)[_-]?(\d{3,10})/i);
+    if (strictIdMatch) {
+      return strictIdMatch[1];
     }
 
-    const appLink = row.querySelector("a[href*='/app/']");
+    const anyIdMatch = (row.id || "").match(/(\d{3,10})/);
+    if (anyIdMatch) {
+      return anyIdMatch[1];
+    }
+
+    const nestedDataEl = row.querySelector("[data-app-id], [data-ds-appid], [data-appid]");
+    if (nestedDataEl) {
+      const nestedData =
+        nestedDataEl.getAttribute("data-app-id") ||
+        nestedDataEl.getAttribute("data-ds-appid") ||
+        nestedDataEl.getAttribute("data-appid");
+      if (nestedData) {
+        return String(nestedData);
+      }
+    }
+
+    const appLink = row.querySelector("a[href*='/app/'], a[href*='/agecheck/app/']");
     const href = appLink?.getAttribute("href") || "";
-    const hrefMatch = href.match(/\/app\/(\d+)/);
-    return hrefMatch ? hrefMatch[1] : "";
+    const hrefMatch = href.match(/\/(?:agecheck\/)?app\/(\d+)/);
+    if (hrefMatch) {
+      return hrefMatch[1];
+    }
+
+    return "";
   }
 
   function getListContainer() {
-    return document.querySelector("#wishlist_ctn") || document.querySelector("#wishlist_items") || null;
+    const firstRow = getRows()[0] || null;
+    return (
+      firstRow?.parentElement ||
+      document.querySelector("#wishlist_items") ||
+      document.querySelector("#wishlist_ctn") ||
+      document.querySelector(".wishlist_rows") ||
+      null
+    );
   }
 
   function findVisibleElement(elements) {
@@ -383,6 +404,10 @@ if (!window.location.pathname.startsWith("/wishlist")) {
   function applyCollection(state, collectionName) {
     const rows = getRows();
     const total = rows.length;
+    if (total === 0) {
+      // Steam re-renders asynchronously; keep previous DOM state if list is momentarily unavailable.
+      return;
+    }
 
     if (!collectionName || collectionName === "__all__") {
       for (const row of rows) {

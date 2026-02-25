@@ -3,6 +3,7 @@ const MODAL_ID = "swcm-modal";
 const APP_MANAGE_BUTTON_ID = "swcm-manage-collections-app";
 const APP_MANAGE_MODAL_ID = "swcm-collections-modal-app";
 const ENABLE_MANAGE_COLLECTIONS = false;
+const ENABLE_APP_PAGE_ADD_COLLECTION = false;
 
 const INIT_RETRY_INTERVAL_MS = 400;
 const MAX_INIT_ATTEMPTS = 20;
@@ -658,6 +659,10 @@ async function init() {
 }
 
 async function bootstrap() {
+  if (!ENABLE_APP_PAGE_ADD_COLLECTION) {
+    return;
+  }
+
   await init().catch(() => false);
 
   const observer = new MutationObserver(() => {
