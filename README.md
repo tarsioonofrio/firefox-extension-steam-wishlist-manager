@@ -7,6 +7,7 @@ Firefox extension MVP to organize Steam wishlist games into local custom collect
 - Sandbox-only behavior: the extension never writes to Steam wishlist.
 - Collection data is stored only in `browser.storage.local`.
 - A game can be added to a collection only if it is already in Steam wishlist.
+- If a game leaves your Steam wishlist, it is automatically removed from all local collections.
 - Host scope is limited to Steam app and wishlist pages.
 
 ## Compatibility
@@ -31,6 +32,7 @@ Useful commands:
 2. If the game is in your Steam wishlist, `Add to Collection` is enabled.
 3. Choose collection and position (start/end), then save.
 4. Open Steam wishlist page (`/wishlist/...`) and use the `Collections` filter panel.
+5. Use `Manage Collections` (next to wishlist counter) to create/remove collections.
 
 ## Wishlist Validation Strategy
 
@@ -38,6 +40,7 @@ Useful commands:
 - 60s local cache to reduce requests/CPU.
 - Cache is invalidated when wishlist UI state changes on app page.
 - Fallback: conservative UI-based check if `dynamicstore/userdata` is unavailable.
+- Collection pruning runs on wishlist page to remove any app no longer present in Steam wishlist.
 
 ## Troubleshooting
 

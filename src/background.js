@@ -36,6 +36,50 @@ function validateAppId(appId) {
   }
 }
 
+function getReferencedAppIds(state) {
+  const referenced = new Set();
+
+  for (const collectionName of state.collectionOrder) {
+    const appIds = state.collections[collectionName] || [];
+    for (const appId of appIds) {
+      referenced.add(appId);
+    }
+  }
+
+  return referenced;
+}
+
+function cleanupOrphanItems(state) {
+  const referenced = getReferencedAppIds(state);
+
+  for (const appId of Object.keys(state.items)) {
+    if (!referenced.has(appId)) {
+      delete state.items[appId];
+    }
+  }
+}
+
+function sanitizeAppIdList(appIds) {
+  if (!Array.isArray(appIds)) {
+    return [];
+  }
+
+  const out = [];
+  const seen = new Set();
+
+  for (const rawAppId of appIds) {
+    const appId = String(rawAppId || "").trim();
+    if (!appId || seen.has(appId) || !VALID_APP_ID_PATTERN.test(appId)) {
+      continue;
+    }
+
+    seen.add(appId);
+    out.push(appId);
+  }
+
+  return out;
+}
+
 function normalizeState(rawState) {
   const state = {
     ...DEFAULT_STATE,
@@ -79,7 +123,7 @@ function normalizeState(rawState) {
 
     for (const rawId of rawList) {
       const appId = String(rawId || "").trim();
-      if (!appId || seenIds.has(appId)) {
+      if (!appId || seenIds.has(appId) || !VALID_APP_ID_PATTERN.test(appId)) {
         continue;
       }
       seenIds.add(appId);
@@ -142,6 +186,34 @@ function removeFromAllCollections(state, appId) {
       (id) => id !== appId
     );
   }
+}
+
+function pruneItemsNotInWishlist(state, allowedAppIds) {
+  const allowed = new Set(sanitizeAppIdList(allowedAppIds));
+
+  for (const collectionName of state.collectionOrder) {
+    const current = state.collections[collectionName] || [];
+    state.collections[collectionName] = current.filter((appId) => allowed.has(appId));
+  }
+
+  cleanupOrphanItems(state);
+}
+
+function deleteCollection(state, name) {
+  const normalized = normalizeCollectionName(name);
+  if (!normalized || !state.collections[normalized]) {
+    return false;
+  }
+
+  delete state.collections[normalized];
+  state.collectionOrder = state.collectionOrder.filter((collectionName) => collectionName !== normalized);
+
+  if (state.activeCollection === normalized) {
+    state.activeCollection = "__all__";
+  }
+
+  cleanupOrphanItems(state);
+  return true;
 }
 
 browser.runtime.onMessage.addListener((message, sender) => {
@@ -215,6 +287,39 @@ browser.runtime.onMessage.addListener((message, sender) => {
           (id) => id !== appId
         );
 
+        cleanupOrphanItems(state);
+        await setState(state);
+        return { ok: true, state };
+      }
+
+      case "remove-item-everywhere": {
+        const appId = String(message.appId || "").trim();
+        if (!appId) {
+          throw new Error("appId is required.");
+        }
+        validateAppId(appId);
+
+        removeFromAllCollections(state, appId);
+        cleanupOrphanItems(state);
+
+        await setState(state);
+        return { ok: true, state };
+      }
+
+      case "create-collection": {
+        ensureCollection(state, message.collectionName);
+        await setState(state);
+        return { ok: true, state };
+      }
+
+      case "delete-collection": {
+        const deleted = deleteCollection(state, message.collectionName);
+        await setState(state);
+        return { ok: true, deleted, state };
+      }
+
+      case "prune-items-not-in-wishlist": {
+        pruneItemsNotInWishlist(state, message.appIds);
         await setState(state);
         return { ok: true, state };
       }

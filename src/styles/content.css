@@ -27,6 +27,17 @@
   border-color: #2a3139;
 }
 
+.swcm-btn-danger {
+  background: #8f3d3d;
+  border-color: #6c2e2e;
+}
+
+.swcm-btn-inline {
+  margin-left: 8px;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
 .swcm-overlay {
   position: fixed;
   inset: 0;
@@ -82,6 +93,10 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.swcm-actions-left {
+  justify-content: flex-start;
 }
 
 .swcm-status {

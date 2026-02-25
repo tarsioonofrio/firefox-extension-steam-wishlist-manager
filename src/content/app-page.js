@@ -1,14 +1,22 @@
 const EXT_ROOT_ID = "swcm-root";
 const MODAL_ID = "swcm-modal";
+const APP_MANAGE_BUTTON_ID = "swcm-manage-collections-app";
+const APP_MANAGE_MODAL_ID = "swcm-collections-modal-app";
+const ENABLE_MANAGE_COLLECTIONS = false;
+
 const INIT_RETRY_INTERVAL_MS = 400;
 const MAX_INIT_ATTEMPTS = 20;
 const WISHLIST_API_CACHE_TTL_MS = 60000;
+const MEMBERSHIP_ENFORCE_MIN_INTERVAL_MS = 5000;
+const GLOBAL_PRUNE_MIN_INTERVAL_MS = 30000;
 
 let wishlistStateObserver = null;
 let wishlistStateRefreshTimer = 0;
 let wishlistApiCache = null;
 let wishlistApiCacheAt = 0;
 let wishlistApiInFlight = null;
+let lastMembershipEnforceAt = 0;
+let lastGlobalPruneAt = 0;
 
 function getAppIdFromUrl() {
   const match = window.location.pathname.match(/\/app\/(\d+)/);
@@ -22,10 +30,22 @@ function getGameTitle() {
 
 function getWishlistButton() {
   return (
-    document.querySelector("#add_to_wishlist_area a") ||
     document.querySelector("#add_to_wishlist_area") ||
+    document.querySelector("#add_to_wishlist_area_success") ||
+    document.querySelector("#add_to_wishlist_area a") ||
     document.querySelector("a.queue_btn_wishlist")
   );
+}
+
+function getCommunityHubAnchor() {
+  const candidates = Array.from(document.querySelectorAll("a, span, div"));
+  for (const el of candidates) {
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (text === "community hub") {
+      return el;
+    }
+  }
+  return null;
 }
 
 function invalidateWishlistApiCache() {
@@ -126,9 +146,46 @@ async function isOnSteamWishlist(appId) {
     const wishlistSet = await fetchWishlistSetFromApi();
     return wishlistSet.has(appId);
   } catch {
-    // Fail-safe fallback when internal endpoint is unavailable.
     return isOnSteamWishlistFromUi();
   }
+}
+
+async function syncCollectionsWithWishlistApi() {
+  const now = Date.now();
+  if (now - lastGlobalPruneAt < GLOBAL_PRUNE_MIN_INTERVAL_MS) {
+    return;
+  }
+
+  try {
+    const wishlistSet = await fetchWishlistSetFromApi();
+    lastGlobalPruneAt = Date.now();
+
+    await browser.runtime.sendMessage({
+      type: "prune-items-not-in-wishlist",
+      appIds: Array.from(wishlistSet)
+    });
+  } catch {
+    // Ignore sync failures and keep local state unchanged.
+  }
+}
+
+function syncRemovalIfNotWishlisted(appId, onSteamWishlist) {
+  if (onSteamWishlist) {
+    return;
+  }
+
+  const now = Date.now();
+  if (now - lastMembershipEnforceAt < MEMBERSHIP_ENFORCE_MIN_INTERVAL_MS) {
+    return;
+  }
+
+  lastMembershipEnforceAt = now;
+  browser.runtime
+    .sendMessage({
+      type: "remove-item-everywhere",
+      appId
+    })
+    .catch(() => {});
 }
 
 async function updateTriggerAvailability(appId) {
@@ -137,7 +194,11 @@ async function updateTriggerAvailability(appId) {
     return;
   }
 
+  await syncCollectionsWithWishlistApi();
+
   const onSteamWishlist = await isOnSteamWishlist(appId);
+  syncRemovalIfNotWishlisted(appId, onSteamWishlist);
+
   triggerButton.disabled = !onSteamWishlist;
   triggerButton.title = onSteamWishlist
     ? "Add this game to a collection"
@@ -150,7 +211,11 @@ async function updateSaveAvailability(appId) {
     return;
   }
 
+  await syncCollectionsWithWishlistApi();
+
   const onSteamWishlist = await isOnSteamWishlist(appId);
+  syncRemovalIfNotWishlisted(appId, onSteamWishlist);
+
   saveButton.disabled = !onSteamWishlist;
 
   if (!onSteamWishlist) {
@@ -243,29 +308,85 @@ function createModal() {
   return overlay;
 }
 
+function createAppManageButton() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.id = APP_MANAGE_BUTTON_ID;
+  button.className = "swcm-btn swcm-btn-inline";
+  button.textContent = "Manage Collections";
+  return button;
+}
+
+function createAppManageModal() {
+  const overlay = document.createElement("div");
+  overlay.id = APP_MANAGE_MODAL_ID;
+  overlay.className = "swcm-overlay swcm-hidden";
+
+  overlay.innerHTML = `
+    <div class="swcm-modal" role="dialog" aria-modal="true" aria-label="Manage collections">
+      <h3>Manage Collections</h3>
+      <label>
+        New collection name
+        <input id="swcm-app-new-collection-name" type="text" placeholder="e.g. High Priority" />
+      </label>
+      <div class="swcm-actions swcm-actions-left">
+        <button id="swcm-app-create-collection" type="button" class="swcm-btn">Create</button>
+      </div>
+      <label>
+        Remove collection
+        <select id="swcm-app-delete-collection-select"></select>
+      </label>
+      <div class="swcm-actions swcm-actions-left">
+        <button id="swcm-app-delete-collection" type="button" class="swcm-btn swcm-btn-danger">Remove</button>
+      </div>
+      <div class="swcm-actions">
+        <button id="swcm-app-close-collections" type="button" class="swcm-btn swcm-btn-secondary">Close</button>
+      </div>
+      <p id="swcm-app-collections-status" class="swcm-status" aria-live="polite"></p>
+    </div>
+  `;
+
+  return overlay;
+}
+
 function setStatus(text, isError = false) {
   const status = document.getElementById("swcm-status");
   if (!status) {
     return;
   }
+
+  status.textContent = text;
+  status.classList.toggle("swcm-status-error", isError);
+}
+
+function setAppCollectionsStatus(text, isError = false) {
+  const status = document.getElementById("swcm-app-collections-status");
+  if (!status) {
+    return;
+  }
+
   status.textContent = text;
   status.classList.toggle("swcm-status-error", isError);
 }
 
 function openModal() {
   const modal = document.getElementById(MODAL_ID);
-  if (!modal) {
-    return;
-  }
-  modal.classList.remove("swcm-hidden");
+  modal?.classList.remove("swcm-hidden");
 }
 
 function closeModal() {
   const modal = document.getElementById(MODAL_ID);
-  if (!modal) {
-    return;
-  }
-  modal.classList.add("swcm-hidden");
+  modal?.classList.add("swcm-hidden");
+}
+
+function openAppManageModal() {
+  const modal = document.getElementById(APP_MANAGE_MODAL_ID);
+  modal?.classList.remove("swcm-hidden");
+}
+
+function closeAppManageModal() {
+  const modal = document.getElementById(APP_MANAGE_MODAL_ID);
+  modal?.classList.add("swcm-hidden");
 }
 
 async function fillCollectionSelect() {
@@ -292,8 +413,75 @@ async function fillCollectionSelect() {
   }
 }
 
+async function populateAppCollectionsSelect() {
+  const select = document.getElementById("swcm-app-delete-collection-select");
+  if (!select) {
+    return;
+  }
+
+  const state = await browser.runtime.sendMessage({ type: "get-state" });
+  select.innerHTML = "";
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "-- choose collection --";
+  select.appendChild(placeholder);
+
+  for (const collectionName of state.collectionOrder || []) {
+    const option = document.createElement("option");
+    option.value = collectionName;
+    option.textContent = collectionName;
+    select.appendChild(option);
+  }
+}
+
+async function createCollectionFromAppModal() {
+  const input = document.getElementById("swcm-app-new-collection-name");
+  const collectionName = String(input?.value || "").trim();
+
+  if (!collectionName) {
+    setAppCollectionsStatus("Type a collection name.", true);
+    return;
+  }
+
+  await browser.runtime.sendMessage({
+    type: "create-collection",
+    collectionName
+  });
+
+  if (input) {
+    input.value = "";
+  }
+
+  setAppCollectionsStatus(`Collection "${collectionName}" created.`);
+  await fillCollectionSelect();
+  await populateAppCollectionsSelect();
+}
+
+async function deleteCollectionFromAppModal() {
+  const select = document.getElementById("swcm-app-delete-collection-select");
+  const collectionName = String(select?.value || "").trim();
+
+  if (!collectionName) {
+    setAppCollectionsStatus("Select a collection to remove.", true);
+    return;
+  }
+
+  await browser.runtime.sendMessage({
+    type: "delete-collection",
+    collectionName
+  });
+
+  setAppCollectionsStatus(`Collection "${collectionName}" removed.`);
+  await fillCollectionSelect();
+  await populateAppCollectionsSelect();
+}
+
 async function saveToCollection(appId) {
-  if (!(await isOnSteamWishlist(appId))) {
+  const onSteamWishlist = await isOnSteamWishlist(appId);
+  syncRemovalIfNotWishlisted(appId, onSteamWishlist);
+
+  if (!onSteamWishlist) {
     setStatus("Game is not in Steam wishlist. Add it on Steam first.", true);
     return;
   }
@@ -329,8 +517,60 @@ async function saveToCollection(appId) {
   await fillCollectionSelect();
 }
 
+function attachAppManageUi() {
+  if (!ENABLE_MANAGE_COLLECTIONS) {
+    return;
+  }
+
+  if (!document.getElementById(APP_MANAGE_MODAL_ID)) {
+    const modal = createAppManageModal();
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        closeAppManageModal();
+      }
+    });
+    document.body.appendChild(modal);
+
+    document.getElementById("swcm-app-close-collections")?.addEventListener("click", closeAppManageModal);
+    document.getElementById("swcm-app-create-collection")?.addEventListener("click", () => {
+      createCollectionFromAppModal().catch((error) => {
+        setAppCollectionsStatus(error?.message || "Failed to create collection.", true);
+      });
+    });
+    document.getElementById("swcm-app-delete-collection")?.addEventListener("click", () => {
+      deleteCollectionFromAppModal().catch((error) => {
+        setAppCollectionsStatus(error?.message || "Failed to remove collection.", true);
+      });
+    });
+  }
+
+  if (document.getElementById(APP_MANAGE_BUTTON_ID)) {
+    return;
+  }
+
+  const manageButton = createAppManageButton();
+  manageButton.addEventListener("click", async () => {
+    setAppCollectionsStatus("");
+    await populateAppCollectionsSelect();
+    openAppManageModal();
+  });
+
+  const communityAnchor = getCommunityHubAnchor();
+  if (communityAnchor) {
+    const target = communityAnchor.closest("a") || communityAnchor;
+    target.insertAdjacentElement("afterend", manageButton);
+    return;
+  }
+
+  const root = document.getElementById(EXT_ROOT_ID);
+  if (root) {
+    root.insertAdjacentElement("afterend", manageButton);
+  }
+}
+
 async function init() {
   if (document.getElementById(EXT_ROOT_ID)) {
+    attachAppManageUi();
     return true;
   }
 
@@ -339,8 +579,8 @@ async function init() {
     return false;
   }
 
-  const anchor = getWishlistButton();
-  if (!anchor) {
+  const wishlistAnchor = getWishlistButton();
+  if (!wishlistAnchor) {
     return false;
   }
 
@@ -370,8 +610,8 @@ async function init() {
   root.appendChild(button);
   document.body.appendChild(modal);
 
-  const parent = anchor.parentElement || anchor;
-  parent.insertAdjacentElement("afterend", root);
+  const target = wishlistAnchor.closest("a") || wishlistAnchor;
+  target.insertAdjacentElement("afterend", root);
 
   document.getElementById("swcm-cancel")?.addEventListener("click", closeModal);
   document.getElementById("swcm-save")?.addEventListener("click", () => {
@@ -382,21 +622,24 @@ async function init() {
 
   await updateTriggerAvailability(appId);
   observeWishlistState(appId);
+  attachAppManageUi();
 
   return true;
 }
 
 async function bootstrap() {
-  for (let attempt = 0; attempt < MAX_INIT_ATTEMPTS; attempt += 1) {
-    const initialized = await init().catch(() => false);
-    if (initialized) {
-      return;
-    }
+  await init().catch(() => false);
 
-    await new Promise((resolve) => {
-      window.setTimeout(resolve, INIT_RETRY_INTERVAL_MS);
-    });
-  }
+  const observer = new MutationObserver(() => {
+    init().catch(() => {});
+  });
+
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+
+  // Periodic lightweight re-check for late Steam async UI replacements.
+  window.setInterval(() => {
+    init().catch(() => {});
+  }, INIT_RETRY_INTERVAL_MS * MAX_INIT_ATTEMPTS);
 }
 
 bootstrap().catch(() => {});
