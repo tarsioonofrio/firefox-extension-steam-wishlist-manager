@@ -21,6 +21,80 @@ function getWishlistButton() {
   );
 }
 
+function isElementVisible(element) {
+  if (!element) {
+    return false;
+  }
+
+  const style = window.getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden") {
+    return false;
+  }
+
+  return element.offsetWidth > 0 || element.offsetHeight > 0;
+}
+
+function isOnSteamWishlist() {
+  const area = document.querySelector("#add_to_wishlist_area");
+  const successArea = document.querySelector("#add_to_wishlist_area_success");
+
+  if (isElementVisible(successArea)) {
+    return true;
+  }
+
+  const button = area?.querySelector("a, button");
+  if (!button) {
+    return false;
+  }
+
+  const buttonText = (button.textContent || "").toLowerCase();
+  const buttonClass = (button.className || "").toLowerCase();
+  const ariaPressed = button.getAttribute("aria-pressed");
+
+  const looksLikeAddAction =
+    /add to your wishlist/.test(buttonText) ||
+    /adicionar a( sua)? lista de desejos/.test(buttonText) ||
+    /adicionar a lista de desejos/.test(buttonText);
+
+  if (looksLikeAddAction) {
+    return false;
+  }
+
+  return (
+    ariaPressed === "true" ||
+    buttonClass.includes("disabled") ||
+    buttonClass.includes("btn_disabled") ||
+    buttonClass.includes("active")
+  );
+}
+
+function updateTriggerAvailability() {
+  const triggerButton = document.getElementById("swcm-open-modal");
+  if (!triggerButton) {
+    return;
+  }
+
+  const onSteamWishlist = isOnSteamWishlist();
+  triggerButton.disabled = !onSteamWishlist;
+  triggerButton.title = onSteamWishlist
+    ? "Add this game to a collection"
+    : "Game is not in Steam wishlist. Add it on Steam first.";
+}
+
+function updateSaveAvailability() {
+  const saveButton = document.getElementById("swcm-save");
+  if (!saveButton) {
+    return;
+  }
+
+  const onSteamWishlist = isOnSteamWishlist();
+  saveButton.disabled = !onSteamWishlist;
+
+  if (!onSteamWishlist) {
+    setStatus("Game is not in Steam wishlist. Add it on Steam first.", true);
+  }
+}
+
 function createButton() {
   const button = document.createElement("button");
   button.type = "button";
@@ -115,6 +189,11 @@ async function fillCollectionSelect() {
 }
 
 async function saveToCollection() {
+  if (!isOnSteamWishlist()) {
+    setStatus("Game is not in Steam wishlist. Add it on Steam first.", true);
+    return;
+  }
+
   const appId = getAppIdFromUrl();
   if (!appId) {
     setStatus("Could not detect Steam app id on this page.", true);
@@ -162,9 +241,15 @@ async function init() {
 
   const button = createButton();
   button.addEventListener("click", async () => {
+    if (button.disabled) {
+      setStatus("Game is not in Steam wishlist. Add it on Steam first.", true);
+      return;
+    }
+
     await fillCollectionSelect();
     setStatus("");
     openModal();
+    updateSaveAvailability();
   });
 
   const modal = createModal();
@@ -186,6 +271,8 @@ async function init() {
       setStatus(error?.message || "Failed to save game.", true);
     });
   });
+
+  updateTriggerAvailability();
 
   return true;
 }

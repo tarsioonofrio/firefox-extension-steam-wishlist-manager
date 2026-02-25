@@ -7,6 +7,7 @@ Firefox extension MVP to organize Steam wishlist entries into custom collections
 - Add a game to a custom collection directly from a Steam app page.
 - Choose insertion position when saving: beginning or end of collection.
 - Strict sandbox mode: no writes to Steam wishlist; local extension data only.
+- Collection save is allowed only for games already present in Steam wishlist.
 - Filter and reorder wishlist page by selected collection.
 - Persistent local storage via `browser.storage.local`.
 

@@ -16,6 +16,12 @@
   filter: brightness(1.05);
 }
 
+.swcm-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+}
+
 .swcm-btn-secondary {
   background: #3b4450;
   border-color: #2a3139;
