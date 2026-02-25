@@ -1,1 +1,28 @@
+# Runtime logs
 logs/
+*.log
+
+# Build/package artifacts
+*.zip
+web-ext-artifacts/
+
+# Test/coverage artifacts
+coverage/
+.nyc_output/
+
+# Dependency folders (if tooling is added later)
+node_modules/
+
+# Environment/config local overrides
+.env
+.env.*
+!.env.example
+
+# OS/editor temp files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
