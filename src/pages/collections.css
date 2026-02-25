@@ -331,10 +331,7 @@ main {
 }
 
 .details {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  align-items: start;
+  display: block;
   margin-top: 4px;
 }
 
@@ -343,12 +340,22 @@ main {
 }
 
 .right-col {
+  align-self: start;
   text-align: right;
   min-width: 130px;
+  padding: 8px 10px 8px 0;
 }
 
 .right-col .meta {
   margin: 1px 0;
+}
+
+.right-col .refresh-item-btn,
+.right-col .remove-btn {
+  display: block;
+  margin-left: auto;
+  margin-bottom: 4px;
+  width: auto;
 }
 
 .tags-row {
@@ -368,20 +375,12 @@ main {
   line-height: 18px;
 }
 
-.actions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: flex-start;
-  gap: 6px;
-  padding: 8px;
-}
-
 .wishlist-added {
   margin: 0;
   font-size: 12px;
   text-align: right;
   max-width: 180px;
+  margin-bottom: 4px;
 }
 
 .empty {
@@ -448,11 +447,6 @@ main {
     width: 100%;
     height: auto;
     aspect-ratio: 184 / 69;
-  }
-
-  .actions {
-    padding-top: 0;
-    align-items: flex-start;
   }
 
   .details {
