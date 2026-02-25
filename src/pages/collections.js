@@ -6,6 +6,10 @@ const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const TAG_SHOW_STEP = 12;
+const SAFE_FETCH_CONCURRENCY = 4;
+const SAFE_FETCH_BASE_DELAY_MS = 350;
+const SAFE_FETCH_JITTER_MS = 220;
+const SAFE_FETCH_MAX_RETRIES = 3;
 
 let state = null;
 let activeCollection = "__all__";
@@ -53,6 +57,67 @@ function parseNonNegativeInt(value, fallback = 0) {
     return fallback;
   }
   return Math.floor(n);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function nextBackoffDelay(attempt) {
+  const jitter = Math.floor(Math.random() * SAFE_FETCH_JITTER_MS);
+  return (SAFE_FETCH_BASE_DELAY_MS * (2 ** attempt)) + jitter;
+}
+
+function shouldRetryStatus(status) {
+  return [403, 429, 500, 502, 503, 504].includes(Number(status));
+}
+
+async function fetchSteamJson(url, options = {}) {
+  let attempt = 0;
+  while (true) {
+    try {
+      const response = await fetch(url, { cache: "no-store", ...options });
+      if (response.ok) {
+        return await response.json();
+      }
+      if (attempt < SAFE_FETCH_MAX_RETRIES && shouldRetryStatus(response.status)) {
+        await sleep(nextBackoffDelay(attempt));
+        attempt += 1;
+        continue;
+      }
+      throw new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      if (attempt >= SAFE_FETCH_MAX_RETRIES) {
+        throw error;
+      }
+      await sleep(nextBackoffDelay(attempt));
+      attempt += 1;
+    }
+  }
+}
+
+async function fetchSteamText(url, options = {}) {
+  let attempt = 0;
+  while (true) {
+    try {
+      const response = await fetch(url, { cache: "no-store", ...options });
+      if (response.ok) {
+        return await response.text();
+      }
+      if (attempt < SAFE_FETCH_MAX_RETRIES && shouldRetryStatus(response.status)) {
+        await sleep(nextBackoffDelay(attempt));
+        attempt += 1;
+        continue;
+      }
+      throw new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      if (attempt >= SAFE_FETCH_MAX_RETRIES) {
+        throw error;
+      }
+      await sleep(nextBackoffDelay(attempt));
+      attempt += 1;
+    }
+  }
 }
 
 function setStatus(text, isError = false) {
@@ -158,11 +223,10 @@ async function loadWishlistAddedMap() {
 
   async function resolveSteamIdFromStoreHtml() {
     try {
-      const response = await fetch("https://store.steampowered.com/", {
+      const html = await fetchSteamText("https://store.steampowered.com/", {
         credentials: "include",
         cache: "no-store"
       });
-      const html = await response.text();
       const match = html.match(/g_steamID\s*=\s*"(\d{10,20})"/);
       return match ? match[1] : "";
     } catch {
@@ -178,14 +242,13 @@ async function loadWishlistAddedMap() {
     }
 
     for (let pageIndex = 0; pageIndex < 200 && remaining.size > 0; pageIndex += 1) {
-      const wishlistResponse = await fetch(
+      const wishlistPayload = await fetchSteamJson(
         `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
         {
           credentials: "include",
           cache: "no-store"
         }
       );
-      const wishlistPayload = await wishlistResponse.json();
       const entries = Object.entries(wishlistPayload || {});
       if (entries.length === 0) {
         break;
@@ -205,11 +268,10 @@ async function loadWishlistAddedMap() {
   }
 
   try {
-    const userdataResponse = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
+    const userdata = await fetchSteamJson("https://store.steampowered.com/dynamicstore/userdata/", {
       credentials: "include",
       cache: "no-store"
     });
-    const userdata = await userdataResponse.json();
     const nowIds = Array.isArray(userdata?.rgWishlist)
       ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
       : [];
@@ -314,18 +376,18 @@ async function fetchAppMeta(appId, options = {}) {
 
   try {
     const [detailsResult, reviewsResult] = await Promise.allSettled([
-      fetch(`https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=pt-BR`),
-      fetch(`https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`)
+      fetchSteamJson(`https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=pt-BR`),
+      fetchSteamJson(`https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`)
     ]);
 
     let detailsPayload = null;
     if (detailsResult.status === "fulfilled") {
-      detailsPayload = await detailsResult.value.json();
+      detailsPayload = detailsResult.value;
     }
 
     let reviewsPayload = null;
     if (reviewsResult.status === "fulfilled") {
-      reviewsPayload = await reviewsResult.value.json();
+      reviewsPayload = reviewsResult.value;
     }
 
     const appData = detailsPayload?.[appId]?.data;
@@ -420,7 +482,7 @@ async function ensureMetaForAppIds(appIds, limit = 400, force = false) {
     }
   }
 
-  const concurrency = 8;
+  const concurrency = SAFE_FETCH_CONCURRENCY;
   let cursor = 0;
 
   async function worker() {
@@ -428,6 +490,7 @@ async function ensureMetaForAppIds(appIds, limit = 400, force = false) {
       const idx = cursor;
       cursor += 1;
       await fetchAppMeta(missing[idx], { force });
+      await sleep(80 + Math.floor(Math.random() * 100));
     }
   }
 
