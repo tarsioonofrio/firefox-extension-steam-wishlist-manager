@@ -733,8 +733,7 @@ async function refreshWholeDatabase() {
   await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
 
-  await ensureTagCounts();
-  await ensureTypeCounts();
+  await Promise.allSettled([ensureTagCounts(), ensureTypeCounts()]);
   renderTagOptions();
   renderTypeOptions();
   await render();
@@ -752,8 +751,7 @@ async function refreshCurrentPageItems() {
   await ensureMetaForAppIds(ids, ids.length, true);
   await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
-  await ensureTagCounts();
-  await ensureTypeCounts();
+  await Promise.allSettled([ensureTagCounts(), ensureTypeCounts()]);
   renderTagOptions();
   renderTypeOptions();
   await render();
@@ -1314,12 +1312,20 @@ async function renderCards() {
   const shouldSkipHeavyMetaHydration = sourceMode === "wishlist";
 
   if (sourceMode === "wishlist") {
-    await ensureWishlistPrecomputedSorts(sourceIds);
+    try {
+      await ensureWishlistPrecomputedSorts(sourceIds);
+    } catch {
+      setStatus("Could not precompute wishlist sorts, using fallback.", true);
+    }
   }
 
   if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
     setStatus("Loading metadata for sorting/search...");
-    await ensureMetaForAppIds(sourceIds, sourceIds.length);
+    try {
+      await ensureMetaForAppIds(sourceIds, sourceIds.length);
+    } catch {
+      setStatus("Metadata loading partially failed.", true);
+    }
   }
 
   const appIds = getFilteredAndSorted(sourceIds);
@@ -1330,7 +1336,11 @@ async function renderCards() {
   currentRenderedPageIds = [...pageIds];
 
   // Always hydrate visible items to avoid fallback "App {id}" titles.
-  await ensureMetaForAppIds(pageIds, pageIds.length);
+  try {
+    await ensureMetaForAppIds(pageIds, pageIds.length);
+  } catch {
+    setStatus("Some visible items could not be refreshed.", true);
+  }
   if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
     setStatus("");
   }
@@ -1672,12 +1682,14 @@ async function bootstrap() {
   activeCollection = state.activeCollection || "__all__";
 
   attachEvents();
-  await ensureTagCounts();
-  await ensureTypeCounts();
-  renderTagOptions();
-  renderTypeOptions();
   renderRatingControls();
   await render();
+
+  // Load heavy filter counts after first paint to avoid blank screen on large wishlists.
+  Promise.allSettled([ensureTagCounts(), ensureTypeCounts()]).then(() => {
+    renderTagOptions();
+    renderTypeOptions();
+  });
 
   const refreshAll = new URLSearchParams(window.location.search).get("refreshAll") === "1";
   if (refreshAll) {
