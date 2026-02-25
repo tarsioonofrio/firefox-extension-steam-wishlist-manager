@@ -295,6 +295,23 @@ function getWishlistEntryPriority(entry, fallback = null) {
   return fallback;
 }
 
+function extractWishlistAppIdsInTextOrder(rawText) {
+  const text = String(rawText || "");
+  const ids = [];
+  const seen = new Set();
+  const re = /"(\d+)"\s*:/g;
+  let match = null;
+  while ((match = re.exec(text)) !== null) {
+    const appId = String(match[1] || "").trim();
+    if (!appId || seen.has(appId)) {
+      continue;
+    }
+    seen.add(appId);
+    ids.push(appId);
+  }
+  return ids;
+}
+
 function buildWishlistSortOrders(appIds) {
   const ids = Array.isArray(appIds) ? [...appIds] : [];
   const basePosition = sortByWishlistPriority(ids);
@@ -670,25 +687,27 @@ async function ensureWishlistOrderFromSnapshot(appIds) {
 
   setStatus("Loading wishlist order...");
   let orderRank = 0;
+  const orderedIds = [];
+  const orderedSeen = new Set();
   for (let pageIndex = 0; pageIndex < 200 && missing.size > 0; pageIndex += 1) {
-    const payload = await fetchSteamJson(
+    const raw = await fetchSteamText(
       `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
       {
         credentials: "include",
         cache: "no-store"
       }
     );
-    const entries = Object.entries(payload || {});
-    if (entries.length === 0) {
+    const idsInOrder = extractWishlistAppIdsInTextOrder(raw);
+    if (idsInOrder.length === 0) {
       break;
     }
 
-    for (const [appId, entry] of entries) {
-      const resolvedPriority = getWishlistEntryPriority(entry, null);
-      // Only trust explicit priority fields from Steam payload.
-      if (Number.isFinite(resolvedPriority)) {
-        wishlistPriorityMap[appId] = resolvedPriority;
+    for (const appId of idsInOrder) {
+      if (!orderedSeen.has(appId)) {
+        orderedSeen.add(appId);
+        orderedIds.push(appId);
       }
+      wishlistPriorityMap[appId] = orderRank;
       if (missing.has(appId)) {
         missing.delete(appId);
       }
@@ -696,7 +715,28 @@ async function ensureWishlistOrderFromSnapshot(appIds) {
     }
   }
 
-  wishlistOrderedAppIds = sortByWishlistPriority(appIds);
+  if (orderedIds.length > 0) {
+    const requestedSet = new Set(appIds.map((id) => String(id)));
+    const base = orderedIds.filter((id) => requestedSet.has(id));
+    for (const id of appIds) {
+      if (!base.includes(id)) {
+        base.push(id);
+      }
+    }
+    wishlistOrderedAppIds = base;
+    try {
+      const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+      const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+      await browser.storage.local.set({
+        [WISHLIST_ADDED_CACHE_KEY]: {
+          ...cached,
+          orderedAppIds: wishlistOrderedAppIds
+        }
+      });
+    } catch {
+      // Ignore storage persistence issues for ordering cache.
+    }
+  }
   setStatus("");
 }
 
