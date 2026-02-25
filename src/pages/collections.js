@@ -4,6 +4,7 @@ const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
+const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const TAG_SHOW_STEP = 12;
 
 let state = null;
@@ -20,6 +21,12 @@ let selectedTags = new Set();
 let tagSearchQuery = "";
 let tagShowLimit = TAG_SHOW_STEP;
 let tagCounts = [];
+let selectedTypes = new Set();
+let typeCounts = [];
+let ratingMin = 0;
+let ratingMax = 100;
+let reviewsMin = 0;
+let reviewsMax = 999999999;
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -37,6 +44,14 @@ function formatCompactCount(value) {
     return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
   }
   return String(n);
+}
+
+function parseNonNegativeInt(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    return fallback;
+  }
+  return Math.floor(n);
 }
 
 function setStatus(text, isError = false) {
@@ -90,6 +105,39 @@ function buildTagCacheBucketKey() {
 function getMetaTags(appId) {
   const tags = metaCache[appId]?.tags;
   return Array.isArray(tags) ? tags : [];
+}
+
+function normalizeAppTypeLabel(value) {
+  const raw = String(value || "").trim();
+  const lowered = raw.toLowerCase();
+  if (!raw) {
+    return "Unknown";
+  }
+
+  const known = {
+    game: "Game",
+    dlc: "DLC",
+    music: "Music",
+    demo: "Demo",
+    application: "Application",
+    video: "Video",
+    movie: "Video",
+    series: "Series",
+    tool: "Tool",
+    beta: "Beta"
+  };
+
+  if (known[lowered]) {
+    return known[lowered];
+  }
+
+  // Preserve raw Steam type when it's not in our mapping.
+  return raw;
+}
+
+function getMetaType(appId) {
+  const value = metaCache[appId]?.appType;
+  return normalizeAppTypeLabel(value);
 }
 
 async function loadWishlistAddedMap() {
@@ -239,11 +287,12 @@ function getAppLink(appId) {
   return `https://store.steampowered.com/app/${appId}/`;
 }
 
-async function fetchAppMeta(appId) {
+async function fetchAppMeta(appId, options = {}) {
+  const force = Boolean(options.force);
   const cached = metaCache[appId];
   const now = Date.now();
 
-  if (cached && now - cached.cachedAt < META_CACHE_TTL_MS) {
+  if (!force && cached && now - cached.cachedAt < META_CACHE_TTL_MS) {
     return cached;
   }
 
@@ -294,6 +343,8 @@ async function fetchAppMeta(appId) {
       priceText = "Not announced";
     }
 
+    const rawType = String(appData?.type || "").trim();
+
     const meta = {
       cachedAt: now,
       titleText: String(appData?.name || "").trim(),
@@ -301,7 +352,11 @@ async function fetchAppMeta(appId) {
       discountText: appData?.price_overview?.discount_percent
         ? `${appData.price_overview.discount_percent}% off`
         : "-",
+      appTypeRaw: rawType,
+      appType: normalizeAppTypeLabel(rawType),
       tags,
+      reviewPositivePct: positivePct,
+      reviewTotalVotes: totalVotes,
       reviewText,
       releaseText
     };
@@ -315,20 +370,24 @@ async function fetchAppMeta(appId) {
       titleText: "",
       priceText: "-",
       discountText: "-",
+      appTypeRaw: "",
+      appType: "Unknown",
       tags: [],
+      reviewPositivePct: null,
+      reviewTotalVotes: 0,
       reviewText: "No user reviews",
       releaseText: "-"
     };
   }
 }
 
-async function ensureMetaForAppIds(appIds, limit = 400) {
+async function ensureMetaForAppIds(appIds, limit = 400, force = false) {
   const now = Date.now();
   const missing = [];
 
   for (const appId of appIds) {
     const cached = metaCache[appId];
-    const fresh = cached && now - Number(cached.cachedAt || 0) < META_CACHE_TTL_MS;
+    const fresh = cached && now - Number(cached.cachedAt || 0) < META_CACHE_TTL_MS && !force;
     if (!fresh) {
       missing.push(appId);
     }
@@ -344,7 +403,7 @@ async function ensureMetaForAppIds(appIds, limit = 400) {
     while (cursor < missing.length) {
       const idx = cursor;
       cursor += 1;
-      await fetchAppMeta(missing[idx]);
+      await fetchAppMeta(missing[idx], { force });
     }
   }
 
@@ -374,6 +433,26 @@ function buildTagCountsFromAppIds(appIds) {
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
 }
 
+function buildTypeCountsFromAppIds(appIds) {
+  const counts = new Map();
+
+  for (const appId of appIds) {
+    const typeName = getMetaType(appId);
+    counts.set(typeName, (counts.get(typeName) || 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+}
+
+function getUnknownTypeAppIds(appIds) {
+  return appIds.filter((appId) => {
+    const raw = String(metaCache?.[appId]?.appTypeRaw || "").trim();
+    return !raw;
+  });
+}
+
 async function ensureTagCounts() {
   const appIds = Object.keys(wishlistAddedMap);
   const bucket = buildTagCacheBucketKey();
@@ -400,6 +479,40 @@ async function ensureTagCounts() {
   };
 
   await browser.storage.local.set({ [TAG_COUNTS_CACHE_KEY]: cache });
+  setStatus("");
+}
+
+async function ensureTypeCounts() {
+  const appIds = Object.keys(wishlistAddedMap);
+  const bucket = buildTagCacheBucketKey();
+  const day = todayKey();
+
+  const storage = await browser.storage.local.get(TYPE_COUNTS_CACHE_KEY);
+  const cache = storage[TYPE_COUNTS_CACHE_KEY] || {};
+  const cachedBucket = cache[bucket];
+
+  if (cachedBucket && cachedBucket.day === day) {
+    typeCounts = Array.isArray(cachedBucket.counts) ? cachedBucket.counts : [];
+    return;
+  }
+
+  setStatus("Loading full wishlist metadata for type frequencies...");
+  await ensureMetaForAppIds(appIds, appIds.length);
+
+  const unknownTypeIds = getUnknownTypeAppIds(appIds);
+  if (unknownTypeIds.length > 0) {
+    setStatus("Refreshing unresolved app types...");
+    await ensureMetaForAppIds(unknownTypeIds, unknownTypeIds.length, true);
+  }
+
+  typeCounts = buildTypeCountsFromAppIds(appIds);
+
+  cache[bucket] = {
+    day,
+    counts: typeCounts
+  };
+
+  await browser.storage.local.set({ [TYPE_COUNTS_CACHE_KEY]: cache });
   setStatus("");
 }
 
@@ -450,6 +563,46 @@ function renderTagOptions() {
   showMoreBtn.style.display = filtered.length > tagShowLimit ? "" : "none";
 }
 
+function renderTypeOptions() {
+  const optionsEl = document.getElementById("type-options");
+  if (!optionsEl) {
+    return;
+  }
+
+  optionsEl.innerHTML = "";
+
+  for (const type of typeCounts) {
+    const row = document.createElement("label");
+    row.className = "tag-option";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedTypes.has(type.name);
+    checkbox.addEventListener("change", async () => {
+      if (checkbox.checked) {
+        selectedTypes.add(type.name);
+      } else {
+        selectedTypes.delete(type.name);
+      }
+      page = 1;
+      await renderCards();
+    });
+
+    const name = document.createElement("span");
+    name.className = "tag-name";
+    name.textContent = type.name;
+
+    const count = document.createElement("span");
+    count.className = "tag-count";
+    count.textContent = formatCompactCount(type.count);
+
+    row.appendChild(checkbox);
+    row.appendChild(name);
+    row.appendChild(count);
+    optionsEl.appendChild(row);
+  }
+}
+
 function passesTagFilter(appId) {
   if (selectedTags.size === 0) {
     return true;
@@ -463,13 +616,39 @@ function passesTagFilter(appId) {
   return tags.some((t) => selectedTags.has(t));
 }
 
+function passesTypeFilter(appId) {
+  if (selectedTypes.size === 0) {
+    return true;
+  }
+  return selectedTypes.has(getMetaType(appId));
+}
+
+function passesReviewFilter(appId) {
+  const hasPctFilter = ratingMin > 0 || ratingMax < 100;
+  const hasCountFilter = reviewsMin > 0 || reviewsMax < 999999999;
+  if (!hasPctFilter && !hasCountFilter) {
+    return true;
+  }
+
+  const meta = metaCache?.[appId] || {};
+  const pct = Number(meta.reviewPositivePct);
+  const votes = parseNonNegativeInt(meta.reviewTotalVotes, 0);
+
+  if (!Number.isFinite(pct)) {
+    // Keep items visible when review metrics are still unavailable.
+    return true;
+  }
+
+  return pct >= ratingMin && pct <= ratingMax && votes >= reviewsMin && votes <= reviewsMax;
+}
+
 function getFilteredAndSorted(ids) {
   const normalizedQuery = searchQuery.toLowerCase();
 
   const list = ids.filter((appId) => {
     const title = String(state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || "").toLowerCase();
     const textOk = !normalizedQuery || title.includes(normalizedQuery) || appId.includes(normalizedQuery);
-    return textOk && passesTagFilter(appId);
+    return textOk && passesTagFilter(appId) && passesTypeFilter(appId) && passesReviewFilter(appId);
   });
 
   if (sortMode === "title") {
@@ -610,7 +789,9 @@ async function renderCards() {
 
         await refreshState();
         await ensureTagCounts();
+        await ensureTypeCounts();
         renderTagOptions();
+        renderTypeOptions();
         await render();
       });
     }
@@ -672,7 +853,9 @@ async function createCollection() {
   activeCollection = name;
   page = 1;
   await ensureTagCounts();
+  await ensureTypeCounts();
   renderTagOptions();
+  renderTypeOptions();
   setStatus(`Collection \"${name}\" created.`);
   await render();
 }
@@ -692,7 +875,9 @@ async function deleteActiveCollection() {
   activeCollection = "__all__";
   page = 1;
   await ensureTagCounts();
+  await ensureTypeCounts();
   renderTagOptions();
+  renderTypeOptions();
   setStatus("Collection deleted.");
   await render();
 }
@@ -717,15 +902,45 @@ async function render() {
   await renderCards();
 }
 
+function renderRatingControls() {
+  const minLabel = document.getElementById("rating-min-label");
+  const maxLabel = document.getElementById("rating-max-label");
+  const minRange = document.getElementById("rating-min-range");
+  const maxRange = document.getElementById("rating-max-range");
+  const minInput = document.getElementById("reviews-min-input");
+  const maxInput = document.getElementById("reviews-max-input");
+  if (minLabel) {
+    minLabel.textContent = `${ratingMin}%`;
+  }
+  if (maxLabel) {
+    maxLabel.textContent = `${ratingMax}%`;
+  }
+  if (minRange) {
+    minRange.value = String(ratingMin);
+  }
+  if (maxRange) {
+    maxRange.value = String(ratingMax);
+  }
+  if (minInput) {
+    minInput.value = String(reviewsMin);
+  }
+  if (maxInput) {
+    maxInput.value = String(reviewsMax);
+  }
+}
+
 function attachEvents() {
   document.getElementById("source-select")?.addEventListener("change", async (event) => {
     sourceMode = event.target.value === "wishlist" ? "wishlist" : "collections";
     page = 1;
     selectedTags.clear();
+    selectedTypes.clear();
     tagSearchQuery = "";
     tagShowLimit = TAG_SHOW_STEP;
     await ensureTagCounts();
+    await ensureTypeCounts();
     renderTagOptions();
+    renderTypeOptions();
     await render();
   });
 
@@ -739,10 +954,13 @@ function attachEvents() {
     });
 
     selectedTags.clear();
+    selectedTypes.clear();
     tagSearchQuery = "";
     tagShowLimit = TAG_SHOW_STEP;
     await ensureTagCounts();
+    await ensureTypeCounts();
     renderTagOptions();
+    renderTypeOptions();
     await render();
   });
 
@@ -786,6 +1004,32 @@ function attachEvents() {
     tagShowLimit += TAG_SHOW_STEP;
     renderTagOptions();
   });
+
+  document.getElementById("rating-min-range")?.addEventListener("input", async (event) => {
+    const next = parseNonNegativeInt(event.target.value, ratingMin);
+    ratingMin = Math.max(0, Math.min(next, ratingMax));
+    renderRatingControls();
+    page = 1;
+    await renderCards();
+  });
+
+  document.getElementById("rating-max-range")?.addEventListener("input", async (event) => {
+    const next = parseNonNegativeInt(event.target.value, ratingMax);
+    ratingMax = Math.min(100, Math.max(next, ratingMin));
+    renderRatingControls();
+    page = 1;
+    await renderCards();
+  });
+
+  document.getElementById("apply-reviews-btn")?.addEventListener("click", async () => {
+    const minValue = parseNonNegativeInt(document.getElementById("reviews-min-input")?.value, 0);
+    const maxValue = parseNonNegativeInt(document.getElementById("reviews-max-input")?.value, 999999999);
+    reviewsMin = Math.min(minValue, maxValue);
+    reviewsMax = Math.max(minValue, maxValue);
+    renderRatingControls();
+    page = 1;
+    await renderCards();
+  });
 }
 
 async function bootstrap() {
@@ -797,7 +1041,10 @@ async function bootstrap() {
 
   attachEvents();
   await ensureTagCounts();
+  await ensureTypeCounts();
   renderTagOptions();
+  renderTypeOptions();
+  renderRatingControls();
   await render();
 }
 

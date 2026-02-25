@@ -158,6 +158,49 @@ button.danger,
   font-size: 13px;
 }
 
+.range-header {
+  display: flex;
+  justify-content: space-between;
+  color: #d6e7f7;
+  font-size: 13px;
+}
+
+.dual-range {
+  position: relative;
+  height: 28px;
+}
+
+.dual-range input[type="range"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  pointer-events: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.dual-range input[type="range"]::-webkit-slider-thumb {
+  pointer-events: auto;
+}
+
+.dual-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+}
+
+.reviews-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.reviews-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 main {
   padding: 0;
 }

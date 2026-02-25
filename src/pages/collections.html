@@ -61,6 +61,31 @@
             <button id="tag-show-more-btn" type="button" class="small-btn">Show more</button>
           </div>
         </details>
+        <details class="filter-group" open>
+          <summary>Type</summary>
+          <div class="filter-content">
+            <div id="type-options" class="tag-options"></div>
+          </div>
+        </details>
+        <details class="filter-group" open>
+          <summary>Rating &amp; Reviews</summary>
+          <div class="filter-content">
+            <div class="range-header">
+              <span id="rating-min-label">0%</span>
+              <span id="rating-max-label">100%</span>
+            </div>
+            <div class="dual-range">
+              <input id="rating-min-range" type="range" min="0" max="100" step="1" value="0">
+              <input id="rating-max-range" type="range" min="0" max="100" step="1" value="100">
+            </div>
+            <div class="reviews-row">
+              <input id="reviews-min-input" type="number" min="0" step="1" value="0">
+              <span>to</span>
+              <input id="reviews-max-input" type="number" min="0" step="1" value="999999999">
+              <button id="apply-reviews-btn" type="button" class="small-btn">Go</button>
+            </div>
+          </div>
+        </details>
         <p id="status" class="status"></p>
       </div>
     </aside>
