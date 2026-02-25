@@ -21,6 +21,7 @@ let sortMode = "position";
 let metaCache = {};
 let wishlistAddedMap = {};
 let wishlistOrderedAppIds = [];
+let wishlistPriorityMap = {};
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -165,6 +166,27 @@ function getCurrentSourceAppIds() {
   }
 
   return [...(state.collections?.[activeCollection] || [])];
+}
+
+function sortByWishlistPriority(appIds) {
+  const indexed = appIds.map((id, index) => ({ id, index }));
+  indexed.sort((a, b) => {
+    const pa = Number(wishlistPriorityMap?.[a.id]);
+    const pb = Number(wishlistPriorityMap?.[b.id]);
+    const hasPa = Number.isFinite(pa);
+    const hasPb = Number.isFinite(pb);
+    if (hasPa && hasPb) {
+      return pa - pb;
+    }
+    if (hasPa) {
+      return -1;
+    }
+    if (hasPb) {
+      return 1;
+    }
+    return a.index - b.index;
+  });
+  return indexed.map((entry) => entry.id);
 }
 
 function buildTagCacheBucketKey() {
@@ -342,6 +364,7 @@ async function loadWishlistAddedMap() {
       ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
       : [];
     wishlistOrderedAppIds = [...nowIds];
+    wishlistPriorityMap = {};
 
     // If we couldn't load current wishlist, keep existing cache to avoid destructive overwrite.
     if (nowIds.length === 0 && Object.keys(cachedMap).length > 0) {
@@ -414,6 +437,54 @@ async function loadWishlistAddedMap() {
   }
 }
 
+async function ensureWishlistOrderFromSnapshot(appIds) {
+  if (sourceMode !== "wishlist" || !Array.isArray(appIds) || appIds.length === 0) {
+    return;
+  }
+
+  const missing = new Set(
+    appIds.filter((appId) => !Number.isFinite(Number(wishlistPriorityMap?.[appId])))
+  );
+  if (missing.size === 0) {
+    wishlistOrderedAppIds = sortByWishlistPriority(appIds);
+    return;
+  }
+
+  const steamId = await resolveCurrentSteamId();
+  if (!steamId) {
+    return;
+  }
+
+  setStatus("Loading wishlist order...");
+  for (let pageIndex = 0; pageIndex < 200 && missing.size > 0; pageIndex += 1) {
+    const payload = await fetchSteamJson(
+      `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
+      {
+        credentials: "include",
+        cache: "no-store"
+      }
+    );
+    const entries = Object.entries(payload || {});
+    if (entries.length === 0) {
+      break;
+    }
+
+    for (const [appId, entry] of entries) {
+      if (!missing.has(appId)) {
+        continue;
+      }
+      const priority = Number(entry?.priority);
+      if (Number.isFinite(priority)) {
+        wishlistPriorityMap[appId] = priority;
+      }
+      missing.delete(appId);
+    }
+  }
+
+  wishlistOrderedAppIds = sortByWishlistPriority(appIds);
+  setStatus("");
+}
+
 async function resolveCurrentSteamId() {
   try {
     const userdata = await fetchSteamJson("https://store.steampowered.com/dynamicstore/userdata/", {
@@ -483,6 +554,7 @@ function mergeMetaFromWishlistEntry(appId, entry) {
     appType: normalizeAppTypeLabel(typeRaw || existing.appTypeRaw || existing.appType || ""),
     reviewPositivePct: Number.isFinite(reviewPct) ? Math.round(reviewPct) : existing.reviewPositivePct,
     reviewTotalVotes: reviewTotal > 0 ? reviewTotal : Number(existing.reviewTotalVotes || 0),
+    recommendationsTotal: reviewTotal > 0 ? reviewTotal : Number(existing.recommendationsTotal || 0),
     reviewText,
     releaseUnix: Number.isFinite(releaseUnix) ? releaseUnix : Number(existing.releaseUnix || 0),
     releaseText: releaseString || existing.releaseText || "-"
@@ -511,6 +583,9 @@ async function ensureWishlistMetaFromSnapshot(appIds) {
     }
     if (sortMode === "review-score") {
       return !Number.isFinite(Number(meta?.reviewPositivePct));
+    }
+    if (sortMode === "top-selling") {
+      return !Number.isFinite(Number(meta?.recommendationsTotal));
     }
     return false;
   }
@@ -1028,6 +1103,10 @@ function getFilteredAndSorted(ids) {
     return list;
   }
 
+  if (sortMode === "position" && sourceMode === "wishlist") {
+    return sortByWishlistPriority(list);
+  }
+
   return list;
 }
 
@@ -1100,12 +1179,16 @@ async function renderCards() {
     || sortMode === "discount"
     || sortMode === "release-date"
     || sortMode === "review-score"
+    || sortMode === "top-selling"
     || needsMetaForSearch
   );
   const shouldSkipHeavyMetaHydration = shouldUseWishlistSnapshot;
 
   if (shouldUseWishlistSnapshot) {
     await ensureWishlistMetaFromSnapshot(sourceIds);
+  }
+  if (sourceMode === "wishlist" && sortMode === "position") {
+    await ensureWishlistOrderFromSnapshot(sourceIds);
   }
 
   if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
