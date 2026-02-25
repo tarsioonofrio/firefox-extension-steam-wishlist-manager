@@ -49,3 +49,21 @@ This repository currently has no Node build pipeline. Use direct Firefox loading
 - Do not expand `host_permissions` beyond required Steam routes.
 - Do not commit personal Steam data or browser profile artifacts.
 - Treat stored wishlist metadata as local user data; avoid unnecessary collection of fields.
+- API/compliance posture:
+  - Prefer official Steam Web API/documented endpoints whenever possible.
+  - Keep request volume low (cache aggressively; avoid polling bursts and mass parallel requests).
+  - Do not implement abusive automation (bulk account actions, bot-like behavior, bypassing auth flows).
+  - Treat risk primarily as access throttling/integration breakage; still avoid patterns that could violate Steam terms.
+
+## External Reference Baseline (SteamDB)
+- Primary implementation reference for upcoming work is the local clone at `../BrowserExtension`
+  (upstream: `https://github.com/SteamDatabase/BrowserExtension`).
+- Use this baseline for:
+  - content script organization and route segmentation,
+  - background message patterns and caching approach,
+  - UI injection conventions and DOM resilience patterns,
+  - build/test conventions (`web-ext`, lint/type-check flow).
+- Before introducing a new pattern in this repository, check whether an equivalent pattern already exists in
+  `../BrowserExtension/scripts`, `../BrowserExtension/styles`, or `../BrowserExtension/manifest.json`.
+- Keep this project scoped to Steam wishlist collections, but prefer SteamDB extension architecture/style decisions
+  whenever there is no strong reason to diverge.

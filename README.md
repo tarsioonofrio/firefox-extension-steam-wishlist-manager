@@ -2,6 +2,59 @@
 
 Firefox extension MVP to organize Steam wishlist games into local custom collections with independent ordering.
 
+## Reference Codebase
+
+For upcoming development, this project uses the SteamDB browser extension as architectural reference:
+
+- Local clone: `../BrowserExtension`
+- Upstream: `https://github.com/SteamDatabase/BrowserExtension`
+
+What we reuse as guidance:
+- content script split by route/domain,
+- background messaging and cache invalidation patterns,
+- resilient Steam DOM handling conventions,
+- packaging/dev workflow with `web-ext`.
+
+Scope note: this repository remains focused on wishlist collection management, but implementation patterns should
+prefer the SteamDB baseline unless there is a clear project-specific reason to diverge.
+
+## Official Steam API References (instead of SteamDB API)
+
+SteamDB does not provide a public API (see SteamDB FAQ: `https://steamdb.info/faq/`), so this project should rely on
+official Steam endpoints when API data is needed.
+
+Recommended official references:
+
+- `IStoreService/GetAppList/v1` (catalog/app list)  
+  Docs: `https://partner.steamgames.com/doc/webapi/IStoreService`
+
+- `IPlayerService/GetOwnedGames/v1` (owned games)  
+  Docs: `https://partner.steamgames.com/doc/webapi/IPlayerService`
+
+- `ISteamUser` interface (profile/public user data such as `GetPlayerSummaries`)  
+  Docs index: `https://partner.steamgames.com/doc/webapi`
+
+- `ISteamNews/GetNewsForApp/v2` (app news)  
+  Docs: `https://partner.steamgames.com/doc/webapi/isteamnews`
+
+- `ISteamUserStats/GetNumberOfCurrentPlayers/v1` (current player count)  
+  Docs: `https://partner.steamgames.com/doc/webapi/ISteamUserStats`
+
+Notes:
+- `ISteamApps/GetAppList/v2` is marked deprecated in official docs localization; prefer `IStoreService/GetAppList/v1`.
+- Avoid building critical flows on undocumented or unofficial endpoints.
+
+## API Risk & Compliance
+
+- Using official Steam APIs/endpoints with normal user-like traffic is generally low risk.
+- Main practical risk is technical (`rate limiting`, temporary blocking, endpoint changes), not VAC-style anti-cheat.
+- Keep integrations conservative:
+  - cache responses and avoid request bursts,
+  - avoid mass automation of account actions,
+  - do not bypass authentication/session controls.
+- Follow Steam terms and Steam Subscriber Agreement:
+  - `https://store.steampowered.com/subscriber_agreement/`
+
 ## Security Model
 
 - Sandbox-only behavior: the extension never writes to Steam wishlist.
