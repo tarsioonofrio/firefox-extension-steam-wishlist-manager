@@ -224,6 +224,34 @@ function deleteCollection(state, name) {
   return true;
 }
 
+function renameCollection(state, fromName, toName) {
+  const from = normalizeCollectionName(fromName);
+  const to = normalizeCollectionName(toName);
+
+  if (!from || !state.collections[from]) {
+    throw new Error("Collection not found.");
+  }
+  if (!to) {
+    throw new Error("New collection name is required.");
+  }
+  if (from === to) {
+    return to;
+  }
+  if (state.collections[to]) {
+    throw new Error("A collection with this name already exists.");
+  }
+
+  state.collections[to] = state.collections[from];
+  delete state.collections[from];
+  state.collectionOrder = state.collectionOrder.map((name) => (name === from ? to : name));
+
+  if (state.activeCollection === from) {
+    state.activeCollection = to;
+  }
+
+  return to;
+}
+
 browser.runtime.onMessage.addListener((message, sender) => {
   return (async () => {
     if (!message || typeof message !== "object") {
@@ -318,6 +346,12 @@ browser.runtime.onMessage.addListener((message, sender) => {
         ensureCollection(state, message.collectionName);
         await setState(state);
         return { ok: true, state };
+      }
+
+      case "rename-collection": {
+        const newName = renameCollection(state, message.fromName, message.toName);
+        await setState(state);
+        return { ok: true, newName, state };
       }
 
       case "delete-collection": {

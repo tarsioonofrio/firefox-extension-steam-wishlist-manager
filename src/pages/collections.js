@@ -1249,7 +1249,7 @@ function getFilteredAndSorted(ids) {
 
 function renderCollectionSelect() {
   const select = document.getElementById("collection-select");
-  const deleteBtn = document.getElementById("delete-collection-btn");
+  const deleteSelect = document.getElementById("delete-collection-select");
   if (!select || !state) {
     return;
   }
@@ -1279,9 +1279,15 @@ function renderCollectionSelect() {
   }
 
   select.value = sourceMode === "wishlist" ? WISHLIST_SELECT_VALUE : activeCollection;
-  const disabled = sourceMode === "wishlist";
-  if (deleteBtn) {
-    deleteBtn.disabled = disabled;
+
+  if (deleteSelect) {
+    deleteSelect.innerHTML = "";
+    for (const name of state.collectionOrder || []) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = `${name} (${(state.collections?.[name] || []).length})`;
+      deleteSelect.appendChild(option);
+    }
   }
 }
 
@@ -1460,10 +1466,8 @@ async function refreshState() {
   state = await browser.runtime.sendMessage({ type: "get-state" });
 }
 
-async function createCollection() {
-  const input = document.getElementById("new-collection-input");
-  const name = normalizeCollectionName(input?.value || "");
-
+async function createCollectionByName(rawName) {
+  const name = normalizeCollectionName(rawName || "");
   if (!name) {
     setStatus("Type a collection name.", true);
     return;
@@ -1474,12 +1478,9 @@ async function createCollection() {
     collectionName: name
   });
 
-  if (input) {
-    input.value = "";
-  }
-
   await refreshState();
   activeCollection = name;
+  sourceMode = "collections";
   page = 1;
   await ensureTagCounts();
   await ensureTypeCounts();
@@ -1489,45 +1490,81 @@ async function createCollection() {
   await render();
 }
 
-async function deleteActiveCollection() {
-  if (!activeCollection || activeCollection === "__all__") {
-    setStatus("Select a specific collection to delete.", true);
+async function renameActiveCollectionByName(rawName) {
+  if (sourceMode === "wishlist" || !activeCollection || activeCollection === "__all__") {
+    setStatus("Select a specific collection to rename.", true);
+    return;
+  }
+
+  const newName = normalizeCollectionName(rawName || "");
+  if (!newName) {
+    setStatus("Type a new collection name.", true);
     return;
   }
 
   await browser.runtime.sendMessage({
-    type: "delete-collection",
-    collectionName: activeCollection
+    type: "rename-collection",
+    fromName: activeCollection,
+    toName: newName
   });
 
   await refreshState();
-  activeCollection = "__all__";
+  activeCollection = newName;
   page = 1;
   await ensureTagCounts();
   await ensureTypeCounts();
   renderTagOptions();
   renderTypeOptions();
-  setStatus("Collection deleted.");
+  setStatus(`Collection renamed to \"${newName}\".`);
+  await render();
+}
+
+async function deleteCollectionByName(rawName) {
+  const collectionName = normalizeCollectionName(rawName || "");
+  if (!collectionName) {
+    setStatus("Select a collection to delete.", true);
+    return;
+  }
+
+  await browser.runtime.sendMessage({
+    type: "delete-collection",
+    collectionName
+  });
+
+  await refreshState();
+  if (activeCollection === collectionName) {
+    activeCollection = "__all__";
+    sourceMode = "collections";
+  }
+  page = 1;
+  await ensureTagCounts();
+  await ensureTypeCounts();
+  renderTagOptions();
+  renderTypeOptions();
+  setStatus(`Collection \"${collectionName}\" deleted.`);
   await render();
 }
 
 async function render() {
-  const createBtn = document.getElementById("create-collection-btn");
-  const newInput = document.getElementById("new-collection-input");
   const sortSelect = document.getElementById("sort-select");
-  const isWishlistMode = sourceMode === "wishlist";
-
-  if (createBtn) {
-    createBtn.disabled = isWishlistMode;
-  }
-  if (newInput) {
-    newInput.disabled = isWishlistMode;
-  }
+  const renameActionBtn = document.getElementById("menu-action-rename");
+  const deleteActionBtn = document.getElementById("menu-action-delete");
+  const deleteSelect = document.getElementById("delete-collection-select");
   if (sortSelect) {
     sortSelect.value = sortMode;
   }
 
   renderCollectionSelect();
+  const canRenameCurrent = sourceMode !== "wishlist" && activeCollection !== "__all__";
+  if (renameActionBtn) {
+    renameActionBtn.disabled = !canRenameCurrent;
+  }
+  if (deleteActionBtn) {
+    deleteActionBtn.disabled = (state?.collectionOrder || []).length === 0;
+  }
+  if (deleteSelect) {
+    deleteSelect.disabled = (state?.collectionOrder || []).length === 0;
+  }
   await renderCards();
 }
 
@@ -1555,6 +1592,24 @@ function renderRatingControls() {
   }
   if (maxInput) {
     maxInput.value = String(reviewsMax);
+  }
+}
+
+function hideCollectionMenuForms() {
+  document.getElementById("rename-collection-form")?.classList.add("hidden");
+  document.getElementById("create-collection-form")?.classList.add("hidden");
+  document.getElementById("delete-collection-form")?.classList.add("hidden");
+}
+
+function toggleCollectionMenu(forceOpen = null) {
+  const panel = document.getElementById("collection-menu-panel");
+  if (!panel) {
+    return;
+  }
+  const open = forceOpen === null ? panel.classList.contains("hidden") : Boolean(forceOpen);
+  panel.classList.toggle("hidden", !open);
+  if (!open) {
+    hideCollectionMenuForms();
   }
 }
 
@@ -1605,12 +1660,48 @@ function attachEvents() {
     await render();
   });
 
-  document.getElementById("create-collection-btn")?.addEventListener("click", () => {
-    createCollection().catch(() => setStatus("Failed to create collection.", true));
+  document.getElementById("collection-menu-btn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleCollectionMenu();
   });
 
-  document.getElementById("delete-collection-btn")?.addEventListener("click", () => {
-    deleteActiveCollection().catch(() => setStatus("Failed to delete collection.", true));
+  document.getElementById("menu-action-rename")?.addEventListener("click", () => {
+    hideCollectionMenuForms();
+    document.getElementById("rename-collection-form")?.classList.remove("hidden");
+  });
+
+  document.getElementById("menu-action-create")?.addEventListener("click", () => {
+    hideCollectionMenuForms();
+    document.getElementById("create-collection-form")?.classList.remove("hidden");
+  });
+
+  document.getElementById("menu-action-delete")?.addEventListener("click", () => {
+    hideCollectionMenuForms();
+    document.getElementById("delete-collection-form")?.classList.remove("hidden");
+  });
+
+  document.getElementById("rename-collection-ok")?.addEventListener("click", () => {
+    const input = document.getElementById("rename-collection-input");
+    const value = String(input?.value || "");
+    renameActiveCollectionByName(value).catch(() => setStatus("Failed to rename collection.", true));
+    if (input) {
+      input.value = "";
+    }
+  });
+
+  document.getElementById("create-collection-ok")?.addEventListener("click", () => {
+    const input = document.getElementById("create-collection-input");
+    const value = String(input?.value || "");
+    createCollectionByName(value).catch(() => setStatus("Failed to create collection.", true));
+    if (input) {
+      input.value = "";
+    }
+  });
+
+  document.getElementById("delete-collection-ok")?.addEventListener("click", () => {
+    const select = document.getElementById("delete-collection-select");
+    const value = String(select?.value || "");
+    deleteCollectionByName(value).catch(() => setStatus("Failed to delete collection.", true));
   });
 
   document.getElementById("prev-page-btn")?.addEventListener("click", async () => {
@@ -1662,6 +1753,22 @@ function attachEvents() {
     renderRatingControls();
     page = 1;
     await renderCards();
+  });
+
+  document.addEventListener("click", (event) => {
+    const panel = document.getElementById("collection-menu-panel");
+    const btn = document.getElementById("collection-menu-btn");
+    if (!panel || !btn) {
+      return;
+    }
+    if (panel.classList.contains("hidden")) {
+      return;
+    }
+    const target = event.target;
+    if (panel.contains(target) || btn.contains(target)) {
+      return;
+    }
+    toggleCollectionMenu(false);
   });
 }
 

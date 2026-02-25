@@ -13,9 +13,31 @@
         <h1>Collections</h1>
       </header>
       <div class="top-controls">
-        <select id="collection-select"></select>
+        <div class="collection-tools">
+          <select id="collection-select"></select>
+          <button id="collection-menu-btn" type="button">Collection Menu</button>
+        </div>
         <input id="search-input" type="search" placeholder="Search by title or appid">
         <button id="refresh-page-btn" type="button" class="header-btn">Refresh Page Data</button>
+      </div>
+      <div id="collection-menu-panel" class="collection-menu-panel hidden">
+        <div class="menu-actions">
+          <button id="menu-action-rename" type="button">Rename current collection</button>
+          <button id="menu-action-create" type="button">Create new collection</button>
+          <button id="menu-action-delete" type="button" class="danger">Delete collection</button>
+        </div>
+        <div id="rename-collection-form" class="menu-form hidden">
+          <input id="rename-collection-input" type="text" placeholder="New collection name">
+          <button id="rename-collection-ok" type="button">OK</button>
+        </div>
+        <div id="create-collection-form" class="menu-form hidden">
+          <input id="create-collection-input" type="text" placeholder="New collection name">
+          <button id="create-collection-ok" type="button">OK</button>
+        </div>
+        <div id="delete-collection-form" class="menu-form hidden">
+          <select id="delete-collection-select"></select>
+          <button id="delete-collection-ok" type="button" class="danger">Delete</button>
+        </div>
       </div>
       <section id="cards" class="cards"></section>
       <p id="empty" class="empty hidden">No items found for this collection/filter.</p>
@@ -43,11 +65,6 @@
               <option value="review-score">Review Score</option>
             </select>
           </label>
-        </div>
-        <div class="manage">
-          <input id="new-collection-input" type="text" placeholder="New collection name">
-          <button id="create-collection-btn" type="button">Create</button>
-          <button id="delete-collection-btn" type="button" class="danger">Delete selected</button>
         </div>
         <details class="filter-group" open>
           <summary>Tags</summary>

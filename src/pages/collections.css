@@ -49,7 +49,7 @@ body {
 
 .top-controls {
   display: grid;
-  grid-template-columns: minmax(180px, auto) minmax(240px, 1fr) auto;
+  grid-template-columns: minmax(320px, auto) minmax(240px, 1fr) auto;
   gap: 8px;
   align-items: center;
   width: min(860px, 100%);
@@ -82,6 +82,39 @@ body {
   display: grid;
   gap: 10px;
   margin-bottom: 10px;
+}
+
+.collection-tools {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) auto;
+  gap: 8px;
+}
+
+.collection-menu-panel {
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #2f445a;
+  border-radius: 6px;
+  background: rgba(18, 28, 42, 0.94);
+  display: grid;
+  gap: 8px;
+}
+
+.menu-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.menu-actions button {
+  width: auto;
+}
+
+.menu-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
 }
 
 label {
@@ -399,6 +432,14 @@ main {
   }
 
   .top-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .collection-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .menu-form {
     grid-template-columns: 1fr;
   }
 
