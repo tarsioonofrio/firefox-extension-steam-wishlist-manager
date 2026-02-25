@@ -1860,13 +1860,6 @@ async function renderCards() {
   const start = (page - 1) * PAGE_SIZE;
   const pageIds = appIds.slice(start, start + PAGE_SIZE);
   currentRenderedPageIds = [...pageIds];
-
-  // Always hydrate visible items to avoid fallback "App {id}" titles.
-  try {
-    await ensureMetaForAppIds(pageIds, pageIds.length, false, "Loading visible metadata:");
-  } catch {
-    setStatus("Some visible items could not be refreshed.", true);
-  }
   if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
     setStatus("");
   }
