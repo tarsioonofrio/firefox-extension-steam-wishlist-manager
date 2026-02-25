@@ -283,6 +283,18 @@ function sortByWishlistPriority(appIds) {
   return indexed.map((entry) => entry.id);
 }
 
+function getWishlistEntryPriority(entry, fallback = null) {
+  const raw = Number(entry?.priority);
+  if (Number.isFinite(raw) && raw >= 0) {
+    return raw;
+  }
+  const rank = Number(entry?.rank ?? entry?.order ?? entry?.sort_order ?? entry?.wishlist_rank);
+  if (Number.isFinite(rank) && rank >= 0) {
+    return rank;
+  }
+  return fallback;
+}
+
 function buildWishlistSortOrders(appIds) {
   const ids = Array.isArray(appIds) ? [...appIds] : [];
   const basePosition = sortByWishlistPriority(ids);
@@ -486,6 +498,9 @@ async function loadWishlistAddedMap() {
   const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
   const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
   const cachedMap = cached.map || {};
+  const cachedOrderedIds = Array.isArray(cached.orderedAppIds)
+    ? cached.orderedAppIds.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
   const lastFullSyncAt = Number(cached.lastFullSyncAt || 0);
 
   async function resolveSteamIdFromStoreHtml() {
@@ -552,7 +567,7 @@ async function loadWishlistAddedMap() {
     if (nowIds.length === 0 && Object.keys(cachedMap).length > 0) {
       wishlistAddedMap = { ...cachedMap };
       if (wishlistOrderedAppIds.length === 0) {
-        wishlistOrderedAppIds = Object.keys(cachedMap);
+        wishlistOrderedAppIds = cachedOrderedIds.length > 0 ? [...cachedOrderedIds] : Object.keys(cachedMap);
       }
       return;
     }
@@ -604,17 +619,30 @@ async function loadWishlistAddedMap() {
     }
 
     wishlistAddedMap = nextMap;
+    if (nowIds.length > 0) {
+      wishlistOrderedAppIds = [...nowIds];
+    } else if (cachedOrderedIds.length > 0) {
+      wishlistOrderedAppIds = cachedOrderedIds.filter((id) => id in nextMap);
+      for (const id of Object.keys(nextMap)) {
+        if (!wishlistOrderedAppIds.includes(id)) {
+          wishlistOrderedAppIds.push(id);
+        }
+      }
+    } else if (wishlistOrderedAppIds.length === 0) {
+      wishlistOrderedAppIds = Object.keys(nextMap);
+    }
     await browser.storage.local.set({
       [WISHLIST_ADDED_CACHE_KEY]: {
         cachedAt: now,
         lastFullSyncAt: nextLastFullSyncAt,
+        orderedAppIds: wishlistOrderedAppIds,
         map: wishlistAddedMap
       }
     });
   } catch {
     wishlistAddedMap = { ...cachedMap };
     if (wishlistOrderedAppIds.length === 0) {
-      wishlistOrderedAppIds = Object.keys(cachedMap);
+      wishlistOrderedAppIds = cachedOrderedIds.length > 0 ? [...cachedOrderedIds] : Object.keys(cachedMap);
     }
     wishlistSortSignature = "";
     wishlistSortOrders = {};
@@ -656,14 +684,15 @@ async function ensureWishlistOrderFromSnapshot(appIds) {
     }
 
     for (const [appId, entry] of entries) {
-      if (!missing.has(appId)) {
-        orderRank += 1;
-        continue;
+      const resolvedPriority = getWishlistEntryPriority(entry, null);
+      // Only trust explicit priority fields from Steam payload.
+      if (Number.isFinite(resolvedPriority)) {
+        wishlistPriorityMap[appId] = resolvedPriority;
       }
-      // Use snapshot traversal order to mirror Steam wishlist ranking.
-      wishlistPriorityMap[appId] = orderRank;
+      if (missing.has(appId)) {
+        missing.delete(appId);
+      }
       orderRank += 1;
-      missing.delete(appId);
     }
   }
 
@@ -794,7 +823,10 @@ async function ensureWishlistMetaFromSnapshot(appIds) {
         changed = true;
       }
       // Keep ranking for all items seen in snapshot pages.
-      wishlistPriorityMap[appId] = orderRank;
+      const resolvedPriority = getWishlistEntryPriority(entry, null);
+      if (Number.isFinite(resolvedPriority)) {
+        wishlistPriorityMap[appId] = resolvedPriority;
+      }
       orderRank += 1;
     }
   }
