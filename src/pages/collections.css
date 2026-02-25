@@ -223,7 +223,7 @@ button.danger,
 .filter-group summary {
   cursor: pointer;
   user-select: none;
-  font-size: 28px;
+  font-size: 14px;
   font-weight: 600;
   margin-bottom: 8px;
 }
@@ -235,7 +235,7 @@ button.danger,
 
 .tag-options {
   display: grid;
-  gap: 6px;
+  gap: 1px;
   max-height: 240px;
   overflow-y: auto;
   padding-right: 4px;
@@ -244,12 +244,19 @@ button.danger,
 .tag-option {
   display: grid;
   grid-template-columns: auto 1fr auto;
-  gap: 8px;
+  gap: 2px;
   align-items: center;
 }
 
 .tag-option input {
   margin: 0;
+}
+
+.tag-option input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-height: 14px;
+  padding: 0;
 }
 
 .tag-name {
@@ -260,10 +267,8 @@ button.danger,
 .tag-count {
   font-size: 12px;
   color: #9ab8d3;
-  border: 1px solid #35506a;
-  border-radius: 999px;
-  background: #22384f;
-  padding: 0 8px;
+  font-style: italic;
+  padding: 0;
   line-height: 20px;
 }
 
