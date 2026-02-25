@@ -1,5 +1,5 @@
 const PAGE_SIZE = 30;
-const META_CACHE_KEY = "steamWishlistCollectionsMetaCache";
+const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV2";
 const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 let state = null;
@@ -48,19 +48,57 @@ async function fetchAppMeta(appId) {
   }
 
   try {
-    const response = await fetch(`https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=pt-BR`);
-    const payload = await response.json();
-    const appData = payload?.[appId]?.data;
+    const [detailsResult, reviewsResult] = await Promise.allSettled([
+      fetch(`https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=pt-BR`),
+      fetch(
+        `https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`
+      )
+    ]);
+
+    let detailsPayload = null;
+    if (detailsResult.status === "fulfilled") {
+      detailsPayload = await detailsResult.value.json();
+    }
+
+    let reviewsPayload = null;
+    if (reviewsResult.status === "fulfilled") {
+      reviewsPayload = await reviewsResult.value.json();
+    }
+
+    const appData = detailsPayload?.[appId]?.data;
+    const reviewSummary = reviewsPayload?.query_summary || {};
+
+    const genres = Array.isArray(appData?.genres)
+      ? appData.genres.map((g) => String(g.description || "").trim()).filter(Boolean)
+      : [];
+    const categories = Array.isArray(appData?.categories)
+      ? appData.categories.map((c) => String(c.description || "").trim()).filter(Boolean)
+      : [];
+    const tags = (genres.length > 0 ? genres : categories).slice(0, 5);
+
+    const releaseText = appData?.release_date?.date
+      || (appData?.release_date?.coming_soon ? "Coming soon" : "-");
+    const reviewText = reviewSummary?.review_score_desc
+      ? `${reviewSummary.review_score_desc} (${reviewSummary.total_reviews || 0})`
+      : "No user reviews";
+    let priceText = "-";
+    if (appData?.is_free === true) {
+      priceText = "Free";
+    } else if (appData?.price_overview?.final_formatted) {
+      priceText = appData.price_overview.final_formatted;
+    } else if (releaseText === "Coming soon") {
+      priceText = "Not announced";
+    }
 
     const meta = {
       cachedAt: now,
-      priceText: appData?.price_overview?.final_formatted || appData?.is_free ? "Free" : "-",
+      priceText,
       discountText: appData?.price_overview?.discount_percent
         ? `${appData.price_overview.discount_percent}% off`
-        : "",
-      tagsText: Array.isArray(appData?.genres)
-        ? appData.genres.slice(0, 4).map((g) => g.description).join(" • ")
-        : ""
+        : "-",
+      tags,
+      reviewText,
+      releaseText
     };
 
     metaCache[appId] = meta;
@@ -70,8 +108,10 @@ async function fetchAppMeta(appId) {
     return {
       cachedAt: now,
       priceText: "-",
-      discountText: "",
-      tagsText: ""
+      discountText: "-",
+      tags: [],
+      reviewText: "No user reviews",
+      releaseText: "-"
     };
   }
 }
@@ -190,7 +230,10 @@ async function renderCards() {
     const titleEl = fragment.querySelector(".title");
     const appidEl = fragment.querySelector(".appid");
     const pricingEl = fragment.querySelector(".pricing");
-    const tagsEl = fragment.querySelector(".tags");
+    const discountEl = fragment.querySelector(".discount");
+    const tagsRowEl = fragment.querySelector(".tags-row");
+    const reviewEl = fragment.querySelector(".review");
+    const releaseEl = fragment.querySelector(".release");
     const removeBtn = fragment.querySelector(".remove-btn");
 
     if (coverLink) {
@@ -231,11 +274,25 @@ async function renderCards() {
 
     fetchAppMeta(appId).then((meta) => {
       if (pricingEl) {
-        const base = meta.priceText || "-";
-        pricingEl.textContent = meta.discountText ? `${base} (${meta.discountText})` : base;
+        pricingEl.textContent = `Price: ${meta.priceText || "-"}`;
       }
-      if (tagsEl) {
-        tagsEl.textContent = meta.tagsText || "";
+      if (discountEl) {
+        discountEl.textContent = `Discount: ${meta.discountText || "-"}`;
+      }
+      if (reviewEl) {
+        reviewEl.textContent = `Reviews: ${meta.reviewText || "-"}`;
+      }
+      if (releaseEl) {
+        releaseEl.textContent = `Release: ${meta.releaseText || "-"}`;
+      }
+      if (tagsRowEl) {
+        tagsRowEl.innerHTML = "";
+        for (const tag of meta.tags || []) {
+          const chip = document.createElement("span");
+          chip.className = "tag-chip";
+          chip.textContent = tag;
+          tagsRowEl.appendChild(chip);
+        }
       }
     });
   }

@@ -133,6 +133,44 @@ main {
   color: var(--muted);
 }
 
+.details {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: start;
+  margin-top: 4px;
+}
+
+.left-col {
+  min-width: 0;
+}
+
+.right-col {
+  text-align: right;
+  min-width: 130px;
+}
+
+.right-col .meta {
+  margin: 1px 0;
+}
+
+.tags-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 6px;
+}
+
+.tag-chip {
+  font-size: 11px;
+  color: #c7d5e0;
+  border: 1px solid #3d556e;
+  border-radius: 3px;
+  background: #2a3f55;
+  padding: 1px 6px;
+  line-height: 18px;
+}
+
 .actions {
   display: flex;
   align-items: center;
@@ -169,5 +207,14 @@ main {
 
   .actions {
     padding-top: 0;
+  }
+
+  .details {
+    grid-template-columns: 1fr;
+  }
+
+  .right-col {
+    text-align: left;
+    min-width: 0;
   }
 }
