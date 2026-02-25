@@ -53,10 +53,7 @@ function createModal() {
           <option value="start">Beginning of collection</option>
         </select>
       </label>
-      <label class="swcm-checkbox-label">
-        <input id="swcm-click-native" type="checkbox" checked />
-        Also click Steam wishlist button
-      </label>
+      <p class="swcm-status">Sandbox mode: this only saves to extension data.</p>
       <div class="swcm-actions">
         <button id="swcm-cancel" type="button" class="swcm-btn swcm-btn-secondary">Cancel</button>
         <button id="swcm-save" type="button" class="swcm-btn">Save</button>
@@ -127,7 +124,6 @@ async function saveToCollection() {
   const collectionSelect = document.getElementById("swcm-collection-select");
   const newCollectionInput = document.getElementById("swcm-new-collection");
   const positionSelect = document.getElementById("swcm-position-select");
-  const clickNative = document.getElementById("swcm-click-native");
 
   const collectionName =
     (newCollectionInput?.value || "").trim() || (collectionSelect?.value || "").trim();
@@ -147,14 +143,7 @@ async function saveToCollection() {
     }
   });
 
-  if (clickNative?.checked) {
-    const nativeButton = getWishlistButton();
-    if (nativeButton) {
-      nativeButton.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    }
-  }
-
-  setStatus(`Saved to "${collectionName}".`);
+  setStatus(`Saved locally to "${collectionName}".`);
   await fillCollectionSelect();
 }
 
