@@ -1,0 +1,14 @@
+{
+  "name": "firefox-extension-steam-wishlist-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Firefox extension to organize Steam wishlist into custom collections",
+  "scripts": {
+    "dev": "web-ext run --source-dir . --target=firefox-desktop",
+    "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts",
+    "check:manifest": "node -e \"JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')\""
+  },
+  "devDependencies": {
+    "web-ext": "^8.9.0"
+  }
+}

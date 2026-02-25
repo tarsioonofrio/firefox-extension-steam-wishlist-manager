@@ -10,7 +10,20 @@ Firefox extension MVP to organize Steam wishlist entries into custom collections
 - Filter and reorder wishlist page by selected collection.
 - Persistent local storage via `browser.storage.local`.
 
-## Load in Firefox
+## Development with auto-reload (`web-ext`)
+
+1. Install dependencies:
+   - `npm install`
+2. Run extension in Firefox development profile:
+   - `npm run dev`
+
+This keeps the extension temporarily installed and reloads it when files change.
+
+Useful commands:
+- `npm run check:manifest` (quick manifest syntax check)
+- `npm run build` (creates zipped artifact in `web-ext-artifacts/`)
+
+## Manual temporary load (without `web-ext`)
 
 1. Open `about:debugging`.
 2. Click **This Firefox**.
