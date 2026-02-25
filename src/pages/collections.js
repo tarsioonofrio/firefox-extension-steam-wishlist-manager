@@ -1,5 +1,5 @@
 const PAGE_SIZE = 30;
-const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV2";
+const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV3";
 const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 let state = null;
@@ -8,6 +8,20 @@ let page = 1;
 let searchQuery = "";
 let sortMode = "position";
 let metaCache = {};
+
+function formatCompactCount(value) {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n) || n <= 0) {
+    return "0";
+  }
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  }
+  if (n >= 1_000) {
+    return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  }
+  return String(n);
+}
 
 function setStatus(text, isError = false) {
   const el = document.getElementById("status");
@@ -74,12 +88,18 @@ async function fetchAppMeta(appId) {
     const categories = Array.isArray(appData?.categories)
       ? appData.categories.map((c) => String(c.description || "").trim()).filter(Boolean)
       : [];
-    const tags = (genres.length > 0 ? genres : categories).slice(0, 5);
+    const tags = Array.from(new Set([...genres, ...categories])).slice(0, 8);
 
     const releaseText = appData?.release_date?.date
       || (appData?.release_date?.coming_soon ? "Coming soon" : "-");
-    const reviewText = reviewSummary?.review_score_desc
-      ? `${reviewSummary.review_score_desc} (${reviewSummary.total_reviews || 0})`
+    const totalPositive = Number(reviewSummary?.total_positive || 0);
+    const totalNegative = Number(reviewSummary?.total_negative || 0);
+    const totalVotes = totalPositive + totalNegative;
+    const positivePct = totalVotes > 0
+      ? Math.round((totalPositive / totalVotes) * 100)
+      : 0;
+    const reviewText = totalVotes > 0
+      ? `${positivePct}% positive (${formatCompactCount(totalPositive)}+ / ${formatCompactCount(totalNegative)}-)`
       : "No user reviews";
     let priceText = "-";
     if (appData?.is_free === true) {
