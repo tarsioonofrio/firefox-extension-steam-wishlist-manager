@@ -25,6 +25,7 @@ let wishlistPriorityMap = {};
 let wishlistSortSignature = "";
 let wishlistSortOrders = {};
 let wishlistSnapshotDay = "";
+let currentRenderedPageIds = [];
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -131,6 +132,12 @@ function setStatus(text, isError = false) {
   }
   el.textContent = text;
   el.style.color = isError ? "#ff9696" : "";
+}
+
+function invalidateWishlistPrecomputedSorts() {
+  wishlistSortSignature = "";
+  wishlistSortOrders = {};
+  wishlistSnapshotDay = "";
 }
 
 function normalizeCollectionName(name) {
@@ -698,6 +705,72 @@ async function ensureWishlistPrecomputedSorts(appIds) {
   wishlistSnapshotDay = day;
 }
 
+function getAllKnownAppIds() {
+  const ids = new Set();
+  for (const appId of Object.keys(wishlistAddedMap || {})) {
+    ids.add(appId);
+  }
+  for (const appId of Object.keys(state?.items || {})) {
+    ids.add(appId);
+  }
+  for (const collectionName of state?.collectionOrder || []) {
+    for (const appId of state?.collections?.[collectionName] || []) {
+      ids.add(appId);
+    }
+  }
+  return Array.from(ids);
+}
+
+async function refreshWholeDatabase() {
+  const allIds = getAllKnownAppIds();
+  if (allIds.length === 0) {
+    setStatus("No items to refresh.");
+    return;
+  }
+
+  setStatus(`Refreshing metadata for ${allIds.length} items...`);
+  await ensureMetaForAppIds(allIds, allIds.length, true);
+  await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY]);
+  invalidateWishlistPrecomputedSorts();
+
+  await ensureTagCounts();
+  await ensureTypeCounts();
+  renderTagOptions();
+  renderTypeOptions();
+  await render();
+  setStatus("Database refreshed.");
+}
+
+async function refreshCurrentPageItems() {
+  const ids = Array.isArray(currentRenderedPageIds) ? currentRenderedPageIds : [];
+  if (ids.length === 0) {
+    setStatus("No visible items to refresh.");
+    return;
+  }
+
+  setStatus(`Refreshing ${ids.length} visible items...`);
+  await ensureMetaForAppIds(ids, ids.length, true);
+  await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY]);
+  invalidateWishlistPrecomputedSorts();
+  await ensureTagCounts();
+  await ensureTypeCounts();
+  renderTagOptions();
+  renderTypeOptions();
+  await render();
+  setStatus("Visible items refreshed.");
+}
+
+async function refreshSingleItem(appId) {
+  if (!appId) {
+    return;
+  }
+  setStatus(`Refreshing ${appId}...`);
+  await fetchAppMeta(appId, { force: true });
+  invalidateWishlistPrecomputedSorts();
+  await render();
+  setStatus("Item refreshed.");
+}
+
 async function loadMetaCache() {
   const stored = await browser.storage.local.get(META_CACHE_KEY);
   metaCache = stored[META_CACHE_KEY] || {};
@@ -1254,6 +1327,7 @@ async function renderCards() {
 
   const start = (page - 1) * PAGE_SIZE;
   const pageIds = appIds.slice(start, start + PAGE_SIZE);
+  currentRenderedPageIds = [...pageIds];
 
   // Always hydrate visible items to avoid fallback "App {id}" titles.
   await ensureMetaForAppIds(pageIds, pageIds.length);
@@ -1280,6 +1354,7 @@ async function renderCards() {
     const reviewEl = fragment.querySelector(".review");
     const releaseEl = fragment.querySelector(".release");
     const wishlistAddedEl = fragment.querySelector(".wishlist-added");
+    const refreshItemBtn = fragment.querySelector(".refresh-item-btn");
     const removeBtn = fragment.querySelector(".remove-btn");
 
     if (coverLink) {
@@ -1299,6 +1374,12 @@ async function renderCards() {
     }
     if (wishlistAddedEl) {
       wishlistAddedEl.textContent = `Wishlist: ${formatUnixDate(wishlistAddedMap[appId])}`;
+    }
+
+    if (refreshItemBtn) {
+      refreshItemBtn.addEventListener("click", () => {
+        refreshSingleItem(appId).catch(() => setStatus("Failed to refresh item.", true));
+      });
     }
 
     if (removeBtn) {
@@ -1552,6 +1633,10 @@ function attachEvents() {
     renderTagOptions();
   });
 
+  document.getElementById("refresh-page-btn")?.addEventListener("click", () => {
+    refreshCurrentPageItems().catch(() => setStatus("Failed to refresh visible items.", true));
+  });
+
   document.getElementById("rating-min-range")?.addEventListener("input", async (event) => {
     const next = parseNonNegativeInt(event.target.value, ratingMin);
     ratingMin = Math.max(0, Math.min(next, ratingMax));
@@ -1593,6 +1678,13 @@ async function bootstrap() {
   renderTypeOptions();
   renderRatingControls();
   await render();
+
+  const refreshAll = new URLSearchParams(window.location.search).get("refreshAll") === "1";
+  if (refreshAll) {
+    await refreshWholeDatabase();
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, "", cleanUrl);
+  }
 }
 
 bootstrap().catch(() => setStatus("Failed to load collections page.", true));

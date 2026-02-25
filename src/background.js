@@ -1,4 +1,8 @@
 const STORAGE_KEY = "steamWishlistCollectionsState";
+const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
+const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
+const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
+const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const MAX_COLLECTION_NAME_LENGTH = 64;
 const MAX_COLLECTIONS = 100;
 const MAX_ITEMS_PER_COLLECTION = 5000;
@@ -326,6 +330,21 @@ browser.runtime.onMessage.addListener((message, sender) => {
         pruneItemsNotInWishlist(state, message.appIds);
         await setState(state);
         return { ok: true, state };
+      }
+
+      case "invalidate-caches": {
+        await browser.storage.local.remove([
+          META_CACHE_KEY,
+          WISHLIST_ADDED_CACHE_KEY,
+          TAG_COUNTS_CACHE_KEY,
+          TYPE_COUNTS_CACHE_KEY
+        ]);
+        return { ok: true };
+      }
+
+      case "clear-all-data": {
+        await browser.storage.local.clear();
+        return { ok: true };
       }
 
       default:

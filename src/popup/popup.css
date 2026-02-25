@@ -23,8 +23,13 @@ button {
   color: #fff;
   padding: 8px;
   cursor: pointer;
+  margin-bottom: 8px;
 }
 
 button:hover {
   filter: brightness(1.08);
+}
+
+button.danger {
+  background: #8d3d3d;
 }

@@ -11,6 +11,7 @@
     <main class="content">
       <header class="content-header">
         <h1>Collections</h1>
+        <button id="refresh-page-btn" type="button" class="header-btn">Refresh Page Data</button>
       </header>
       <section id="cards" class="cards"></section>
       <p id="empty" class="empty hidden">No items found for this collection/filter.</p>
@@ -92,10 +93,10 @@
             </div>
           </div>
         </details>
-        <p id="status" class="status"></p>
       </div>
     </aside>
   </div>
+  <p id="status" class="status status-floating"></p>
 
   <template id="card-template">
     <article class="card">
@@ -119,6 +120,7 @@
       </div>
       <div class="actions">
         <p class="meta wishlist-added">Wishlist: -</p>
+        <button class="refresh-item-btn" type="button">Refresh</button>
         <button class="remove-btn" type="button">Remove</button>
       </div>
     </article>

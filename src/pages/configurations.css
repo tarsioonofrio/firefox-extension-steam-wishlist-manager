@@ -1,0 +1,62 @@
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #172334, #0f1a29);
+  color: #d6e7f7;
+  font: 14px/1.4 "Segoe UI", Tahoma, sans-serif;
+}
+
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+header h1 {
+  margin: 0 0 6px;
+  font-size: 28px;
+}
+
+header p {
+  margin: 0;
+  color: #9ab8d3;
+}
+
+.panel {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #2f445a;
+  border-radius: 6px;
+  background: rgba(18, 28, 42, 0.92);
+  display: grid;
+  gap: 10px;
+}
+
+button {
+  border: 1px solid #2f445a;
+  border-radius: 4px;
+  background: #2d4d6b;
+  color: #fff;
+  padding: 10px;
+  cursor: pointer;
+  width: 100%;
+}
+
+button:hover {
+  filter: brightness(1.08);
+}
+
+button.danger {
+  background: #8d3d3d;
+}
+
+.status {
+  margin: 2px 0 0;
+  min-height: 16px;
+  color: #9ab8d3;
+  font-size: 12px;
+}
