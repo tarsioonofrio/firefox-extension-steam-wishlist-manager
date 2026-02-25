@@ -1416,6 +1416,11 @@ async function renderCards() {
           return;
         }
 
+        const confirmed = window.confirm(`Remove AppID ${appId} from collection "${collectionName}"?`);
+        if (!confirmed) {
+          return;
+        }
+
         await browser.runtime.sendMessage({
           type: "remove-item-from-collection",
           appId,
@@ -1523,6 +1528,11 @@ async function deleteCollectionByName(rawName) {
   const collectionName = normalizeCollectionName(rawName || "");
   if (!collectionName) {
     setStatus("Select a collection to delete.", true);
+    return;
+  }
+
+  const confirmed = window.confirm(`Delete collection "${collectionName}"?`);
+  if (!confirmed) {
     return;
   }
 

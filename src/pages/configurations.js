@@ -14,6 +14,11 @@ async function openCollectionsWithRefresh() {
 }
 
 document.getElementById("refresh-db")?.addEventListener("click", async () => {
+  const confirmed = window.confirm("Refresh entire database now? This may take some time.");
+  if (!confirmed) {
+    return;
+  }
+
   try {
     setStatus("Invalidating caches...");
     await browser.runtime.sendMessage({ type: "invalidate-caches" });
