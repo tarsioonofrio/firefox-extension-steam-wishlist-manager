@@ -24,6 +24,7 @@ let wishlistOrderedAppIds = [];
 let wishlistPriorityMap = {};
 let wishlistSortSignature = "";
 let wishlistSortOrders = {};
+let wishlistSnapshotDay = "";
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -428,6 +429,7 @@ async function loadWishlistAddedMap() {
     wishlistPriorityMap = {};
     wishlistSortSignature = "";
     wishlistSortOrders = {};
+    wishlistSnapshotDay = "";
 
     // If we couldn't load current wishlist, keep existing cache to avoid destructive overwrite.
     if (nowIds.length === 0 && Object.keys(cachedMap).length > 0) {
@@ -499,6 +501,7 @@ async function loadWishlistAddedMap() {
     }
     wishlistSortSignature = "";
     wishlistSortOrders = {};
+    wishlistSnapshotDay = "";
   }
 }
 
@@ -682,13 +685,17 @@ async function ensureWishlistPrecomputedSorts(appIds) {
   }
 
   const signature = buildWishlistSignature(appIds);
-  if (wishlistSortSignature === signature && wishlistSortOrders?.position?.length) {
+  const day = todayKey();
+  const needsDailyRefresh = wishlistSnapshotDay !== day;
+
+  if (wishlistSortSignature === signature && wishlistSortOrders?.position?.length && !needsDailyRefresh) {
     return;
   }
 
   await ensureWishlistMetaFromSnapshot(appIds);
   wishlistSortOrders = buildWishlistSortOrders(appIds);
   wishlistSortSignature = signature;
+  wishlistSnapshotDay = day;
 }
 
 async function loadMetaCache() {
