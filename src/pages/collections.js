@@ -214,6 +214,23 @@ function getMetaNumber(appId, key, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function getEffectiveSortPrice(appId) {
+  const meta = metaCache?.[appId] || {};
+  const isFree = String(meta.priceText || "").trim().toLowerCase() === "free";
+  if (isFree) {
+    return 0;
+  }
+
+  const finalPrice = Number(meta.priceFinal);
+  if (Number.isFinite(finalPrice) && finalPrice > 0) {
+    // Steam `final` already includes active discount.
+    return finalPrice;
+  }
+
+  // Unknown/unavailable price goes to end.
+  return Number.POSITIVE_INFINITY;
+}
+
 function isMetaIncomplete(meta) {
   if (!meta) {
     return true;
@@ -797,7 +814,7 @@ function getFilteredAndSorted(ids) {
   }
 
   if (sortMode === "price") {
-    list.sort((a, b) => getMetaNumber(a, "priceFinal", 0) - getMetaNumber(b, "priceFinal", 0));
+    list.sort((a, b) => getEffectiveSortPrice(a) - getEffectiveSortPrice(b));
     return list;
   }
 
