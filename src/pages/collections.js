@@ -1,11 +1,12 @@
 const PAGE_SIZE = 30;
 const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV3";
 const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
-const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV1";
+const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const WISHLIST_ADDED_CACHE_TTL_MS = 30 * 60 * 1000;
 
 let state = null;
 let activeCollection = "__all__";
+let sourceMode = "collections";
 let page = 1;
 let searchQuery = "";
 let sortMode = "position";
@@ -76,6 +77,9 @@ async function loadWishlistAddedMap() {
       cache: "no-store"
     });
     const userdata = await userdataResponse.json();
+    const rgWishlistArray = Array.isArray(userdata?.rgWishlist)
+      ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
     let steamId =
       String(
         userdata?.steamid
@@ -88,7 +92,11 @@ async function loadWishlistAddedMap() {
       steamId = await resolveSteamIdFromStoreHtml();
     }
     if (!steamId) {
-      wishlistAddedMap = {};
+      const map = {};
+      for (const appId of rgWishlistArray) {
+        map[appId] = 0;
+      }
+      wishlistAddedMap = map;
       return;
     }
 
@@ -116,10 +124,15 @@ async function loadWishlistAddedMap() {
     }
 
     wishlistAddedMap = map;
+    if (Object.keys(wishlistAddedMap).length === 0 && rgWishlistArray.length > 0) {
+      for (const appId of rgWishlistArray) {
+        wishlistAddedMap[appId] = 0;
+      }
+    }
     await browser.storage.local.set({
       [WISHLIST_ADDED_CACHE_KEY]: {
         cachedAt: now,
-        map
+        map: wishlistAddedMap
       }
     });
   } catch {
@@ -203,6 +216,7 @@ async function fetchAppMeta(appId) {
 
     const meta = {
       cachedAt: now,
+      titleText: String(appData?.name || "").trim(),
       priceText,
       discountText: appData?.price_overview?.discount_percent
         ? `${appData.price_overview.discount_percent}% off`
@@ -218,6 +232,7 @@ async function fetchAppMeta(appId) {
   } catch {
     return {
       cachedAt: now,
+      titleText: "",
       priceText: "-",
       discountText: "-",
       tags: [],
@@ -228,6 +243,14 @@ async function fetchAppMeta(appId) {
 }
 
 function getSelectedAppIds() {
+  if (sourceMode === "wishlist") {
+    return Object.keys(wishlistAddedMap).sort((a, b) => {
+      const ta = Number(wishlistAddedMap[a] || 0);
+      const tb = Number(wishlistAddedMap[b] || 0);
+      return tb - ta;
+    });
+  }
+
   if (!state) {
     return [];
   }
@@ -269,6 +292,7 @@ function getFilteredAndSorted(ids) {
 
 function renderCollectionSelect() {
   const select = document.getElementById("collection-select");
+  const deleteBtn = document.getElementById("delete-collection-btn");
   if (!select || !state) {
     return;
   }
@@ -293,6 +317,11 @@ function renderCollectionSelect() {
   }
 
   select.value = activeCollection;
+  const disabled = sourceMode === "wishlist";
+  select.disabled = disabled;
+  if (deleteBtn) {
+    deleteBtn.disabled = disabled;
+  }
 }
 
 function renderPager(totalItems) {
@@ -367,6 +396,7 @@ async function renderCards() {
       wishlistAddedEl.textContent = `Wishlist: ${formatUnixDate(wishlistAddedMap[appId])}`;
     }
     if (removeBtn) {
+      removeBtn.style.display = sourceMode === "wishlist" ? "none" : "";
       removeBtn.addEventListener("click", async () => {
         const collectionName = activeCollection;
         if (!collectionName || collectionName === "__all__") {
@@ -388,6 +418,9 @@ async function renderCards() {
     cardsEl.appendChild(fragment);
 
     fetchAppMeta(appId).then((meta) => {
+      if (titleEl && !state.items?.[appId]?.title && meta.titleText) {
+        titleEl.textContent = meta.titleText;
+      }
       if (pricingEl) {
         pricingEl.textContent = `Price: ${meta.priceText || "-"}`;
       }
@@ -461,11 +494,32 @@ async function deleteActiveCollection() {
 }
 
 async function render() {
+  const createBtn = document.getElementById("create-collection-btn");
+  const newInput = document.getElementById("new-collection-input");
+  const sourceSelect = document.getElementById("source-select");
+  const isWishlistMode = sourceMode === "wishlist";
+
+  if (createBtn) {
+    createBtn.disabled = isWishlistMode;
+  }
+  if (newInput) {
+    newInput.disabled = isWishlistMode;
+  }
+  if (sourceSelect) {
+    sourceSelect.value = sourceMode;
+  }
+
   renderCollectionSelect();
   await renderCards();
 }
 
 function attachEvents() {
+  document.getElementById("source-select")?.addEventListener("change", async (event) => {
+    sourceMode = event.target.value === "wishlist" ? "wishlist" : "collections";
+    page = 1;
+    await render();
+  });
+
   document.getElementById("collection-select")?.addEventListener("change", async (event) => {
     activeCollection = event.target.value || "__all__";
     page = 1;

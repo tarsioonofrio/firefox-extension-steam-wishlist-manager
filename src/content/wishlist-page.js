@@ -1,527 +1,250 @@
-const ENABLE_WISHLIST_COLLECTIONS_UI = false;
-
-if (!window.location.pathname.startsWith("/wishlist") || !ENABLE_WISHLIST_COLLECTIONS_UI) {
+if (!window.location.pathname.startsWith("/wishlist")) {
   // Not a wishlist route.
 } else {
-  const PANEL_ID = "swcm-wishlist-panel";
-  const FILTER_ID = "swcm-filter-select";
-  const COUNT_ID = "swcm-filter-count";
-  const FALLBACK_ID = "swcm-wishlist-fallback";
-  const MANAGE_BUTTON_ID = "swcm-wishlist-manage-btn";
-  const MANAGE_MODAL_ID = "swcm-wishlist-manage-modal";
-  const MANAGE_NEW_INPUT_ID = "swcm-wishlist-new-collection-name";
-  const MANAGE_DELETE_SELECT_ID = "swcm-wishlist-delete-collection-select";
-  const MANAGE_STATUS_ID = "swcm-wishlist-collections-status";
+  const ENABLE_WISHLIST_ADD_TO_COLLECTION = true;
+  const PANEL_ID = "swcm-wishlist-add-panel";
+  const STATUS_ID = "swcm-wishlist-add-status";
 
-  let lastRowCount = -1;
-
-  function uniqueElements(elements) {
-    return Array.from(new Set(elements.filter(Boolean)));
-  }
-
-  function getRows() {
-    const candidates = Array.from(
-      document.querySelectorAll(".wishlist_row_ctn, .wishlist_row, div[id^='game_'], [data-ds-appid], [data-app-id]")
-    );
-
-    const normalized = candidates
-      .map((row) =>
-        row.closest(".wishlist_row_ctn") ||
-        row.closest("div[id^='game_']") ||
-        row
-      );
-
-    return uniqueElements(normalized);
-  }
-
-  function extractAppId(row) {
-    const byData =
-      row.getAttribute("data-app-id") ||
-      row.getAttribute("data-ds-appid") ||
-      row.getAttribute("data-appid");
-    if (byData) {
-      return String(byData);
+  if (!ENABLE_WISHLIST_ADD_TO_COLLECTION) {
+    // Feature disabled.
+  } else {
+    function uniqueElements(elements) {
+      return Array.from(new Set(elements.filter(Boolean)));
     }
 
-    // Prefer app-like ids and keep a broad numeric fallback for Steam variants.
-    const strictIdMatch = (row.id || "").match(/(?:game|app|wishlist(?:_row)?)[_-]?(\d{3,10})/i);
-    if (strictIdMatch) {
-      return strictIdMatch[1];
+    function getRows() {
+      const rows = Array.from(document.querySelectorAll(".wishlist_row, div[id^='game_'], .wishlist_row_ctn"));
+      return uniqueElements(rows.map((row) => row.closest(".wishlist_row_ctn") || row));
     }
 
-    const anyIdMatch = (row.id || "").match(/(\d{3,10})/);
-    if (anyIdMatch) {
-      return anyIdMatch[1];
-    }
-
-    const nestedDataEl = row.querySelector("[data-app-id], [data-ds-appid], [data-appid]");
-    if (nestedDataEl) {
-      const nestedData =
-        nestedDataEl.getAttribute("data-app-id") ||
-        nestedDataEl.getAttribute("data-ds-appid") ||
-        nestedDataEl.getAttribute("data-appid");
-      if (nestedData) {
-        return String(nestedData);
-      }
-    }
-
-    const appLink = row.querySelector("a[href*='/app/'], a[href*='/agecheck/app/']");
-    const href = appLink?.getAttribute("href") || "";
-    const hrefMatch = href.match(/\/(?:agecheck\/)?app\/(\d+)/);
-    if (hrefMatch) {
-      return hrefMatch[1];
-    }
-
-    return "";
-  }
-
-  function getListContainer() {
-    const firstRow = getRows()[0] || null;
-    return (
-      firstRow?.parentElement ||
-      document.querySelector("#wishlist_items") ||
-      document.querySelector("#wishlist_ctn") ||
-      document.querySelector(".wishlist_rows") ||
-      null
-    );
-  }
-
-  function findVisibleElement(elements) {
-    return elements.find((el) => {
-      if (!el) {
-        return false;
-      }
-      const style = window.getComputedStyle(el);
-      return style.display !== "none" && style.visibility !== "hidden";
-    }) || null;
-  }
-
-  function getPanelAnchor() {
-    const wishlistRoot = document.querySelector("#wishlist_ctn") || document.body;
-
-    const directHeader = findVisibleElement([
-      wishlistRoot.querySelector(".wishlist_header"),
-      wishlistRoot.querySelector("#wishlist_header"),
-      wishlistRoot.querySelector(".wishlist_title")
-    ]);
-    if (directHeader) {
-      return { node: directHeader, mode: "after" };
-    }
-
-    const heading = findVisibleElement(
-      Array.from(wishlistRoot.querySelectorAll("h1, h2")).filter((el) =>
-        /\bwishlist\b/i.test(el.textContent || "")
-      )
-    );
-    if (heading) {
-      const block = heading.closest("div");
-      if (block) {
-        return { node: block, mode: "after" };
-      }
-    }
-
-    const searchInput = findVisibleElement([
-      wishlistRoot.querySelector("input[placeholder*='Search by name or tag']"),
-      wishlistRoot.querySelector("input[placeholder*='Search by name']")
-    ]);
-    if (searchInput) {
-      const row = searchInput.closest("div");
-      if (row) {
-        return { node: row, mode: "before" };
-      }
-    }
-
-    return null;
-  }
-
-  function ensurePanelPosition(panel) {
-    const anchor = getPanelAnchor();
-    if (!anchor || !anchor.node) {
-      return;
-    }
-
-    const expectedParent = anchor.node.parentElement;
-    if (!expectedParent) {
-      return;
-    }
-
-    const shouldMove = panel.parentElement !== expectedParent;
-    if (shouldMove) {
-      if (anchor.mode === "before") {
-        anchor.node.insertAdjacentElement("beforebegin", panel);
-      } else {
-        anchor.node.insertAdjacentElement("afterend", panel);
-      }
-      return;
-    }
-
-    if (anchor.mode === "before") {
-      if (panel.nextElementSibling !== anchor.node) {
-        anchor.node.insertAdjacentElement("beforebegin", panel);
-      }
-      return;
-    }
-
-    if (panel.previousElementSibling !== anchor.node) {
-      anchor.node.insertAdjacentElement("afterend", panel);
-    }
-  }
-
-  function ensurePanel() {
-    let panel = document.getElementById(PANEL_ID);
-    if (!panel) {
-      panel = document.createElement("div");
-      panel.id = PANEL_ID;
-      panel.className = "swcm-panel";
-      panel.innerHTML = `
-        <strong>Collections</strong>
-        <button id="${MANAGE_BUTTON_ID}" type="button" class="swcm-btn swcm-btn-inline">Manage</button>
-        <select id="${FILTER_ID}"></select>
-        <span id="${COUNT_ID}">0/0 visible</span>
-      `;
-
-      const select = panel.querySelector(`#${FILTER_ID}`);
-      select?.addEventListener("change", async () => {
-        const value = select.value || "__all__";
-        await browser.runtime.sendMessage({
-          type: "set-active-collection",
-          activeCollection: value
-        });
-        const state = await browser.runtime.sendMessage({ type: "get-state" });
-        applyCollection(state, value);
-      });
-
-      const manageButton = panel.querySelector(`#${MANAGE_BUTTON_ID}`);
-      manageButton?.addEventListener("click", async () => {
-        setManageStatus("");
-        await populateManageDeleteSelect();
-        openManageModal();
-      });
-    }
-
-    ensurePanelPosition(panel);
-    ensureManageModal();
-    return panel;
-  }
-
-  function ensureManageModal() {
-    if (document.getElementById(MANAGE_MODAL_ID)) {
-      return;
-    }
-
-    const overlay = document.createElement("div");
-    overlay.id = MANAGE_MODAL_ID;
-    overlay.className = "swcm-overlay swcm-hidden";
-    overlay.innerHTML = `
-      <div class="swcm-modal" role="dialog" aria-modal="true" aria-label="Manage collections">
-        <h3>Manage Collections</h3>
-        <label>
-          New collection name
-          <input id="${MANAGE_NEW_INPUT_ID}" type="text" placeholder="e.g. High Priority" />
-        </label>
-        <div class="swcm-actions swcm-actions-left">
-          <button id="swcm-wishlist-create-collection" type="button" class="swcm-btn">Create</button>
-        </div>
-        <label>
-          Remove collection
-          <select id="${MANAGE_DELETE_SELECT_ID}"></select>
-        </label>
-        <div class="swcm-actions swcm-actions-left">
-          <button id="swcm-wishlist-delete-collection" type="button" class="swcm-btn swcm-btn-danger">Remove</button>
-        </div>
-        <div class="swcm-actions">
-          <button id="swcm-wishlist-close-collections" type="button" class="swcm-btn swcm-btn-secondary">Close</button>
-        </div>
-        <p id="${MANAGE_STATUS_ID}" class="swcm-status" aria-live="polite"></p>
-      </div>
-    `;
-
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) {
-        closeManageModal();
-      }
-    });
-
-    document.body.appendChild(overlay);
-
-    document
-      .getElementById("swcm-wishlist-close-collections")
-      ?.addEventListener("click", closeManageModal);
-    document
-      .getElementById("swcm-wishlist-create-collection")
-      ?.addEventListener("click", () => {
-        createCollectionFromManageModal().catch((error) => {
-          setManageStatus(error?.message || "Failed to create collection.", true);
-        });
-      });
-    document
-      .getElementById("swcm-wishlist-delete-collection")
-      ?.addEventListener("click", () => {
-        deleteCollectionFromManageModal().catch((error) => {
-          setManageStatus(error?.message || "Failed to remove collection.", true);
-        });
-      });
-  }
-
-  function openManageModal() {
-    const modal = document.getElementById(MANAGE_MODAL_ID);
-    modal?.classList.remove("swcm-hidden");
-  }
-
-  function closeManageModal() {
-    const modal = document.getElementById(MANAGE_MODAL_ID);
-    modal?.classList.add("swcm-hidden");
-  }
-
-  function setManageStatus(text, isError = false) {
-    const status = document.getElementById(MANAGE_STATUS_ID);
-    if (!status) {
-      return;
-    }
-    status.textContent = text;
-    status.classList.toggle("swcm-status-error", isError);
-  }
-
-  async function populateManageDeleteSelect() {
-    const select = document.getElementById(MANAGE_DELETE_SELECT_ID);
-    if (!select) {
-      return;
-    }
-
-    const state = await browser.runtime.sendMessage({ type: "get-state" });
-    select.innerHTML = "";
-
-    const placeholder = document.createElement("option");
-    placeholder.value = "";
-    placeholder.textContent = "-- choose collection --";
-    select.appendChild(placeholder);
-
-    for (const collectionName of state.collectionOrder || []) {
-      const option = document.createElement("option");
-      option.value = collectionName;
-      option.textContent = collectionName;
-      select.appendChild(option);
-    }
-  }
-
-  async function createCollectionFromManageModal() {
-    const input = document.getElementById(MANAGE_NEW_INPUT_ID);
-    const collectionName = String(input?.value || "").trim();
-    if (!collectionName) {
-      setManageStatus("Type a collection name.", true);
-      return;
-    }
-
-    await browser.runtime.sendMessage({
-      type: "create-collection",
-      collectionName
-    });
-
-    if (input) {
-      input.value = "";
-    }
-
-    setManageStatus(`Collection "${collectionName}" created.`);
-    await populateManageDeleteSelect();
-    await refreshPanel();
-  }
-
-  async function deleteCollectionFromManageModal() {
-    const select = document.getElementById(MANAGE_DELETE_SELECT_ID);
-    const collectionName = String(select?.value || "").trim();
-    if (!collectionName) {
-      setManageStatus("Select a collection to remove.", true);
-      return;
-    }
-
-    await browser.runtime.sendMessage({
-      type: "delete-collection",
-      collectionName
-    });
-
-    setManageStatus(`Collection "${collectionName}" removed.`);
-    await populateManageDeleteSelect();
-    await refreshPanel();
-  }
-
-  function ensureFallbackBox() {
-    let box = document.getElementById(FALLBACK_ID);
-    if (!box) {
-      box = document.createElement("div");
-      box.id = FALLBACK_ID;
-      box.className = "swcm-fallback swcm-hidden";
-      box.setAttribute("aria-live", "polite");
-    }
-
-    const panel = ensurePanel();
-    if (panel.parentElement && box.parentElement !== panel.parentElement) {
-      panel.insertAdjacentElement("afterend", box);
-    } else if (panel.nextElementSibling !== box) {
-      panel.insertAdjacentElement("afterend", box);
-    }
-
-    return box;
-  }
-
-  function renderFallbackList(state, collectionName, missingIds) {
-    const box = ensureFallbackBox();
-    if (!box) {
-      return;
-    }
-
-    if (!collectionName || collectionName === "__all__" || missingIds.length === 0) {
-      box.classList.add("swcm-hidden");
-      box.innerHTML = "";
-      return;
-    }
-
-    const items = missingIds.slice(0, 25).map((appId) => {
-      const title = state.items?.[appId]?.title || `App ${appId}`;
-      return `<li><a href="https://store.steampowered.com/app/${appId}/" target="_blank" rel="noopener noreferrer">${title}</a></li>`;
-    });
-    const extraCount = Math.max(0, missingIds.length - 25);
-    const extraText = extraCount > 0 ? `<p>+${extraCount} more items in this collection.</p>` : "";
-
-    box.innerHTML = `
-      <strong>Collection items not loaded in current Steam list:</strong>
-      <ul>${items.join("")}</ul>
-      ${extraText}
-    `;
-    box.classList.remove("swcm-hidden");
-  }
-
-  function updateCount(visible, total, missingFromPage = 0) {
-    const el = document.getElementById(COUNT_ID);
-    if (el) {
-      if (missingFromPage > 0) {
-        el.textContent = `${visible}/${total} visible (${missingFromPage} not loaded yet, scroll down)`;
-      } else {
-        el.textContent = `${visible}/${total} visible`;
-      }
-    }
-  }
-
-  function applyCollection(state, collectionName) {
-    const rows = getRows();
-    const total = rows.length;
-    if (total === 0) {
-      // Steam re-renders asynchronously; keep previous DOM state if list is momentarily unavailable.
-      return;
-    }
-
-    if (!collectionName || collectionName === "__all__") {
-      for (const row of rows) {
-        row.style.display = "";
-      }
-      renderFallbackList(state, "__all__", []);
-      updateCount(total, total);
-      return;
-    }
-
-    const orderedIds = state.collections?.[collectionName] || [];
-    const allowed = new Set(orderedIds);
-    const rowByAppId = new Map();
-    let visibleCount = 0;
-
-    for (const row of rows) {
-      const appId = extractAppId(row);
-      if (appId) {
-        rowByAppId.set(appId, row);
+    function extractAppId(row) {
+      const directData =
+        row.getAttribute("data-app-id") ||
+        row.getAttribute("data-ds-appid") ||
+        row.getAttribute("data-appid");
+      if (directData) {
+        return String(directData);
       }
 
-      const isVisible = allowed.has(appId);
-      row.style.display = isVisible ? "" : "none";
-      if (isVisible) {
-        visibleCount += 1;
-      }
-    }
-
-    const container = getListContainer();
-    if (container) {
-      for (const appId of orderedIds) {
-        const row = rowByAppId.get(appId);
-        if (row && row.parentElement === container) {
-          container.appendChild(row);
+      const nestedDataEl = row.querySelector("[data-app-id], [data-ds-appid], [data-appid]");
+      if (nestedDataEl) {
+        const nestedData =
+          nestedDataEl.getAttribute("data-app-id") ||
+          nestedDataEl.getAttribute("data-ds-appid") ||
+          nestedDataEl.getAttribute("data-appid");
+        if (nestedData) {
+          return String(nestedData);
         }
       }
+
+      const strictIdMatch = (row.id || "").match(/(?:game|app|wishlist(?:_row)?)[_-]?(\d{3,10})/i);
+      if (strictIdMatch) {
+        return strictIdMatch[1];
+      }
+
+      const appLink = row.querySelector("a[href*='/app/'], a[href*='/agecheck/app/']");
+      const href = appLink?.getAttribute("href") || "";
+      const hrefMatch = href.match(/\/(?:agecheck\/)?app\/(\d+)/);
+      return hrefMatch ? hrefMatch[1] : "";
     }
 
-    const missingIds = [];
-    for (const appId of orderedIds) {
-      if (!rowByAppId.has(appId)) {
-        missingIds.push(appId);
+    function extractTitle(row) {
+      const candidates = [
+        row.querySelector(".title"),
+        row.querySelector("a[href*='/app/']"),
+        row.querySelector("h3"),
+        row.querySelector(".wishlist_row_title")
+      ];
+
+      for (const el of candidates) {
+        const text = String(el?.textContent || "").trim();
+        if (text) {
+          return text;
+        }
+      }
+
+      return document.title;
+    }
+
+    function findPanelAnchor() {
+      const root = document.querySelector("#wishlist_ctn") || document.body;
+      const search = root.querySelector("input[placeholder*='Search by name or tag']");
+      if (search) {
+        const row = search.closest("div");
+        if (row?.parentElement) {
+          return row;
+        }
+      }
+
+      const heading = Array.from(root.querySelectorAll("h1, h2")).find((el) =>
+        /\bwishlist\b/i.test(el.textContent || "")
+      );
+      if (heading?.parentElement) {
+        return heading.closest("div") || heading;
+      }
+
+      return null;
+    }
+
+    function setStatus(text, isError = false) {
+      const status = document.getElementById(STATUS_ID);
+      if (!status) {
+        return;
+      }
+      status.textContent = text;
+      status.classList.toggle("swcm-status-error", isError);
+    }
+
+    async function populateCollectionSelect() {
+      const select = document.getElementById("swcm-wishlist-collection-select");
+      if (!select) {
+        return;
+      }
+
+      const state = await browser.runtime.sendMessage({ type: "get-state" });
+      select.innerHTML = "";
+
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "-- choose collection --";
+      select.appendChild(empty);
+
+      for (const name of state.collectionOrder || []) {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        select.appendChild(option);
+      }
+
+      const active = String(state.activeCollection || "").trim();
+      if (active && active !== "__all__" && Array.from(select.options).some((o) => o.value === active)) {
+        select.value = active;
       }
     }
 
-    renderFallbackList(state, collectionName, visibleCount === 0 ? missingIds : []);
-    updateCount(visibleCount, total, missingIds.length);
-  }
+    function getSelectedCollectionName() {
+      const newInput = document.getElementById("swcm-wishlist-new-collection");
+      const select = document.getElementById("swcm-wishlist-collection-select");
 
-  async function refreshPanel() {
-    ensurePanel();
+      const newName = String(newInput?.value || "").trim();
+      if (newName) {
+        return newName;
+      }
 
-    const state = await browser.runtime.sendMessage({ type: "get-state" });
-    const select = document.getElementById(FILTER_ID);
-    if (!select) {
-      return;
+      const selected = String(select?.value || "").trim();
+      return selected;
     }
 
-    const previousSelected = select.value || "__all__";
-    select.innerHTML = "";
-
-    const allOption = document.createElement("option");
-    allOption.value = "__all__";
-    allOption.textContent = "All wishlist";
-    select.appendChild(allOption);
-
-    for (const collectionName of state.collectionOrder || []) {
-      const option = document.createElement("option");
-      option.value = collectionName;
-      const size = (state.collections[collectionName] || []).length;
-      option.textContent = `${collectionName} (${size})`;
-      select.appendChild(option);
+    function getSelectedPosition() {
+      const select = document.getElementById("swcm-wishlist-position-select");
+      return select?.value === "start" ? "start" : "end";
     }
 
-    const current = state.activeCollection || "__all__";
-    const hasPrevious = Array.from(select.options).some((o) => o.value === previousSelected);
-    const hasCurrent = Array.from(select.options).some((o) => o.value === current);
-    select.value = hasPrevious ? previousSelected : (hasCurrent ? current : "__all__");
+    function ensurePanel() {
+      let panel = document.getElementById(PANEL_ID);
+      if (!panel) {
+        panel = document.createElement("div");
+        panel.id = PANEL_ID;
+        panel.className = "swcm-panel";
+        panel.innerHTML = `
+          <strong>Collections</strong>
+          <select id="swcm-wishlist-collection-select"></select>
+          <input id="swcm-wishlist-new-collection" type="text" placeholder="new collection" />
+          <select id="swcm-wishlist-position-select">
+            <option value="end">End</option>
+            <option value="start">Start</option>
+          </select>
+          <span id="${STATUS_ID}" class="swcm-status"></span>
+        `;
+      }
 
-    applyCollection(state, select.value);
-  }
+      const anchor = findPanelAnchor();
+      if (anchor?.parentElement) {
+        if (panel.parentElement !== anchor.parentElement || panel.previousElementSibling !== anchor) {
+          anchor.insertAdjacentElement("afterend", panel);
+        }
+      }
 
-  async function bootstrap() {
-    // Immediate attempt.
-    await refreshPanel().catch(() => {});
+      return panel;
+    }
 
-    // Retry while Steam builds the page asynchronously.
-    let attempts = 0;
-    const timer = window.setInterval(async () => {
-      attempts += 1;
+    function ensureRowButton(row) {
+      const visualRow = row.querySelector(".wishlist_row") || row;
+      const appId = extractAppId(visualRow) || extractAppId(row);
+      if (!appId) {
+        return;
+      }
+
+      if (visualRow.querySelector(".swcm-wishlist-add-btn")) {
+        return;
+      }
+
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "swcm-btn swcm-btn-inline swcm-wishlist-add-btn";
+      button.textContent = "Add to Collection";
+
+      button.addEventListener("click", async () => {
+        const collectionName = getSelectedCollectionName();
+        if (!collectionName) {
+          setStatus("Choose or type a collection.", true);
+          return;
+        }
+
+        try {
+          await browser.runtime.sendMessage({
+            type: "add-or-move-item",
+            appId,
+            collectionName,
+            position: getSelectedPosition(),
+            item: {
+              title: extractTitle(visualRow)
+            }
+          });
+
+          setStatus(`Saved ${extractTitle(visualRow)} to \"${collectionName}\".`);
+          await populateCollectionSelect();
+        } catch (error) {
+          setStatus(error?.message || "Failed to add item.", true);
+        }
+      });
+
+      const removeBtn = visualRow.querySelector(".remove");
+      const actionTarget =
+        removeBtn?.parentElement ||
+        visualRow.querySelector(".addedon")?.parentElement ||
+        visualRow.querySelector(".price, .pricecol, .wishlist_row_price") ||
+        visualRow.querySelector(".wishlist_row_action") ||
+        visualRow.querySelector(".wishlist_row_title")?.parentElement;
+
+      if (removeBtn) {
+        removeBtn.insertAdjacentElement("afterend", button);
+      } else if (actionTarget) {
+        actionTarget.appendChild(button);
+      } else {
+        visualRow.appendChild(button);
+      }
+    }
+
+    async function refresh() {
+      ensurePanel();
+      await populateCollectionSelect();
 
       const rows = getRows();
-      if (rows.length !== lastRowCount) {
-        lastRowCount = rows.length;
-        await refreshPanel().catch(() => {});
-      } else {
-        ensurePanel();
+      for (const row of rows) {
+        ensureRowButton(row);
       }
+    }
 
-      if (attempts >= 120 && document.getElementById(PANEL_ID)) {
-        window.clearInterval(timer);
-      }
-    }, 500);
+    async function bootstrap() {
+      await refresh().catch(() => {});
 
-    // Keep resilient to dynamic re-renders.
-    const observer = new MutationObserver(() => {
-      const panel = document.getElementById(PANEL_ID);
-      if (!panel) {
-        refreshPanel().catch(() => {});
-      }
-    });
+      const observer = new MutationObserver(() => {
+        refresh().catch(() => {});
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
 
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    bootstrap().catch(() => {});
   }
-
-  bootstrap().catch(() => {});
 }

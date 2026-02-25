@@ -80,6 +80,10 @@ button.danger,
   color: var(--muted);
 }
 
+#source-select {
+  min-width: 150px;
+}
+
 main {
   padding: 12px;
 }
