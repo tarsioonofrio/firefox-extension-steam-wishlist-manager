@@ -1,8 +1,10 @@
 const PAGE_SIZE = 30;
-const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV3";
+const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const WISHLIST_ADDED_CACHE_TTL_MS = 30 * 60 * 1000;
+const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
+const TAG_SHOW_STEP = 12;
 
 let state = null;
 let activeCollection = "__all__";
@@ -10,8 +12,18 @@ let sourceMode = "collections";
 let page = 1;
 let searchQuery = "";
 let sortMode = "position";
+
 let metaCache = {};
 let wishlistAddedMap = {};
+
+let selectedTags = new Set();
+let tagSearchQuery = "";
+let tagShowLimit = TAG_SHOW_STEP;
+let tagCounts = [];
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 function formatCompactCount(value) {
   const n = Number(value || 0);
@@ -48,6 +60,38 @@ function formatUnixDate(timestamp) {
   return new Date(n * 1000).toLocaleDateString("pt-BR");
 }
 
+function getCurrentSourceAppIds() {
+  if (sourceMode === "wishlist") {
+    return Object.keys(wishlistAddedMap).sort((a, b) => Number(wishlistAddedMap[b] || 0) - Number(wishlistAddedMap[a] || 0));
+  }
+
+  if (!state) {
+    return [];
+  }
+
+  if (activeCollection === "__all__") {
+    const all = [];
+    for (const name of state.collectionOrder || []) {
+      const ids = state.collections?.[name] || [];
+      for (const id of ids) {
+        all.push(id);
+      }
+    }
+    return Array.from(new Set(all));
+  }
+
+  return [...(state.collections?.[activeCollection] || [])];
+}
+
+function buildTagCacheBucketKey() {
+  return "wishlist-all";
+}
+
+function getMetaTags(appId) {
+  const tags = metaCache[appId]?.tags;
+  return Array.isArray(tags) ? tags : [];
+}
+
 async function loadWishlistAddedMap() {
   const now = Date.now();
   const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
@@ -77,26 +121,29 @@ async function loadWishlistAddedMap() {
       cache: "no-store"
     });
     const userdata = await userdataResponse.json();
+
     const rgWishlistArray = Array.isArray(userdata?.rgWishlist)
       ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
       : [];
-    let steamId =
-      String(
-        userdata?.steamid
-        || userdata?.strSteamId
-        || userdata?.str_steamid
-        || userdata?.webapi_token_steamid
-        || ""
-      ).trim();
+
+    let steamId = String(
+      userdata?.steamid
+      || userdata?.strSteamId
+      || userdata?.str_steamid
+      || userdata?.webapi_token_steamid
+      || ""
+    ).trim();
+
     if (!steamId) {
       steamId = await resolveSteamIdFromStoreHtml();
     }
+
     if (!steamId) {
-      const map = {};
+      const fallback = {};
       for (const appId of rgWishlistArray) {
-        map[appId] = 0;
+        fallback[appId] = 0;
       }
-      wishlistAddedMap = map;
+      wishlistAddedMap = fallback;
       return;
     }
 
@@ -117,9 +164,7 @@ async function loadWishlistAddedMap() {
 
       for (const [appId, value] of entries) {
         const added = Number(value?.added || 0);
-        if (added > 0) {
-          map[String(appId)] = added;
-        }
+        map[String(appId)] = added > 0 ? added : 0;
       }
     }
 
@@ -129,6 +174,7 @@ async function loadWishlistAddedMap() {
         wishlistAddedMap[appId] = 0;
       }
     }
+
     await browser.storage.local.set({
       [WISHLIST_ADDED_CACHE_KEY]: {
         cachedAt: now,
@@ -168,9 +214,7 @@ async function fetchAppMeta(appId) {
   try {
     const [detailsResult, reviewsResult] = await Promise.allSettled([
       fetch(`https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=pt-BR`),
-      fetch(
-        `https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`
-      )
+      fetch(`https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`)
     ]);
 
     let detailsPayload = null;
@@ -192,19 +236,19 @@ async function fetchAppMeta(appId) {
     const categories = Array.isArray(appData?.categories)
       ? appData.categories.map((c) => String(c.description || "").trim()).filter(Boolean)
       : [];
-    const tags = Array.from(new Set([...genres, ...categories])).slice(0, 8);
+    const tags = Array.from(new Set([...genres, ...categories])).slice(0, 12);
 
-    const releaseText = appData?.release_date?.date
-      || (appData?.release_date?.coming_soon ? "Coming soon" : "-");
+    const releaseText = appData?.release_date?.date || (appData?.release_date?.coming_soon ? "Coming soon" : "-");
+
     const totalPositive = Number(reviewSummary?.total_positive || 0);
     const totalNegative = Number(reviewSummary?.total_negative || 0);
     const totalVotes = totalPositive + totalNegative;
-    const positivePct = totalVotes > 0
-      ? Math.round((totalPositive / totalVotes) * 100)
-      : 0;
+    const positivePct = totalVotes > 0 ? Math.round((totalPositive / totalVotes) * 100) : 0;
+
     const reviewText = totalVotes > 0
       ? `${positivePct}% positive (${formatCompactCount(totalPositive)}+ / ${formatCompactCount(totalNegative)}-)`
       : "No user reviews";
+
     let priceText = "-";
     if (appData?.is_free === true) {
       priceText = "Free";
@@ -242,47 +286,160 @@ async function fetchAppMeta(appId) {
   }
 }
 
-function getSelectedAppIds() {
-  if (sourceMode === "wishlist") {
-    return Object.keys(wishlistAddedMap).sort((a, b) => {
-      const ta = Number(wishlistAddedMap[a] || 0);
-      const tb = Number(wishlistAddedMap[b] || 0);
-      return tb - ta;
-    });
-  }
+async function ensureMetaForAppIds(appIds, limit = 400) {
+  const now = Date.now();
+  const missing = [];
 
-  if (!state) {
-    return [];
-  }
-
-  if (activeCollection === "__all__") {
-    const all = [];
-    for (const name of state.collectionOrder || []) {
-      const ids = state.collections?.[name] || [];
-      for (const id of ids) {
-        all.push(id);
-      }
+  for (const appId of appIds) {
+    const cached = metaCache[appId];
+    const fresh = cached && now - Number(cached.cachedAt || 0) < META_CACHE_TTL_MS;
+    if (!fresh) {
+      missing.push(appId);
     }
-    return Array.from(new Set(all));
+    if (missing.length >= limit) {
+      break;
+    }
   }
 
-  return [...(state.collections?.[activeCollection] || [])];
+  const concurrency = 8;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < missing.length) {
+      const idx = cursor;
+      cursor += 1;
+      await fetchAppMeta(missing[idx]);
+    }
+  }
+
+  const workers = [];
+  for (let i = 0; i < concurrency; i += 1) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
+}
+
+function buildTagCountsFromAppIds(appIds) {
+  const counts = new Map();
+
+  for (const appId of appIds) {
+    const tags = getMetaTags(appId);
+    for (const tag of tags) {
+      const key = String(tag || "").trim();
+      if (!key) {
+        continue;
+      }
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+}
+
+async function ensureTagCounts() {
+  const appIds = Object.keys(wishlistAddedMap);
+  const bucket = buildTagCacheBucketKey();
+  const day = todayKey();
+
+  const storage = await browser.storage.local.get(TAG_COUNTS_CACHE_KEY);
+  const cache = storage[TAG_COUNTS_CACHE_KEY] || {};
+  const cachedBucket = cache[bucket];
+
+  if (cachedBucket && cachedBucket.day === day && cachedBucket.appCount === appIds.length) {
+    tagCounts = Array.isArray(cachedBucket.counts) ? cachedBucket.counts : [];
+    return;
+  }
+
+  setStatus("Recalculating tag frequencies for full wishlist...");
+  await ensureMetaForAppIds(appIds, 2000);
+
+  tagCounts = buildTagCountsFromAppIds(appIds);
+
+  cache[bucket] = {
+    day,
+    appCount: appIds.length,
+    counts: tagCounts
+  };
+
+  await browser.storage.local.set({ [TAG_COUNTS_CACHE_KEY]: cache });
+  setStatus("");
+}
+
+function renderTagOptions() {
+  const optionsEl = document.getElementById("tag-options");
+  const showMoreBtn = document.getElementById("tag-show-more-btn");
+  if (!optionsEl || !showMoreBtn) {
+    return;
+  }
+
+  const query = tagSearchQuery.toLowerCase();
+  const filtered = tagCounts.filter((t) => !query || t.name.toLowerCase().includes(query));
+  const visible = filtered.slice(0, tagShowLimit);
+
+  optionsEl.innerHTML = "";
+
+  for (const tag of visible) {
+    const row = document.createElement("label");
+    row.className = "tag-option";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedTags.has(tag.name);
+    checkbox.addEventListener("change", async () => {
+      if (checkbox.checked) {
+        selectedTags.add(tag.name);
+      } else {
+        selectedTags.delete(tag.name);
+      }
+      page = 1;
+      await renderCards();
+    });
+
+    const name = document.createElement("span");
+    name.className = "tag-name";
+    name.textContent = tag.name;
+
+    const count = document.createElement("span");
+    count.className = "tag-count";
+    count.textContent = formatCompactCount(tag.count);
+
+    row.appendChild(checkbox);
+    row.appendChild(name);
+    row.appendChild(count);
+    optionsEl.appendChild(row);
+  }
+
+  showMoreBtn.style.display = filtered.length > tagShowLimit ? "" : "none";
+}
+
+function passesTagFilter(appId) {
+  if (selectedTags.size === 0) {
+    return true;
+  }
+
+  const tags = getMetaTags(appId);
+  if (tags.length === 0) {
+    return false;
+  }
+
+  return tags.some((t) => selectedTags.has(t));
 }
 
 function getFilteredAndSorted(ids) {
   const normalizedQuery = searchQuery.toLowerCase();
+
   const list = ids.filter((appId) => {
-    if (!normalizedQuery) {
-      return true;
-    }
-    const title = String(state.items?.[appId]?.title || "").toLowerCase();
-    return title.includes(normalizedQuery) || appId.includes(normalizedQuery);
+    const title = String(state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || "").toLowerCase();
+    const textOk = !normalizedQuery || title.includes(normalizedQuery) || appId.includes(normalizedQuery);
+    return textOk && passesTagFilter(appId);
   });
 
   if (sortMode === "title") {
     list.sort((a, b) => {
-      const ta = String(state.items?.[a]?.title || a);
-      const tb = String(state.items?.[b]?.title || b);
+      const ta = String(state?.items?.[a]?.title || metaCache?.[a]?.titleText || a);
+      const tb = String(state?.items?.[b]?.title || metaCache?.[b]?.titleText || b);
       return ta.localeCompare(tb, "pt-BR", { sensitivity: "base" });
     });
   }
@@ -346,11 +503,11 @@ async function renderCards() {
   const cardsEl = document.getElementById("cards");
   const emptyEl = document.getElementById("empty");
   const template = document.getElementById("card-template");
-  if (!cardsEl || !emptyEl || !template || !state) {
+  if (!cardsEl || !emptyEl || !template) {
     return;
   }
 
-  const appIds = getFilteredAndSorted(getSelectedAppIds());
+  const appIds = getFilteredAndSorted(getCurrentSourceAppIds());
   renderPager(appIds.length);
 
   const start = (page - 1) * PAGE_SIZE;
@@ -362,7 +519,7 @@ async function renderCards() {
   for (const appId of pageIds) {
     const fragment = template.content.cloneNode(true);
 
-    const title = state.items?.[appId]?.title || `App ${appId}`;
+    const title = state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || `App ${appId}`;
     const link = getAppLink(appId);
 
     const coverLink = fragment.querySelector(".cover-link");
@@ -395,9 +552,14 @@ async function renderCards() {
     if (wishlistAddedEl) {
       wishlistAddedEl.textContent = `Wishlist: ${formatUnixDate(wishlistAddedMap[appId])}`;
     }
+
     if (removeBtn) {
       removeBtn.style.display = sourceMode === "wishlist" ? "none" : "";
       removeBtn.addEventListener("click", async () => {
+        if (sourceMode === "wishlist") {
+          return;
+        }
+
         const collectionName = activeCollection;
         if (!collectionName || collectionName === "__all__") {
           setStatus("Select a specific collection to remove items.", true);
@@ -411,6 +573,8 @@ async function renderCards() {
         });
 
         await refreshState();
+        await ensureTagCounts();
+        renderTagOptions();
         await render();
       });
     }
@@ -418,7 +582,7 @@ async function renderCards() {
     cardsEl.appendChild(fragment);
 
     fetchAppMeta(appId).then((meta) => {
-      if (titleEl && !state.items?.[appId]?.title && meta.titleText) {
+      if (titleEl && !state?.items?.[appId]?.title && meta.titleText) {
         titleEl.textContent = meta.titleText;
       }
       if (pricingEl) {
@@ -471,7 +635,9 @@ async function createCollection() {
   await refreshState();
   activeCollection = name;
   page = 1;
-  setStatus(`Collection "${name}" created.`);
+  await ensureTagCounts();
+  renderTagOptions();
+  setStatus(`Collection \"${name}\" created.`);
   await render();
 }
 
@@ -489,6 +655,8 @@ async function deleteActiveCollection() {
   await refreshState();
   activeCollection = "__all__";
   page = 1;
+  await ensureTagCounts();
+  renderTagOptions();
   setStatus("Collection deleted.");
   await render();
 }
@@ -517,6 +685,11 @@ function attachEvents() {
   document.getElementById("source-select")?.addEventListener("change", async (event) => {
     sourceMode = event.target.value === "wishlist" ? "wishlist" : "collections";
     page = 1;
+    selectedTags.clear();
+    tagSearchQuery = "";
+    tagShowLimit = TAG_SHOW_STEP;
+    await ensureTagCounts();
+    renderTagOptions();
     await render();
   });
 
@@ -529,6 +702,11 @@ function attachEvents() {
       activeCollection
     });
 
+    selectedTags.clear();
+    tagSearchQuery = "";
+    tagShowLimit = TAG_SHOW_STEP;
+    await ensureTagCounts();
+    renderTagOptions();
     await render();
   });
 
@@ -561,14 +739,29 @@ function attachEvents() {
     page += 1;
     await renderCards();
   });
+
+  document.getElementById("tag-search-input")?.addEventListener("input", (event) => {
+    tagSearchQuery = String(event.target.value || "").trim();
+    tagShowLimit = TAG_SHOW_STEP;
+    renderTagOptions();
+  });
+
+  document.getElementById("tag-show-more-btn")?.addEventListener("click", () => {
+    tagShowLimit += TAG_SHOW_STEP;
+    renderTagOptions();
+  });
 }
 
 async function bootstrap() {
   await loadMetaCache();
   await loadWishlistAddedMap();
   await refreshState();
+
   activeCollection = state.activeCollection || "__all__";
+
   attachEvents();
+  await ensureTagCounts();
+  renderTagOptions();
   await render();
 }
 

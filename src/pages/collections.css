@@ -100,6 +100,64 @@ button.danger,
   min-width: 150px;
 }
 
+.filter-group {
+  border-top: 1px solid #2f445a;
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.filter-group summary {
+  cursor: pointer;
+  user-select: none;
+  font-size: 28px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.filter-content {
+  display: grid;
+  gap: 8px;
+}
+
+.tag-options {
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.tag-option {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.tag-option input {
+  margin: 0;
+}
+
+.tag-name {
+  color: #d6e7f7;
+  font-size: 13px;
+}
+
+.tag-count {
+  font-size: 12px;
+  color: #9ab8d3;
+  border: 1px solid #35506a;
+  border-radius: 999px;
+  background: #22384f;
+  padding: 0 8px;
+  line-height: 20px;
+}
+
+.small-btn {
+  height: 28px;
+  font-size: 13px;
+}
+
 main {
   padding: 0;
 }
