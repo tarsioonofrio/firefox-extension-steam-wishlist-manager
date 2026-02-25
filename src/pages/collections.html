@@ -14,10 +14,20 @@
       </header>
       <div class="top-controls">
         <div class="collection-tools">
+          <button id="collection-menu-btn" type="button">Menu</button>
           <select id="collection-select"></select>
-          <button id="collection-menu-btn" type="button">Collection Menu</button>
         </div>
         <input id="search-input" type="search" placeholder="Search by title or appid">
+        <select id="sort-select">
+          <option value="position">Your order</option>
+          <option value="title">Title</option>
+          <option value="price">Price</option>
+          <option value="discount">Discount</option>
+          <option value="date-added">Date Added</option>
+          <option value="top-selling">Top Selling</option>
+          <option value="release-date">Release Date</option>
+          <option value="review-score">Review Score</option>
+        </select>
         <button id="refresh-page-btn" type="button" class="header-btn">Refresh Page Data</button>
       </div>
       <div id="collection-menu-panel" class="collection-menu-panel hidden">
@@ -52,19 +62,6 @@
       <div class="sidebar-inner">
         <h2>Tools</h2>
         <div class="controls">
-          <label>
-            Sort
-            <select id="sort-select">
-              <option value="position">Your order</option>
-              <option value="title">Title</option>
-              <option value="price">Price</option>
-              <option value="discount">Discount</option>
-              <option value="date-added">Date Added</option>
-              <option value="top-selling">Top Selling</option>
-              <option value="release-date">Release Date</option>
-              <option value="review-score">Review Score</option>
-            </select>
-          </label>
         </div>
         <details class="filter-group" open>
           <summary>Tags</summary>
