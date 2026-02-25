@@ -5,6 +5,7 @@ const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
+const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
 const TAG_SHOW_STEP = 12;
 const SAFE_FETCH_CONCURRENCY = 4;
 const SAFE_FETCH_BASE_DELAY_MS = 350;
@@ -34,6 +35,28 @@ let tagShowLimit = TAG_SHOW_STEP;
 let tagCounts = [];
 let selectedTypes = new Set();
 let typeCounts = [];
+let selectedPlayers = new Set();
+let playerCounts = [];
+let selectedFeatures = new Set();
+let featureCounts = [];
+let selectedHardware = new Set();
+let hardwareCounts = [];
+let selectedAccessibility = new Set();
+let accessibilityCounts = [];
+let selectedPlatforms = new Set();
+let platformCounts = [];
+let selectedLanguages = new Set();
+let languageCounts = [];
+let selectedFullAudioLanguages = new Set();
+let fullAudioLanguageCounts = [];
+let selectedSubtitleLanguages = new Set();
+let subtitleLanguageCounts = [];
+let selectedTechnologies = new Set();
+let technologyCounts = [];
+let selectedDevelopers = new Set();
+let developerCounts = [];
+let selectedPublishers = new Set();
+let publisherCounts = [];
 let ratingMin = 0;
 let ratingMax = 100;
 let reviewsMin = 0;
@@ -42,6 +65,8 @@ let discountMin = 0;
 let discountMax = 100;
 let priceMin = 0;
 let priceMax = 9999999;
+let releaseYearMin = 1970;
+let releaseYearMax = 2100;
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -308,6 +333,53 @@ function getMetaType(appId) {
 function getMetaNumber(appId, key, fallback = 0) {
   const n = Number(metaCache?.[appId]?.[key]);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function getMetaArray(appId, key) {
+  const value = metaCache?.[appId]?.[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function parseSupportedLanguages(rawHtml) {
+  const text = String(rawHtml || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/?strong>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\(text only\)/gi, "")
+    .replace(/\(interface\)/gi, "")
+    .replace(/\(subtitles\)/gi, "")
+    .replace(/\(full audio\)/gi, "");
+
+  const langs = [];
+  for (const line of text.split("\n")) {
+    const normalized = String(line || "").replace(/\*/g, "").replace(/\s+/g, " ").trim();
+    if (normalized) {
+      langs.push(normalized);
+    }
+  }
+  return Array.from(new Set(langs));
+}
+
+function parseFullAudioLanguages(rawHtml) {
+  const html = String(rawHtml || "").replace(/<br\s*\/?>/gi, "\n");
+  const out = [];
+  for (const line of html.split("\n")) {
+    if (!line.includes("*")) {
+      continue;
+    }
+    const normalized = line
+      .replace(/<\/?strong>/gi, "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/\*/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (normalized) {
+      out.push(normalized);
+    }
+  }
+  return Array.from(new Set(out));
 }
 
 function parseLooseInteger(value, fallback = 0) {
@@ -636,6 +708,18 @@ function mergeMetaFromWishlistEntry(appId, entry) {
     reviewPositivePct: Number.isFinite(reviewPct) ? Math.round(reviewPct) : existing.reviewPositivePct,
     reviewTotalVotes: reviewTotal > 0 ? reviewTotal : Number(existing.reviewTotalVotes || 0),
     recommendationsTotal: reviewTotal > 0 ? reviewTotal : Number(existing.recommendationsTotal || 0),
+    tags: Array.isArray(existing.tags) ? existing.tags : [],
+    players: Array.isArray(existing.players) ? existing.players : [],
+    features: Array.isArray(existing.features) ? existing.features : [],
+    hardware: Array.isArray(existing.hardware) ? existing.hardware : [],
+    accessibility: Array.isArray(existing.accessibility) ? existing.accessibility : [],
+    platforms: Array.isArray(existing.platforms) ? existing.platforms : [],
+    languages: Array.isArray(existing.languages) ? existing.languages : [],
+    fullAudioLanguages: Array.isArray(existing.fullAudioLanguages) ? existing.fullAudioLanguages : [],
+    subtitleLanguages: Array.isArray(existing.subtitleLanguages) ? existing.subtitleLanguages : [],
+    technologies: Array.isArray(existing.technologies) ? existing.technologies : [],
+    developers: Array.isArray(existing.developers) ? existing.developers : [],
+    publishers: Array.isArray(existing.publishers) ? existing.publishers : [],
     reviewText,
     releaseUnix: Number.isFinite(releaseUnix) ? releaseUnix : Number(existing.releaseUnix || 0),
     releaseText: releaseString || existing.releaseText || "-"
@@ -735,12 +819,13 @@ async function refreshWholeDatabase() {
 
   setStatus(`Refreshing metadata for ${allIds.length} items...`);
   await ensureMetaForAppIds(allIds, allIds.length, true);
-  await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY]);
+  await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY, EXTRA_FILTER_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
 
-  await Promise.allSettled([ensureTagCounts(), ensureTypeCounts()]);
+  await Promise.allSettled([ensureTagCounts(), ensureTypeCounts(), ensureExtraFilterCounts()]);
   renderTagOptions();
   renderTypeOptions();
+  renderExtraFilterOptions();
   await render();
   setStatus("Database refreshed.");
 }
@@ -754,11 +839,12 @@ async function refreshCurrentPageItems() {
 
   setStatus(`Refreshing ${ids.length} visible items...`);
   await ensureMetaForAppIds(ids, ids.length, true);
-  await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY]);
+  await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY, EXTRA_FILTER_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
-  await Promise.allSettled([ensureTagCounts(), ensureTypeCounts()]);
+  await Promise.allSettled([ensureTagCounts(), ensureTypeCounts(), ensureExtraFilterCounts()]);
   renderTagOptions();
   renderTypeOptions();
+  renderExtraFilterOptions();
   await render();
   setStatus("Visible items refreshed.");
 }
@@ -851,6 +937,73 @@ async function fetchAppMeta(appId, options = {}) {
       ? appData.categories.map((c) => String(c.description || "").trim()).filter(Boolean)
       : [];
     const tags = Array.from(new Set([...genres, ...categories])).slice(0, 12);
+    const categorySet = new Set(categories.map((c) => c.toLowerCase()));
+
+    const players = categories.filter((label) => {
+      const key = label.toLowerCase();
+      return key.includes("single-player")
+        || key.includes("multi-player")
+        || key.includes("co-op")
+        || key.includes("pvp")
+        || key.includes("mmo")
+        || key.includes("shared/split screen");
+    });
+
+    const hardware = categories.filter((label) => {
+      const key = label.toLowerCase();
+      return key.includes("controller")
+        || key.includes("vr")
+        || key.includes("tracked")
+        || key.includes("keyboard");
+    });
+
+    const technologies = categories.filter((label) => {
+      const key = label.toLowerCase();
+      return key.includes("steam cloud")
+        || key.includes("steam workshop")
+        || key.includes("valve anti-cheat")
+        || key.includes("remote play")
+        || key.includes("hdr")
+        || key.includes("steam timeline")
+        || key.includes("steam leaderboard");
+    });
+
+    const features = categories.filter((label) => !players.includes(label) && !hardware.includes(label) && !technologies.includes(label));
+
+    const platforms = [];
+    if (appData?.platforms?.windows) {
+      platforms.push("Windows");
+    }
+    if (appData?.platforms?.mac) {
+      platforms.push("macOS");
+    }
+    if (appData?.platforms?.linux) {
+      platforms.push("Linux");
+    }
+
+    const languagesRaw = String(appData?.supported_languages || "");
+    const languages = parseSupportedLanguages(languagesRaw);
+    const fullAudioLanguages = parseFullAudioLanguages(languagesRaw);
+    // Steam appdetails usually doesn't split subtitle-only languages; use available list.
+    const subtitleLanguages = [...languages];
+
+    const developers = Array.isArray(appData?.developers)
+      ? appData.developers.map((d) => String(d || "").trim()).filter(Boolean)
+      : [];
+    const publishers = Array.isArray(appData?.publishers)
+      ? appData.publishers.map((p) => String(p || "").trim()).filter(Boolean)
+      : [];
+
+    const accessibility = [];
+    if (categorySet.has("captions available")) {
+      accessibility.push("Captions available");
+    }
+    if (subtitleLanguages.length > 0) {
+      accessibility.push("Subtitles");
+    }
+    if (fullAudioLanguages.length > 0) {
+      accessibility.push("Full audio");
+    }
 
     const releaseText = appData?.release_date?.date || (appData?.release_date?.coming_soon ? "Coming soon" : "-");
 
@@ -886,6 +1039,17 @@ async function fetchAppMeta(appId, options = {}) {
       appTypeRaw: rawType,
       appType: normalizeAppTypeLabel(rawType),
       tags,
+      players,
+      features,
+      hardware,
+      accessibility,
+      platforms,
+      languages,
+      fullAudioLanguages,
+      subtitleLanguages,
+      technologies,
+      developers,
+      publishers,
       reviewPositivePct: positivePct,
       reviewTotalVotes: totalVotes,
       recommendationsTotal: Number(appData?.recommendations?.total || 0),
@@ -908,6 +1072,17 @@ async function fetchAppMeta(appId, options = {}) {
       appTypeRaw: "",
       appType: "Unknown",
       tags: [],
+      players: [],
+      features: [],
+      hardware: [],
+      accessibility: [],
+      platforms: [],
+      languages: [],
+      fullAudioLanguages: [],
+      subtitleLanguages: [],
+      technologies: [],
+      developers: [],
+      publishers: [],
       reviewPositivePct: null,
       reviewTotalVotes: 0,
       recommendationsTotal: 0,
@@ -987,6 +1162,22 @@ function buildTypeCountsFromAppIds(appIds) {
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
 }
 
+function buildArrayFieldCountsFromAppIds(appIds, fieldName) {
+  const counts = new Map();
+  for (const appId of appIds) {
+    for (const raw of getMetaArray(appId, fieldName)) {
+      const name = String(raw || "").trim();
+      if (!name) {
+        continue;
+      }
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+}
+
 function getUnknownTypeAppIds(appIds) {
   return appIds.filter((appId) => {
     const raw = String(metaCache?.[appId]?.appTypeRaw || "").trim();
@@ -1057,6 +1248,102 @@ async function ensureTypeCounts() {
   setStatus("");
 }
 
+async function ensureExtraFilterCounts() {
+  const appIds = Object.keys(wishlistAddedMap);
+  const bucket = buildTagCacheBucketKey();
+  const day = todayKey();
+
+  const storage = await browser.storage.local.get(EXTRA_FILTER_COUNTS_CACHE_KEY);
+  const cache = storage[EXTRA_FILTER_COUNTS_CACHE_KEY] || {};
+  const cachedBucket = cache[bucket];
+
+  if (cachedBucket && cachedBucket.day === day) {
+    playerCounts = Array.isArray(cachedBucket.playerCounts) ? cachedBucket.playerCounts : [];
+    featureCounts = Array.isArray(cachedBucket.featureCounts) ? cachedBucket.featureCounts : [];
+    hardwareCounts = Array.isArray(cachedBucket.hardwareCounts) ? cachedBucket.hardwareCounts : [];
+    accessibilityCounts = Array.isArray(cachedBucket.accessibilityCounts) ? cachedBucket.accessibilityCounts : [];
+    platformCounts = Array.isArray(cachedBucket.platformCounts) ? cachedBucket.platformCounts : [];
+    languageCounts = Array.isArray(cachedBucket.languageCounts) ? cachedBucket.languageCounts : [];
+    fullAudioLanguageCounts = Array.isArray(cachedBucket.fullAudioLanguageCounts) ? cachedBucket.fullAudioLanguageCounts : [];
+    subtitleLanguageCounts = Array.isArray(cachedBucket.subtitleLanguageCounts) ? cachedBucket.subtitleLanguageCounts : [];
+    technologyCounts = Array.isArray(cachedBucket.technologyCounts) ? cachedBucket.technologyCounts : [];
+    developerCounts = Array.isArray(cachedBucket.developerCounts) ? cachedBucket.developerCounts : [];
+    publisherCounts = Array.isArray(cachedBucket.publisherCounts) ? cachedBucket.publisherCounts : [];
+    return;
+  }
+
+  setStatus("Loading metadata for extra filters...");
+  await ensureMetaForAppIds(appIds, 2000);
+
+  playerCounts = buildArrayFieldCountsFromAppIds(appIds, "players");
+  featureCounts = buildArrayFieldCountsFromAppIds(appIds, "features");
+  hardwareCounts = buildArrayFieldCountsFromAppIds(appIds, "hardware");
+  accessibilityCounts = buildArrayFieldCountsFromAppIds(appIds, "accessibility");
+  platformCounts = buildArrayFieldCountsFromAppIds(appIds, "platforms");
+  languageCounts = buildArrayFieldCountsFromAppIds(appIds, "languages");
+  fullAudioLanguageCounts = buildArrayFieldCountsFromAppIds(appIds, "fullAudioLanguages");
+  subtitleLanguageCounts = buildArrayFieldCountsFromAppIds(appIds, "subtitleLanguages");
+  technologyCounts = buildArrayFieldCountsFromAppIds(appIds, "technologies");
+  developerCounts = buildArrayFieldCountsFromAppIds(appIds, "developers");
+  publisherCounts = buildArrayFieldCountsFromAppIds(appIds, "publishers");
+
+  cache[bucket] = {
+    day,
+    playerCounts,
+    featureCounts,
+    hardwareCounts,
+    accessibilityCounts,
+    platformCounts,
+    languageCounts,
+    fullAudioLanguageCounts,
+    subtitleLanguageCounts,
+    technologyCounts,
+    developerCounts,
+    publisherCounts
+  };
+  await browser.storage.local.set({ [EXTRA_FILTER_COUNTS_CACHE_KEY]: cache });
+  setStatus("");
+}
+
+function renderCheckboxOptions(containerId, counts, selectedSet) {
+  const optionsEl = document.getElementById(containerId);
+  if (!optionsEl) {
+    return;
+  }
+  optionsEl.innerHTML = "";
+
+  for (const item of counts) {
+    const row = document.createElement("label");
+    row.className = "tag-option";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedSet.has(item.name);
+    checkbox.addEventListener("change", async () => {
+      if (checkbox.checked) {
+        selectedSet.add(item.name);
+      } else {
+        selectedSet.delete(item.name);
+      }
+      page = 1;
+      await renderCards();
+    });
+
+    const name = document.createElement("span");
+    name.className = "tag-name";
+    name.textContent = item.name;
+
+    const count = document.createElement("span");
+    count.className = "tag-count";
+    count.textContent = formatCompactCount(item.count);
+
+    row.appendChild(checkbox);
+    row.appendChild(name);
+    row.appendChild(count);
+    optionsEl.appendChild(row);
+  }
+}
+
 function renderTagOptions() {
   const optionsEl = document.getElementById("tag-options");
   const showMoreBtn = document.getElementById("tag-show-more-btn");
@@ -1105,43 +1392,21 @@ function renderTagOptions() {
 }
 
 function renderTypeOptions() {
-  const optionsEl = document.getElementById("type-options");
-  if (!optionsEl) {
-    return;
-  }
+  renderCheckboxOptions("type-options", typeCounts, selectedTypes);
+}
 
-  optionsEl.innerHTML = "";
-
-  for (const type of typeCounts) {
-    const row = document.createElement("label");
-    row.className = "tag-option";
-
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = selectedTypes.has(type.name);
-    checkbox.addEventListener("change", async () => {
-      if (checkbox.checked) {
-        selectedTypes.add(type.name);
-      } else {
-        selectedTypes.delete(type.name);
-      }
-      page = 1;
-      await renderCards();
-    });
-
-    const name = document.createElement("span");
-    name.className = "tag-name";
-    name.textContent = type.name;
-
-    const count = document.createElement("span");
-    count.className = "tag-count";
-    count.textContent = formatCompactCount(type.count);
-
-    row.appendChild(checkbox);
-    row.appendChild(name);
-    row.appendChild(count);
-    optionsEl.appendChild(row);
-  }
+function renderExtraFilterOptions() {
+  renderCheckboxOptions("players-options", playerCounts, selectedPlayers);
+  renderCheckboxOptions("features-options", featureCounts, selectedFeatures);
+  renderCheckboxOptions("hardware-options", hardwareCounts, selectedHardware);
+  renderCheckboxOptions("accessibility-options", accessibilityCounts, selectedAccessibility);
+  renderCheckboxOptions("platforms-options", platformCounts, selectedPlatforms);
+  renderCheckboxOptions("languages-options", languageCounts, selectedLanguages);
+  renderCheckboxOptions("full-audio-languages-options", fullAudioLanguageCounts, selectedFullAudioLanguages);
+  renderCheckboxOptions("subtitle-languages-options", subtitleLanguageCounts, selectedSubtitleLanguages);
+  renderCheckboxOptions("technologies-options", technologyCounts, selectedTechnologies);
+  renderCheckboxOptions("developers-options", developerCounts, selectedDevelopers);
+  renderCheckboxOptions("publishers-options", publisherCounts, selectedPublishers);
 }
 
 function passesTagFilter(appId) {
@@ -1162,6 +1427,14 @@ function passesTypeFilter(appId) {
     return true;
   }
   return selectedTypes.has(getMetaType(appId));
+}
+
+function passesArrayFilter(appId, key, selectedSet) {
+  if (selectedSet.size === 0) {
+    return true;
+  }
+  const values = getMetaArray(appId, key);
+  return values.some((value) => selectedSet.has(value));
 }
 
 function passesReviewFilter(appId) {
@@ -1217,6 +1490,19 @@ function passesPriceFilter(appId) {
   return price >= priceMin && price <= priceMax;
 }
 
+function passesReleaseYearFilter(appId) {
+  const hasFilter = releaseYearMin > 1970 || releaseYearMax < 2100;
+  if (!hasFilter) {
+    return true;
+  }
+  const unix = getMetaNumber(appId, "releaseUnix", 0);
+  if (!unix) {
+    return false;
+  }
+  const year = new Date(unix * 1000).getUTCFullYear();
+  return year >= releaseYearMin && year <= releaseYearMax;
+}
+
 function getFilteredAndSorted(ids) {
   const normalizedQuery = searchQuery.toLowerCase();
   const baseIds = (sourceMode === "wishlist" && wishlistSortOrders?.[sortMode]?.length)
@@ -1231,7 +1517,19 @@ function getFilteredAndSorted(ids) {
       && passesTypeFilter(appId)
       && passesReviewFilter(appId)
       && passesDiscountFilter(appId)
-      && passesPriceFilter(appId);
+      && passesPriceFilter(appId)
+      && passesReleaseYearFilter(appId)
+      && passesArrayFilter(appId, "players", selectedPlayers)
+      && passesArrayFilter(appId, "features", selectedFeatures)
+      && passesArrayFilter(appId, "hardware", selectedHardware)
+      && passesArrayFilter(appId, "accessibility", selectedAccessibility)
+      && passesArrayFilter(appId, "platforms", selectedPlatforms)
+      && passesArrayFilter(appId, "languages", selectedLanguages)
+      && passesArrayFilter(appId, "fullAudioLanguages", selectedFullAudioLanguages)
+      && passesArrayFilter(appId, "subtitleLanguages", selectedSubtitleLanguages)
+      && passesArrayFilter(appId, "technologies", selectedTechnologies)
+      && passesArrayFilter(appId, "developers", selectedDevelopers)
+      && passesArrayFilter(appId, "publishers", selectedPublishers);
   });
 
   if (sourceMode === "wishlist" && wishlistSortOrders?.[sortMode]?.length) {
@@ -1490,8 +1788,10 @@ async function renderCards() {
         await refreshState();
         await ensureTagCounts();
         await ensureTypeCounts();
+        await ensureExtraFilterCounts();
         renderTagOptions();
         renderTypeOptions();
+        renderExtraFilterOptions();
         await render();
       });
     }
@@ -1549,8 +1849,10 @@ async function createCollectionByName(rawName) {
   page = 1;
   await ensureTagCounts();
   await ensureTypeCounts();
+  await ensureExtraFilterCounts();
   renderTagOptions();
   renderTypeOptions();
+  renderExtraFilterOptions();
   setStatus(`Collection \"${name}\" created.`);
   await render();
 }
@@ -1578,8 +1880,10 @@ async function renameActiveCollectionByName(rawName) {
   page = 1;
   await ensureTagCounts();
   await ensureTypeCounts();
+  await ensureExtraFilterCounts();
   renderTagOptions();
   renderTypeOptions();
+  renderExtraFilterOptions();
   setStatus(`Collection renamed to \"${newName}\".`);
   await render();
 }
@@ -1609,8 +1913,10 @@ async function deleteCollectionByName(rawName) {
   page = 1;
   await ensureTagCounts();
   await ensureTypeCounts();
+  await ensureExtraFilterCounts();
   renderTagOptions();
   renderTypeOptions();
+  renderExtraFilterOptions();
   setStatus(`Collection \"${collectionName}\" deleted.`);
   await render();
 }
@@ -1652,6 +1958,8 @@ function renderRatingControls() {
   const discountMaxRange = document.getElementById("discount-max-range");
   const priceMinInput = document.getElementById("price-min-input");
   const priceMaxInput = document.getElementById("price-max-input");
+  const releaseYearMinInput = document.getElementById("release-year-min-input");
+  const releaseYearMaxInput = document.getElementById("release-year-max-input");
   if (minLabel) {
     minLabel.textContent = `${ratingMin}%`;
   }
@@ -1687,6 +1995,12 @@ function renderRatingControls() {
   }
   if (priceMaxInput) {
     priceMaxInput.value = String(priceMax);
+  }
+  if (releaseYearMinInput) {
+    releaseYearMinInput.value = String(releaseYearMin);
+  }
+  if (releaseYearMaxInput) {
+    releaseYearMaxInput.value = String(releaseYearMax);
   }
 }
 
@@ -1767,12 +2081,25 @@ function attachEvents() {
 
     selectedTags.clear();
     selectedTypes.clear();
+    selectedPlayers.clear();
+    selectedFeatures.clear();
+    selectedHardware.clear();
+    selectedAccessibility.clear();
+    selectedPlatforms.clear();
+    selectedLanguages.clear();
+    selectedFullAudioLanguages.clear();
+    selectedSubtitleLanguages.clear();
+    selectedTechnologies.clear();
+    selectedDevelopers.clear();
+    selectedPublishers.clear();
     tagSearchQuery = "";
     tagShowLimit = TAG_SHOW_STEP;
     await ensureTagCounts();
     await ensureTypeCounts();
+    await ensureExtraFilterCounts();
     renderTagOptions();
     renderTypeOptions();
+    renderExtraFilterOptions();
     await render();
   });
 
@@ -1976,6 +2303,18 @@ function attachEvents() {
     await renderCards();
   });
 
+  document.getElementById("apply-release-year-btn")?.addEventListener("click", async () => {
+    const minValue = parseNonNegativeInt(document.getElementById("release-year-min-input")?.value, 1970);
+    const maxValue = parseNonNegativeInt(document.getElementById("release-year-max-input")?.value, 2100);
+    const floor = Math.max(1970, Math.min(minValue, maxValue));
+    const ceil = Math.max(1970, Math.max(minValue, maxValue));
+    releaseYearMin = floor;
+    releaseYearMax = ceil;
+    renderRatingControls();
+    page = 1;
+    await renderCards();
+  });
+
   document.addEventListener("click", (event) => {
     const panel = document.getElementById("collection-menu-panel");
     const btn = document.getElementById("collection-menu-btn");
@@ -2016,9 +2355,10 @@ async function bootstrap() {
   await render();
 
   // Load heavy filter counts after first paint to avoid blank screen on large wishlists.
-  Promise.allSettled([ensureTagCounts(), ensureTypeCounts()]).then(() => {
+  Promise.allSettled([ensureTagCounts(), ensureTypeCounts(), ensureExtraFilterCounts()]).then(() => {
     renderTagOptions();
     renderTypeOptions();
+    renderExtraFilterOptions();
   });
 
   const refreshAll = new URLSearchParams(window.location.search).get("refreshAll") === "1";
