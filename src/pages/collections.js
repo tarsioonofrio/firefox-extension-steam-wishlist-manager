@@ -214,6 +214,34 @@ function getMetaNumber(appId, key, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function parseLooseInteger(value, fallback = 0) {
+  const digits = String(value ?? "").replace(/[^\d]/g, "");
+  if (!digits) {
+    return fallback;
+  }
+  const n = Number(digits);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function extractPriceTextFromDiscountBlock(blockHtml) {
+  const block = String(blockHtml || "");
+  if (!block) {
+    return "";
+  }
+
+  const finalMatch = block.match(/discount_final_price">([^<]+)/i);
+  if (finalMatch?.[1]) {
+    return finalMatch[1].replace(/&nbsp;/g, " ").trim();
+  }
+
+  const plainMatch = block.match(/game_purchase_price\s*price">([^<]+)/i);
+  if (plainMatch?.[1]) {
+    return plainMatch[1].replace(/&nbsp;/g, " ").trim();
+  }
+
+  return "";
+}
+
 function getEffectiveSortPrice(appId) {
   const meta = metaCache?.[appId] || {};
   const isFree = String(meta.priceText || "").trim().toLowerCase() === "free";
@@ -384,6 +412,139 @@ async function loadWishlistAddedMap() {
       wishlistOrderedAppIds = Object.keys(cachedMap);
     }
   }
+}
+
+async function resolveCurrentSteamId() {
+  try {
+    const userdata = await fetchSteamJson("https://store.steampowered.com/dynamicstore/userdata/", {
+      credentials: "include",
+      cache: "no-store"
+    });
+    const fromUserData = String(
+      userdata?.steamid
+      || userdata?.strSteamId
+      || userdata?.str_steamid
+      || userdata?.webapi_token_steamid
+      || ""
+    ).trim();
+    if (fromUserData) {
+      return fromUserData;
+    }
+  } catch {
+    // fallback below
+  }
+
+  try {
+    const html = await fetchSteamText("https://store.steampowered.com/", {
+      credentials: "include",
+      cache: "no-store"
+    });
+    const match = html.match(/g_steamID\s*=\s*"(\d{10,20})"/);
+    return match ? match[1] : "";
+  } catch {
+    return "";
+  }
+}
+
+function mergeMetaFromWishlistEntry(appId, entry) {
+  const existing = metaCache[appId] || {};
+  const now = Date.now();
+
+  const name = String(entry?.name || "").trim();
+  const releaseString = String(entry?.release_string || "").trim();
+  const releaseUnix = Number(entry?.release_date || 0);
+  const isFree = Boolean(entry?.is_free_game);
+  const reviewPct = Number(entry?.reviews_percent);
+  const reviewTotal = parseLooseInteger(entry?.reviews_total, 0);
+  const typeRaw = String(entry?.type || "").trim();
+
+  const firstSub = Array.isArray(entry?.subs) ? entry.subs[0] : null;
+  const discountPercent = Number(firstSub?.discount_pct || 0);
+  const priceFinal = Number(firstSub?.price || 0);
+  const blockPriceText = extractPriceTextFromDiscountBlock(firstSub?.discount_block);
+
+  const priceText = isFree
+    ? "Free"
+    : (blockPriceText || existing.priceText || "-");
+
+  const reviewText = (Number.isFinite(reviewPct) && reviewTotal > 0)
+    ? `${Math.round(reviewPct)}% positive (${formatCompactCount(reviewTotal)} reviews)`
+    : (existing.reviewText || "No user reviews");
+
+  metaCache[appId] = {
+    ...existing,
+    cachedAt: now,
+    titleText: name || existing.titleText || "",
+    priceText,
+    priceFinal: Number.isFinite(priceFinal) ? priceFinal : Number(existing.priceFinal || 0),
+    discountText: discountPercent > 0 ? `${discountPercent}% off` : (existing.discountText || "-"),
+    discountPercent: Number.isFinite(discountPercent) ? discountPercent : Number(existing.discountPercent || 0),
+    appTypeRaw: typeRaw || existing.appTypeRaw || "",
+    appType: normalizeAppTypeLabel(typeRaw || existing.appTypeRaw || existing.appType || ""),
+    reviewPositivePct: Number.isFinite(reviewPct) ? Math.round(reviewPct) : existing.reviewPositivePct,
+    reviewTotalVotes: reviewTotal > 0 ? reviewTotal : Number(existing.reviewTotalVotes || 0),
+    reviewText,
+    releaseUnix: Number.isFinite(releaseUnix) ? releaseUnix : Number(existing.releaseUnix || 0),
+    releaseText: releaseString || existing.releaseText || "-"
+  };
+}
+
+async function ensureWishlistMetaFromSnapshot(appIds) {
+  if (sourceMode !== "wishlist" || !Array.isArray(appIds) || appIds.length === 0) {
+    return;
+  }
+
+  const unresolved = new Set(
+    appIds.filter((appId) => {
+      const meta = metaCache?.[appId];
+      const hasTitle = Boolean(String(meta?.titleText || "").trim());
+      if (sortMode === "title" || String(searchQuery || "").trim()) {
+        return !hasTitle;
+      }
+      return false;
+    })
+  );
+
+  if (unresolved.size === 0) {
+    return;
+  }
+
+  const steamId = await resolveCurrentSteamId();
+  if (!steamId) {
+    return;
+  }
+
+  setStatus("Loading wishlist titles...");
+  let changed = false;
+
+  for (let pageIndex = 0; pageIndex < 200 && unresolved.size > 0; pageIndex += 1) {
+    const payload = await fetchSteamJson(
+      `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
+      {
+        credentials: "include",
+        cache: "no-store"
+      }
+    );
+    const entries = Object.entries(payload || {});
+    if (entries.length === 0) {
+      break;
+    }
+
+    for (const [appId, entry] of entries) {
+      if (!unresolved.has(appId)) {
+        continue;
+      }
+      mergeMetaFromWishlistEntry(appId, entry);
+      unresolved.delete(appId);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    await saveMetaCache();
+  }
+
+  setStatus("");
 }
 
 async function loadMetaCache() {
@@ -915,8 +1076,13 @@ async function renderCards() {
   const sourceIds = getCurrentSourceAppIds();
   const needsMetaForSort = sortMode !== "position";
   const needsMetaForSearch = Boolean(String(searchQuery || "").trim());
+  const shouldSkipHeavyMetaHydration = sourceMode === "wishlist" && sortMode === "title";
 
-  if (needsMetaForSort || needsMetaForSearch) {
+  if (sourceMode === "wishlist" && (sortMode === "title" || needsMetaForSearch)) {
+    await ensureWishlistMetaFromSnapshot(sourceIds);
+  }
+
+  if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
     setStatus("Loading metadata for sorting/search...");
     await ensureMetaForAppIds(sourceIds, sourceIds.length);
   }
@@ -929,7 +1095,7 @@ async function renderCards() {
 
   // Always hydrate visible items to avoid fallback "App {id}" titles.
   await ensureMetaForAppIds(pageIds, pageIds.length);
-  if (needsMetaForSort || needsMetaForSearch) {
+  if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
     setStatus("");
   }
 
