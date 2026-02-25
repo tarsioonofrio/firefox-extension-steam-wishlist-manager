@@ -7,49 +7,56 @@
   <link rel="stylesheet" href="collections.css">
 </head>
 <body>
-  <header class="topbar">
-    <h1>Collections</h1>
-    <div class="controls">
-      <label>
-        Source
-        <select id="source-select">
-          <option value="collections">Collections</option>
-          <option value="wishlist">Steam wishlist</option>
-        </select>
-      </label>
-      <label>
-        Collection
-        <select id="collection-select"></select>
-      </label>
-      <label>
-        Search
-        <input id="search-input" type="search" placeholder="Search by title or appid">
-      </label>
-      <label>
-        Sort
-        <select id="sort-select">
-          <option value="position">Collection order</option>
-          <option value="title">Title</option>
-        </select>
-      </label>
-    </div>
-    <div class="manage">
-      <input id="new-collection-input" type="text" placeholder="New collection name">
-      <button id="create-collection-btn" type="button">Create</button>
-      <button id="delete-collection-btn" type="button" class="danger">Delete selected</button>
-    </div>
-    <p id="status" class="status"></p>
-  </header>
+  <div class="layout">
+    <main class="content">
+      <header class="content-header">
+        <h1>Collections</h1>
+      </header>
+      <section id="cards" class="cards"></section>
+      <p id="empty" class="empty hidden">No items found for this collection/filter.</p>
+      <footer class="pager">
+        <button id="prev-page-btn" type="button">Previous</button>
+        <span id="page-info">Page 1</span>
+        <button id="next-page-btn" type="button">Next</button>
+      </footer>
+    </main>
 
-  <main>
-    <section id="cards" class="cards"></section>
-    <p id="empty" class="empty hidden">No items found for this collection/filter.</p>
-    <footer class="pager">
-      <button id="prev-page-btn" type="button">Previous</button>
-      <span id="page-info">Page 1</span>
-      <button id="next-page-btn" type="button">Next</button>
-    </footer>
-  </main>
+    <aside class="sidebar">
+      <div class="sidebar-inner">
+        <h2>Tools</h2>
+        <div class="controls">
+          <label>
+            Source
+            <select id="source-select">
+              <option value="collections">Collections</option>
+              <option value="wishlist">Steam wishlist</option>
+            </select>
+          </label>
+          <label>
+            Collection
+            <select id="collection-select"></select>
+          </label>
+          <label>
+            Search
+            <input id="search-input" type="search" placeholder="Search by title or appid">
+          </label>
+          <label>
+            Sort
+            <select id="sort-select">
+              <option value="position">Collection order</option>
+              <option value="title">Title</option>
+            </select>
+          </label>
+        </div>
+        <div class="manage">
+          <input id="new-collection-input" type="text" placeholder="New collection name">
+          <button id="create-collection-btn" type="button">Create</button>
+          <button id="delete-collection-btn" type="button" class="danger">Delete selected</button>
+        </div>
+        <p id="status" class="status"></p>
+      </div>
+    </aside>
+  </div>
 
   <template id="card-template">
     <article class="card">
