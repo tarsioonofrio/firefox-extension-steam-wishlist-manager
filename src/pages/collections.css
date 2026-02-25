@@ -288,7 +288,7 @@ main {
 
 .card {
   display: grid;
-  grid-template-columns: 184px 1fr auto;
+  grid-template-columns: 184px 1fr;
   gap: 10px;
   align-items: stretch;
   border: 1px solid #2f445a;
@@ -310,6 +310,10 @@ main {
 }
 
 .info {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: start;
   padding: 8px 0;
   min-width: 0;
 }
@@ -325,25 +329,36 @@ main {
   text-overflow: ellipsis;
 }
 
+.title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  grid-column: 1;
+}
+
+.appid {
+  margin: 0;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 .meta {
   margin: 2px 0;
   color: var(--muted);
 }
 
-.details {
-  display: block;
+.left-col {
+  min-width: 0;
+  grid-column: 1;
   margin-top: 4px;
 }
 
-.left-col {
-  min-width: 0;
-}
-
 .right-col {
-  align-self: start;
   text-align: right;
   min-width: 130px;
   padding: 8px 10px 8px 0;
+  grid-column: 2;
+  grid-row: 1 / span 2;
 }
 
 .right-col .meta {
@@ -449,12 +464,20 @@ main {
     aspect-ratio: 184 / 69;
   }
 
-  .details {
+  .info {
     grid-template-columns: 1fr;
+  }
+
+  .title-row,
+  .left-col,
+  .right-col {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .right-col {
     text-align: left;
     min-width: 0;
+    padding: 0;
   }
 }
