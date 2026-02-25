@@ -1,52 +1,52 @@
 # Steam Wishlist Collections Manager (Firefox)
 
-Firefox extension MVP to organize Steam wishlist entries into custom collections with independent ordering.
+Firefox extension MVP to organize Steam wishlist games into local custom collections with independent ordering.
 
-## Features (MVP)
+## Security Model
 
-- Add a game to a custom collection directly from a Steam app page.
-- Choose insertion position when saving: beginning or end of collection.
-- Strict sandbox mode: no writes to Steam wishlist; local extension data only.
-- Collection save is allowed only for games already present in Steam wishlist.
-- Filter and reorder wishlist page by selected collection.
-- Persistent local storage via `browser.storage.local`.
+- Sandbox-only behavior: the extension never writes to Steam wishlist.
+- Collection data is stored only in `browser.storage.local`.
+- A game can be added to a collection only if it is already in Steam wishlist.
+- Host scope is limited to Steam app and wishlist pages.
 
-## Development with auto-reload (`web-ext`)
+## Compatibility
 
-1. Install dependencies:
+- Firefox `109+` (see `manifest.json` `strict_min_version`).
+- Recommended dev profile: `steam-dev` (isolates login/session and extension state).
+
+## Development (Auto-Reload)
+
+1. Install deps:
    - `npm install`
-2. Run extension in Firefox development profile:
-   - `npm run dev`
-
-This keeps the extension temporarily installed and reloads it when files change.
+2. Run in Firefox with auto-reload:
+   - `npm run dev -- --firefox-profile steam-dev --keep-profile-changes`
 
 Useful commands:
-- `npm run check:manifest` (quick manifest syntax check)
-- `npm run build` (creates zipped artifact in `web-ext-artifacts/`)
+- `npm run check:manifest` validates `manifest.json`.
+- `npm run build` creates a package in `web-ext-artifacts/`.
 
-## Manual temporary load (without `web-ext`)
+## Usage Flow
 
-1. Open `about:debugging`.
-2. Click **This Firefox**.
-3. Click **Load Temporary Add-on...**.
-4. Select `manifest.json` from this project.
+1. Open a Steam app page (`/app/...`).
+2. If the game is in your Steam wishlist, `Add to Collection` is enabled.
+3. Choose collection and position (start/end), then save.
+4. Open Steam wishlist page (`/wishlist/...`) and use the `Collections` filter panel.
 
-## Wishlist Membership Validation
+## Wishlist Validation Strategy
 
-- Primary source: `https://store.steampowered.com/dynamicstore/userdata/` (`rgWishlist`) from your logged-in session.
-- Local cache: 60 seconds to reduce network/CPU overhead.
-- Cache is invalidated when Steam wishlist UI state changes on the app page.
-- Fallback: conservative UI-based check only if `dynamicstore/userdata` is unavailable.
+- Primary source: `https://store.steampowered.com/dynamicstore/userdata/` (`rgWishlist`) from current logged-in session.
+- 60s local cache to reduce requests/CPU.
+- Cache is invalidated when wishlist UI state changes on app page.
+- Fallback: conservative UI-based check if `dynamicstore/userdata` is unavailable.
 
-## Current limitations
+## Troubleshooting
 
-- `dynamicstore/userdata` is an internal Steam endpoint and may change in the future.
-- Reordering/filtering is visual and local; it does not modify Steam server-side data.
-- Storage is local to your browser profile unless sync is implemented later.
+- `steam-dev profile cannot be resolved`: create it first (`about:profiles` or `firefox -CreateProfile "steam-dev"`).
+- Button stays disabled after adding to wishlist: wait up to ~1s for UI/API refresh.
+- Extension not updating in dev: ensure `npm run dev` process is still running.
 
-## Next MVP+ ideas
+## Known Limitations
 
-- Collection management UI (rename/delete/reorder collections).
-- Bulk assign from wishlist page.
-- Optional `storage.sync` mode.
-- Export/import JSON backup.
+- `dynamicstore/userdata` is an internal Steam endpoint and may change.
+- Reordering/filtering is visual/local only; it does not modify Steam server-side order.
+- Storage is per Firefox profile unless sync/export is implemented.
