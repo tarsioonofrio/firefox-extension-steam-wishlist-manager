@@ -140,6 +140,11 @@ function getMetaType(appId) {
   return normalizeAppTypeLabel(value);
 }
 
+function getMetaNumber(appId, key, fallback = 0) {
+  const n = Number(metaCache?.[appId]?.[key]);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 async function loadWishlistAddedMap() {
   const now = Date.now();
   const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
@@ -349,15 +354,19 @@ async function fetchAppMeta(appId, options = {}) {
       cachedAt: now,
       titleText: String(appData?.name || "").trim(),
       priceText,
+      priceFinal: Number(appData?.price_overview?.final || 0),
       discountText: appData?.price_overview?.discount_percent
         ? `${appData.price_overview.discount_percent}% off`
         : "-",
+      discountPercent: Number(appData?.price_overview?.discount_percent || 0),
       appTypeRaw: rawType,
       appType: normalizeAppTypeLabel(rawType),
       tags,
       reviewPositivePct: positivePct,
       reviewTotalVotes: totalVotes,
+      recommendationsTotal: Number(appData?.recommendations?.total || 0),
       reviewText,
+      releaseUnix: Number(appData?.release_date?.steam_release_date || 0),
       releaseText
     };
 
@@ -369,13 +378,17 @@ async function fetchAppMeta(appId, options = {}) {
       cachedAt: now,
       titleText: "",
       priceText: "-",
+      priceFinal: 0,
       discountText: "-",
+      discountPercent: 0,
       appTypeRaw: "",
       appType: "Unknown",
       tags: [],
       reviewPositivePct: null,
       reviewTotalVotes: 0,
+      recommendationsTotal: 0,
       reviewText: "No user reviews",
+      releaseUnix: 0,
       releaseText: "-"
     };
   }
@@ -657,6 +670,43 @@ function getFilteredAndSorted(ids) {
       const tb = String(state?.items?.[b]?.title || metaCache?.[b]?.titleText || b);
       return ta.localeCompare(tb, "pt-BR", { sensitivity: "base" });
     });
+    return list;
+  }
+
+  if (sortMode === "price") {
+    list.sort((a, b) => getMetaNumber(a, "priceFinal", 0) - getMetaNumber(b, "priceFinal", 0));
+    return list;
+  }
+
+  if (sortMode === "discount") {
+    list.sort((a, b) => getMetaNumber(b, "discountPercent", 0) - getMetaNumber(a, "discountPercent", 0));
+    return list;
+  }
+
+  if (sortMode === "date-added") {
+    list.sort((a, b) => Number(wishlistAddedMap[b] || 0) - Number(wishlistAddedMap[a] || 0));
+    return list;
+  }
+
+  if (sortMode === "top-selling") {
+    list.sort((a, b) => getMetaNumber(b, "recommendationsTotal", 0) - getMetaNumber(a, "recommendationsTotal", 0));
+    return list;
+  }
+
+  if (sortMode === "release-date") {
+    list.sort((a, b) => getMetaNumber(b, "releaseUnix", 0) - getMetaNumber(a, "releaseUnix", 0));
+    return list;
+  }
+
+  if (sortMode === "review-score") {
+    list.sort((a, b) => {
+      const pctDiff = getMetaNumber(b, "reviewPositivePct", -1) - getMetaNumber(a, "reviewPositivePct", -1);
+      if (pctDiff !== 0) {
+        return pctDiff;
+      }
+      return getMetaNumber(b, "reviewTotalVotes", 0) - getMetaNumber(a, "reviewTotalVotes", 0);
+    });
+    return list;
   }
 
   return list;
@@ -886,6 +936,7 @@ async function render() {
   const createBtn = document.getElementById("create-collection-btn");
   const newInput = document.getElementById("new-collection-input");
   const sourceSelect = document.getElementById("source-select");
+  const sortSelect = document.getElementById("sort-select");
   const isWishlistMode = sourceMode === "wishlist";
 
   if (createBtn) {
@@ -896,6 +947,9 @@ async function render() {
   }
   if (sourceSelect) {
     sourceSelect.value = sourceMode;
+  }
+  if (sortSelect) {
+    sortSelect.value = sortMode;
   }
 
   renderCollectionSelect();
@@ -971,7 +1025,17 @@ function attachEvents() {
   });
 
   document.getElementById("sort-select")?.addEventListener("change", async (event) => {
-    sortMode = event.target.value === "title" ? "title" : "position";
+    const allowed = new Set([
+      "position",
+      "title",
+      "price",
+      "discount",
+      "date-added",
+      "top-selling",
+      "release-date",
+      "review-score"
+    ]);
+    sortMode = allowed.has(event.target.value) ? event.target.value : "position";
     page = 1;
     await render();
   });
