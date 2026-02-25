@@ -231,6 +231,13 @@ button.danger,
 .filter-content {
   display: grid;
   gap: 8px;
+  min-width: 0;
+}
+
+.filter-content input,
+.filter-content button {
+  max-width: 100%;
+  min-width: 0;
 }
 
 .tag-options {
@@ -313,11 +320,17 @@ button.danger,
   grid-template-columns: 1fr auto 1fr auto;
   gap: 8px;
   align-items: center;
+  min-width: 0;
 }
 
 .reviews-row span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.reviews-row input {
+  width: 100%;
+  min-width: 0;
 }
 
 main {
