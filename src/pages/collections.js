@@ -71,6 +71,7 @@ let discountMin = 0;
 let discountMax = 100;
 let priceMin = 0;
 let priceMax = 9999999;
+let filterSyncRunId = 0;
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -847,13 +848,10 @@ async function refreshWholeDatabase() {
   await ensureMetaForAppIds(allIds, allIds.length, true, "Refreshing full database:");
   await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY, EXTRA_FILTER_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
-
-  await Promise.allSettled([ensureTagCounts(), ensureTypeCounts(), ensureExtraFilterCounts()]);
-  renderTagOptions();
-  renderTypeOptions();
-  renderExtraFilterOptions();
+  quickPopulateFiltersFromCache();
+  refreshFilterOptionsInBackground();
   await render();
-  setStatus("Database refreshed.");
+  setStatus("Database refreshed. Finalizing filter frequencies in background...");
 }
 
 async function refreshCurrentPageItems() {
@@ -867,12 +865,10 @@ async function refreshCurrentPageItems() {
   await ensureMetaForAppIds(ids, ids.length, true, "Refreshing visible items:");
   await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY, EXTRA_FILTER_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
-  await Promise.allSettled([ensureTagCounts(), ensureTypeCounts(), ensureExtraFilterCounts()]);
-  renderTagOptions();
-  renderTypeOptions();
-  renderExtraFilterOptions();
+  quickPopulateFiltersFromCache();
+  refreshFilterOptionsInBackground();
   await render();
-  setStatus("Visible items refreshed.");
+  setStatus("Visible items refreshed. Finalizing filter frequencies in background...");
 }
 
 async function refreshSingleItem(appId) {
@@ -905,6 +901,7 @@ function getAppLink(appId) {
 
 async function fetchAppMeta(appId, options = {}) {
   const force = Boolean(options.force);
+  const includeReviews = options.includeReviews !== false;
   const cached = metaCache[appId];
   const now = Date.now();
 
@@ -935,10 +932,13 @@ async function fetchAppMeta(appId, options = {}) {
   }
 
   try {
-    const [detailsDataResult, reviewsResult] = await Promise.allSettled([
-      fetchAppDetailsDataWithFallback(),
-      fetchSteamJson(`https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`)
-    ]);
+    const requests = [fetchAppDetailsDataWithFallback()];
+    if (includeReviews) {
+      requests.push(fetchSteamJson(`https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`));
+    }
+    const settled = await Promise.allSettled(requests);
+    const detailsDataResult = settled[0];
+    const reviewsResult = includeReviews ? settled[1] : null;
 
     let appData = null;
     if (detailsDataResult.status === "fulfilled") {
@@ -950,7 +950,7 @@ async function fetchAppMeta(appId, options = {}) {
     }
 
     let reviewsPayload = null;
-    if (reviewsResult.status === "fulfilled") {
+    if (reviewsResult && reviewsResult.status === "fulfilled") {
       reviewsPayload = reviewsResult.value;
     }
 
@@ -1119,7 +1119,7 @@ async function fetchAppMeta(appId, options = {}) {
   }
 }
 
-async function ensureMetaForAppIds(appIds, limit = 400, force = false, progressLabel = "") {
+async function ensureMetaForAppIds(appIds, limit = 400, force = false, progressLabel = "", includeReviews = true) {
   const now = Date.now();
   const missing = [];
 
@@ -1166,7 +1166,7 @@ async function ensureMetaForAppIds(appIds, limit = 400, force = false, progressL
     while (cursor < missing.length) {
       const idx = cursor;
       cursor += 1;
-      await fetchAppMeta(missing[idx], { force });
+      await fetchAppMeta(missing[idx], { force, includeReviews });
       completed += 1;
       updateProgress();
       const perItemDelay = force
@@ -1280,7 +1280,7 @@ async function ensureTagCounts() {
   }
 
   setStatus("Recalculating tag frequencies for full wishlist...");
-  await ensureMetaForAppIds(appIds, 2000, false, "Recalculating tag frequencies:");
+  await ensureMetaForAppIds(appIds, 2000, false, "Recalculating tag frequencies:", false);
 
   const nextCounts = buildTagCountsFromAppIds(appIds);
   if (nextCounts.length === 0 && cachedBucket && Array.isArray(cachedBucket.counts) && cachedBucket.counts.length > 0) {
@@ -1322,12 +1322,12 @@ async function ensureTypeCounts() {
   }
 
   setStatus("Loading full wishlist metadata for type frequencies...");
-  await ensureMetaForAppIds(appIds, appIds.length, false, "Loading type frequencies:");
+  await ensureMetaForAppIds(appIds, appIds.length, false, "Loading type frequencies:", false);
 
   const unknownTypeIds = getUnknownTypeAppIds(appIds);
   if (unknownTypeIds.length > 0) {
     setStatus("Refreshing unresolved app types...");
-    await ensureMetaForAppIds(unknownTypeIds, unknownTypeIds.length, true, "Refreshing unresolved types:");
+    await ensureMetaForAppIds(unknownTypeIds, unknownTypeIds.length, true, "Refreshing unresolved types:", false);
   }
 
   const nextCounts = buildTypeCountsFromAppIds(appIds);
@@ -1391,7 +1391,7 @@ async function ensureExtraFilterCounts() {
   }
 
   setStatus("Loading metadata for extra filters...");
-  await ensureMetaForAppIds(appIds, 2000, false, "Loading extra filters:");
+  await ensureMetaForAppIds(appIds, 2000, false, "Loading extra filters:", false);
 
   const nextPlayerCounts = buildArrayFieldCountsFromAppIds(appIds, "players");
   const nextFeatureCounts = buildArrayFieldCountsFromAppIds(appIds, "features");
@@ -1492,13 +1492,94 @@ function renderCheckboxOptions(containerId, counts, selectedSet) {
 
     const count = document.createElement("span");
     count.className = "tag-count";
-    count.textContent = formatCompactCount(item.count);
+    const hasCount = Number.isFinite(Number(item.count)) && Number(item.count) > 0;
+    count.textContent = hasCount ? formatCompactCount(item.count) : "";
 
     row.appendChild(checkbox);
     row.appendChild(name);
     row.appendChild(count);
     optionsEl.appendChild(row);
   }
+}
+
+function uniqueSorted(values, compareFn = null) {
+  const out = Array.from(new Set(values.filter(Boolean).map((v) => String(v).trim()).filter(Boolean)));
+  out.sort(compareFn || ((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" })));
+  return out;
+}
+
+function quickPopulateFiltersFromCache() {
+  const fromWishlist = Object.keys(wishlistAddedMap || {});
+  const appIds = fromWishlist.length > 0 ? fromWishlist : getAllKnownAppIds();
+  if (appIds.length === 0) {
+    return;
+  }
+
+  const tags = [];
+  const types = [];
+  const players = [];
+  const features = [];
+  const hardware = [];
+  const accessibility = [];
+  const platforms = [];
+  const languages = [];
+  const fullAudioLanguages = [];
+  const subtitleLanguages = [];
+  const technologies = [];
+  const developers = [];
+  const publishers = [];
+  const years = [];
+
+  for (const appId of appIds) {
+    tags.push(...getMetaTags(appId));
+    types.push(getMetaType(appId));
+    players.push(...getMetaArray(appId, "players"));
+    features.push(...getMetaArray(appId, "features"));
+    hardware.push(...getMetaArray(appId, "hardware"));
+    accessibility.push(...getMetaArray(appId, "accessibility"));
+    platforms.push(...getMetaArray(appId, "platforms"));
+    languages.push(...getMetaArray(appId, "languages"));
+    fullAudioLanguages.push(...getMetaArray(appId, "fullAudioLanguages"));
+    subtitleLanguages.push(...getMetaArray(appId, "subtitleLanguages"));
+    technologies.push(...getMetaArray(appId, "technologies"));
+    developers.push(...getMetaArray(appId, "developers"));
+    publishers.push(...getMetaArray(appId, "publishers"));
+    const releaseUnix = getMetaNumber(appId, "releaseUnix", 0);
+    if (releaseUnix > 0) {
+      years.push(String(new Date(releaseUnix * 1000).getUTCFullYear()));
+    }
+  }
+
+  tagCounts = uniqueSorted(tags).map((name) => ({ name }));
+  typeCounts = uniqueSorted(types).map((name) => ({ name }));
+  playerCounts = uniqueSorted(players).map((name) => ({ name }));
+  featureCounts = uniqueSorted(features).map((name) => ({ name }));
+  hardwareCounts = uniqueSorted(hardware).map((name) => ({ name }));
+  accessibilityCounts = uniqueSorted(accessibility).map((name) => ({ name }));
+  platformCounts = uniqueSorted(platforms).map((name) => ({ name }));
+  languageCounts = uniqueSorted(languages).map((name) => ({ name }));
+  fullAudioLanguageCounts = uniqueSorted(fullAudioLanguages).map((name) => ({ name }));
+  subtitleLanguageCounts = uniqueSorted(subtitleLanguages).map((name) => ({ name }));
+  technologyCounts = uniqueSorted(technologies).map((name) => ({ name }));
+  developerCounts = uniqueSorted(developers).map((name) => ({ name }));
+  publisherCounts = uniqueSorted(publishers).map((name) => ({ name }));
+  releaseYearCounts = uniqueSorted(years, (a, b) => Number(b) - Number(a)).map((name) => ({ name }));
+
+  renderTagOptions();
+  renderTypeOptions();
+  renderExtraFilterOptions();
+}
+
+function refreshFilterOptionsInBackground() {
+  const runId = ++filterSyncRunId;
+  Promise.allSettled([ensureTagCounts(), ensureTypeCounts(), ensureExtraFilterCounts()]).then(() => {
+    if (runId !== filterSyncRunId) {
+      return;
+    }
+    renderTagOptions();
+    renderTypeOptions();
+    renderExtraFilterOptions();
+  });
 }
 
 function renderTagOptions() {
@@ -1936,12 +2017,8 @@ async function renderCards() {
         });
 
         await refreshState();
-        await ensureTagCounts();
-        await ensureTypeCounts();
-        await ensureExtraFilterCounts();
-        renderTagOptions();
-        renderTypeOptions();
-        renderExtraFilterOptions();
+        quickPopulateFiltersFromCache();
+        refreshFilterOptionsInBackground();
         await render();
       });
     }
@@ -1997,12 +2074,8 @@ async function createCollectionByName(rawName) {
   activeCollection = name;
   sourceMode = "collections";
   page = 1;
-  await ensureTagCounts();
-  await ensureTypeCounts();
-  await ensureExtraFilterCounts();
-  renderTagOptions();
-  renderTypeOptions();
-  renderExtraFilterOptions();
+  quickPopulateFiltersFromCache();
+  refreshFilterOptionsInBackground();
   setStatus(`Collection \"${name}\" created.`);
   await render();
 }
@@ -2028,12 +2101,8 @@ async function renameActiveCollectionByName(rawName) {
   await refreshState();
   activeCollection = newName;
   page = 1;
-  await ensureTagCounts();
-  await ensureTypeCounts();
-  await ensureExtraFilterCounts();
-  renderTagOptions();
-  renderTypeOptions();
-  renderExtraFilterOptions();
+  quickPopulateFiltersFromCache();
+  refreshFilterOptionsInBackground();
   setStatus(`Collection renamed to \"${newName}\".`);
   await render();
 }
@@ -2061,12 +2130,8 @@ async function deleteCollectionByName(rawName) {
     sourceMode = "collections";
   }
   page = 1;
-  await ensureTagCounts();
-  await ensureTypeCounts();
-  await ensureExtraFilterCounts();
-  renderTagOptions();
-  renderTypeOptions();
-  renderExtraFilterOptions();
+  quickPopulateFiltersFromCache();
+  refreshFilterOptionsInBackground();
   setStatus(`Collection \"${collectionName}\" deleted.`);
   await render();
 }
@@ -2237,12 +2302,8 @@ function attachEvents() {
     selectedReleaseYears.clear();
     tagSearchQuery = "";
     tagShowLimit = TAG_SHOW_STEP;
-    await ensureTagCounts();
-    await ensureTypeCounts();
-    await ensureExtraFilterCounts();
-    renderTagOptions();
-    renderTypeOptions();
-    renderExtraFilterOptions();
+    quickPopulateFiltersFromCache();
+    refreshFilterOptionsInBackground();
     await render();
   });
 
@@ -2482,15 +2543,12 @@ async function bootstrap() {
   activeCollection = state.activeCollection || "__all__";
 
   attachEvents();
+  quickPopulateFiltersFromCache();
   renderRatingControls();
   await render();
 
-  // Load heavy filter counts after first paint to avoid blank screen on large wishlists.
-  Promise.allSettled([ensureTagCounts(), ensureTypeCounts(), ensureExtraFilterCounts()]).then(() => {
-    renderTagOptions();
-    renderTypeOptions();
-    renderExtraFilterOptions();
-  });
+  // Load heavy filter counts in background; keep UI responsive with local-cache options first.
+  refreshFilterOptionsInBackground();
 
   const refreshAll = new URLSearchParams(window.location.search).get("refreshAll") === "1";
   if (refreshAll) {
