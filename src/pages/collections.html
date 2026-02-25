@@ -15,19 +15,27 @@
       <div class="top-controls">
         <div class="collection-tools">
           <button id="collection-menu-btn" type="button">Menu</button>
-          <select id="collection-select"></select>
+          <div class="dropdown">
+            <button id="collection-dropdown-btn" type="button" class="dropdown-btn">Collection</button>
+            <div id="collection-dropdown-menu" class="dropdown-menu hidden"></div>
+            <select id="collection-select" class="native-select-hidden"></select>
+          </div>
         </div>
         <input id="search-input" type="search" placeholder="Search by title or appid">
-        <select id="sort-select">
-          <option value="position">Your order</option>
-          <option value="title">Title</option>
-          <option value="price">Price</option>
-          <option value="discount">Discount</option>
-          <option value="date-added">Date Added</option>
-          <option value="top-selling">Top Selling</option>
-          <option value="release-date">Release Date</option>
-          <option value="review-score">Review Score</option>
-        </select>
+        <div class="dropdown">
+          <button id="sort-dropdown-btn" type="button" class="dropdown-btn">Sort</button>
+          <div id="sort-dropdown-menu" class="dropdown-menu hidden"></div>
+          <select id="sort-select" class="native-select-hidden">
+            <option value="position">Your order</option>
+            <option value="title">Title</option>
+            <option value="price">Price</option>
+            <option value="discount">Discount</option>
+            <option value="date-added">Date Added</option>
+            <option value="top-selling">Top Selling</option>
+            <option value="release-date">Release Date</option>
+            <option value="review-score">Review Score</option>
+          </select>
+        </div>
         <button id="refresh-page-btn" type="button" class="header-btn">Refresh Page Data</button>
       </div>
       <div id="collection-menu-panel" class="collection-menu-panel hidden">

@@ -1289,6 +1289,8 @@ function renderCollectionSelect() {
       deleteSelect.appendChild(option);
     }
   }
+
+  renderDropdownMenu("collection-select", "collection-dropdown-menu", "collection-dropdown-btn");
 }
 
 function renderPager(totalItems) {
@@ -1564,6 +1566,7 @@ async function render() {
     sortSelect.value = sortMode;
   }
 
+  renderDropdownMenu("sort-select", "sort-dropdown-menu", "sort-dropdown-btn");
   renderCollectionSelect();
   const canRenameCurrent = sourceMode !== "wishlist" && activeCollection !== "__all__";
   if (renameActionBtn) {
@@ -1605,6 +1608,68 @@ function renderRatingControls() {
   }
 }
 
+function closeDropdownMenus() {
+  document.getElementById("collection-dropdown-menu")?.classList.add("hidden");
+  document.getElementById("sort-dropdown-menu")?.classList.add("hidden");
+}
+
+function renderDropdownMenu(selectId, menuId, buttonId) {
+  const select = document.getElementById(selectId);
+  const menu = document.getElementById(menuId);
+  const btn = document.getElementById(buttonId);
+  if (!select || !menu || !btn) {
+    return;
+  }
+
+  const selectedOption = select.options[select.selectedIndex];
+  if (selectedOption) {
+    btn.textContent = selectedOption.textContent || "";
+  }
+
+  menu.innerHTML = "";
+  for (const option of Array.from(select.options)) {
+    const itemBtn = document.createElement("button");
+    itemBtn.type = "button";
+    itemBtn.className = "dropdown-option";
+    if (option.value === select.value) {
+      itemBtn.classList.add("active");
+    }
+    itemBtn.textContent = option.textContent || option.value;
+    itemBtn.dataset.value = option.value;
+    menu.appendChild(itemBtn);
+  }
+}
+
+function bindDropdown(selectId, menuId, buttonId) {
+  const select = document.getElementById(selectId);
+  const menu = document.getElementById(menuId);
+  const btn = document.getElementById(buttonId);
+  if (!select || !menu || !btn) {
+    return;
+  }
+
+  btn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const willOpen = menu.classList.contains("hidden");
+    closeDropdownMenus();
+    menu.classList.toggle("hidden", !willOpen);
+  });
+
+  menu.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const value = target.dataset.value;
+    if (!value) {
+      return;
+    }
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    closeDropdownMenus();
+  });
+}
+
 function hideCollectionMenuForms() {
   document.getElementById("rename-collection-form")?.classList.add("hidden");
   document.getElementById("create-collection-form")?.classList.add("hidden");
@@ -1624,6 +1689,9 @@ function toggleCollectionMenu(forceOpen = null) {
 }
 
 function attachEvents() {
+  bindDropdown("collection-select", "collection-dropdown-menu", "collection-dropdown-btn");
+  bindDropdown("sort-select", "sort-dropdown-menu", "sort-dropdown-btn");
+
   document.getElementById("collection-select")?.addEventListener("change", async (event) => {
     const value = event.target.value || "__all__";
     sourceMode = value === WISHLIST_SELECT_VALUE ? "wishlist" : "collections";
@@ -1766,6 +1834,8 @@ function attachEvents() {
   });
 
   document.addEventListener("click", (event) => {
+    closeDropdownMenus();
+
     const panel = document.getElementById("collection-menu-panel");
     const btn = document.getElementById("collection-menu-btn");
     if (!panel || !btn) {
