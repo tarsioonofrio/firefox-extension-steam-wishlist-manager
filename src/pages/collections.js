@@ -10,6 +10,7 @@ const SAFE_FETCH_CONCURRENCY = 4;
 const SAFE_FETCH_BASE_DELAY_MS = 350;
 const SAFE_FETCH_JITTER_MS = 220;
 const SAFE_FETCH_MAX_RETRIES = 3;
+const WISHLIST_SELECT_VALUE = "__wishlist__";
 
 let state = null;
 let activeCollection = "__all__";
@@ -1255,6 +1256,11 @@ function renderCollectionSelect() {
 
   select.innerHTML = "";
 
+  const wishlistOption = document.createElement("option");
+  wishlistOption.value = WISHLIST_SELECT_VALUE;
+  wishlistOption.textContent = `Steam wishlist (${Object.keys(wishlistAddedMap || {}).length})`;
+  select.appendChild(wishlistOption);
+
   const allOption = document.createElement("option");
   allOption.value = "__all__";
   allOption.textContent = "All collections";
@@ -1272,9 +1278,8 @@ function renderCollectionSelect() {
     activeCollection = validValues.includes(state.activeCollection) ? state.activeCollection : "__all__";
   }
 
-  select.value = activeCollection;
+  select.value = sourceMode === "wishlist" ? WISHLIST_SELECT_VALUE : activeCollection;
   const disabled = sourceMode === "wishlist";
-  select.disabled = disabled;
   if (deleteBtn) {
     deleteBtn.disabled = disabled;
   }
@@ -1509,7 +1514,6 @@ async function deleteActiveCollection() {
 async function render() {
   const createBtn = document.getElementById("create-collection-btn");
   const newInput = document.getElementById("new-collection-input");
-  const sourceSelect = document.getElementById("source-select");
   const sortSelect = document.getElementById("sort-select");
   const isWishlistMode = sourceMode === "wishlist";
 
@@ -1518,9 +1522,6 @@ async function render() {
   }
   if (newInput) {
     newInput.disabled = isWishlistMode;
-  }
-  if (sourceSelect) {
-    sourceSelect.value = sourceMode;
   }
   if (sortSelect) {
     sortSelect.value = sortMode;
@@ -1558,28 +1559,18 @@ function renderRatingControls() {
 }
 
 function attachEvents() {
-  document.getElementById("source-select")?.addEventListener("change", async (event) => {
-    sourceMode = event.target.value === "wishlist" ? "wishlist" : "collections";
-    page = 1;
-    selectedTags.clear();
-    selectedTypes.clear();
-    tagSearchQuery = "";
-    tagShowLimit = TAG_SHOW_STEP;
-    await ensureTagCounts();
-    await ensureTypeCounts();
-    renderTagOptions();
-    renderTypeOptions();
-    await render();
-  });
-
   document.getElementById("collection-select")?.addEventListener("change", async (event) => {
-    activeCollection = event.target.value || "__all__";
+    const value = event.target.value || "__all__";
+    sourceMode = value === WISHLIST_SELECT_VALUE ? "wishlist" : "collections";
+    activeCollection = sourceMode === "wishlist" ? "__all__" : value;
     page = 1;
 
-    await browser.runtime.sendMessage({
-      type: "set-active-collection",
-      activeCollection
-    });
+    if (sourceMode !== "wishlist") {
+      await browser.runtime.sendMessage({
+        type: "set-active-collection",
+        activeCollection
+      });
+    }
 
     selectedTags.clear();
     selectedTypes.clear();
