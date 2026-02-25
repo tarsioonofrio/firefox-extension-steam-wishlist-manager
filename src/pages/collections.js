@@ -38,6 +38,10 @@ let ratingMin = 0;
 let ratingMax = 100;
 let reviewsMin = 0;
 let reviewsMax = 999999999;
+let discountMin = 0;
+let discountMax = 100;
+let priceMin = 0;
+let priceMax = 9999999;
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -1179,6 +1183,40 @@ function passesReviewFilter(appId) {
   return pct >= ratingMin && pct <= ratingMax && votes >= reviewsMin && votes <= reviewsMax;
 }
 
+function passesDiscountFilter(appId) {
+  const hasDiscountFilter = discountMin > 0 || discountMax < 100;
+  if (!hasDiscountFilter) {
+    return true;
+  }
+  const pct = getMetaNumber(appId, "discountPercent", 0);
+  return pct >= discountMin && pct <= discountMax;
+}
+
+function getPriceForFilter(appId) {
+  const meta = metaCache?.[appId] || {};
+  const isFree = String(meta.priceText || "").trim().toLowerCase() === "free";
+  if (isFree) {
+    return 0;
+  }
+  const finalPrice = Number(meta.priceFinal);
+  if (Number.isFinite(finalPrice) && finalPrice > 0) {
+    return finalPrice / 100;
+  }
+  return null;
+}
+
+function passesPriceFilter(appId) {
+  const hasPriceFilter = priceMin > 0 || priceMax < 9999999;
+  if (!hasPriceFilter) {
+    return true;
+  }
+  const price = getPriceForFilter(appId);
+  if (price === null) {
+    return false;
+  }
+  return price >= priceMin && price <= priceMax;
+}
+
 function getFilteredAndSorted(ids) {
   const normalizedQuery = searchQuery.toLowerCase();
   const baseIds = (sourceMode === "wishlist" && wishlistSortOrders?.[sortMode]?.length)
@@ -1188,7 +1226,12 @@ function getFilteredAndSorted(ids) {
   const list = baseIds.filter((appId) => {
     const title = String(state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || "").toLowerCase();
     const textOk = !normalizedQuery || title.includes(normalizedQuery) || appId.includes(normalizedQuery);
-    return textOk && passesTagFilter(appId) && passesTypeFilter(appId) && passesReviewFilter(appId);
+    return textOk
+      && passesTagFilter(appId)
+      && passesTypeFilter(appId)
+      && passesReviewFilter(appId)
+      && passesDiscountFilter(appId)
+      && passesPriceFilter(appId);
   });
 
   if (sourceMode === "wishlist" && wishlistSortOrders?.[sortMode]?.length) {
@@ -1603,6 +1646,12 @@ function renderRatingControls() {
   const maxRange = document.getElementById("rating-max-range");
   const minInput = document.getElementById("reviews-min-input");
   const maxInput = document.getElementById("reviews-max-input");
+  const discountMinLabel = document.getElementById("discount-min-label");
+  const discountMaxLabel = document.getElementById("discount-max-label");
+  const discountMinRange = document.getElementById("discount-min-range");
+  const discountMaxRange = document.getElementById("discount-max-range");
+  const priceMinInput = document.getElementById("price-min-input");
+  const priceMaxInput = document.getElementById("price-max-input");
   if (minLabel) {
     minLabel.textContent = `${ratingMin}%`;
   }
@@ -1620,6 +1669,24 @@ function renderRatingControls() {
   }
   if (maxInput) {
     maxInput.value = String(reviewsMax);
+  }
+  if (discountMinLabel) {
+    discountMinLabel.textContent = `${discountMin}%`;
+  }
+  if (discountMaxLabel) {
+    discountMaxLabel.textContent = `${discountMax}%`;
+  }
+  if (discountMinRange) {
+    discountMinRange.value = String(discountMin);
+  }
+  if (discountMaxRange) {
+    discountMaxRange.value = String(discountMax);
+  }
+  if (priceMinInput) {
+    priceMinInput.value = String(priceMin);
+  }
+  if (priceMaxInput) {
+    priceMaxInput.value = String(priceMax);
   }
 }
 
@@ -1876,6 +1943,34 @@ function attachEvents() {
     const maxValue = parseNonNegativeInt(document.getElementById("reviews-max-input")?.value, 999999999);
     reviewsMin = Math.min(minValue, maxValue);
     reviewsMax = Math.max(minValue, maxValue);
+    renderRatingControls();
+    page = 1;
+    await renderCards();
+  });
+
+  document.getElementById("discount-min-range")?.addEventListener("input", async (event) => {
+    const next = parseNonNegativeInt(event.target.value, discountMin);
+    discountMin = Math.max(0, Math.min(next, discountMax));
+    renderRatingControls();
+    page = 1;
+    await renderCards();
+  });
+
+  document.getElementById("discount-max-range")?.addEventListener("input", async (event) => {
+    const next = parseNonNegativeInt(event.target.value, discountMax);
+    discountMax = Math.min(100, Math.max(next, discountMin));
+    renderRatingControls();
+    page = 1;
+    await renderCards();
+  });
+
+  document.getElementById("apply-price-btn")?.addEventListener("click", async () => {
+    const minValue = Number(document.getElementById("price-min-input")?.value || 0);
+    const maxValue = Number(document.getElementById("price-max-input")?.value || 9999999);
+    const normMin = Number.isFinite(minValue) && minValue >= 0 ? minValue : 0;
+    const normMax = Number.isFinite(maxValue) && maxValue >= 0 ? maxValue : 9999999;
+    priceMin = Math.min(normMin, normMax);
+    priceMax = Math.max(normMin, normMax);
     renderRatingControls();
     page = 1;
     await renderCards();
