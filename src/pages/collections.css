@@ -37,10 +37,7 @@ body {
 }
 
 .content-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  display: block;
   margin-bottom: 10px;
 }
 
@@ -56,6 +53,7 @@ body {
   gap: 8px;
   align-items: center;
   width: min(860px, 100%);
+  margin-bottom: 10px;
 }
 
 .top-controls input,
@@ -397,8 +395,7 @@ main {
   }
 
   .content-header {
-    flex-direction: column;
-    align-items: stretch;
+    display: block;
   }
 
   .top-controls {
