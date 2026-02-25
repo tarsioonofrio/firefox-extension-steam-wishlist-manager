@@ -3,6 +3,9 @@ const MODAL_ID = "swcm-modal";
 const INIT_RETRY_INTERVAL_MS = 400;
 const MAX_INIT_ATTEMPTS = 20;
 
+let wishlistStateObserver = null;
+let wishlistStateRefreshTimer = 0;
+
 function getAppIdFromUrl() {
   const match = window.location.pathname.match(/\/app\/(\d+)/);
   return match ? match[1] : "";
@@ -92,6 +95,46 @@ function updateSaveAvailability() {
 
   if (!onSteamWishlist) {
     setStatus("Game is not in Steam wishlist. Add it on Steam first.", true);
+  }
+}
+
+function refreshAvailabilitySoon() {
+  if (wishlistStateRefreshTimer) {
+    window.clearTimeout(wishlistStateRefreshTimer);
+  }
+
+  wishlistStateRefreshTimer = window.setTimeout(() => {
+    wishlistStateRefreshTimer = 0;
+    updateTriggerAvailability();
+    updateSaveAvailability();
+  }, 60);
+}
+
+function observeWishlistState() {
+  const area = document.querySelector("#add_to_wishlist_area");
+  const successArea = document.querySelector("#add_to_wishlist_area_success");
+  const parent = area?.parentElement || null;
+
+  const targets = [area, successArea, parent].filter(Boolean);
+  if (!targets.length) {
+    return;
+  }
+
+  if (wishlistStateObserver) {
+    wishlistStateObserver.disconnect();
+  }
+
+  wishlistStateObserver = new MutationObserver(() => {
+    refreshAvailabilitySoon();
+  });
+
+  for (const target of targets) {
+    wishlistStateObserver.observe(target, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "aria-pressed"]
+    });
   }
 }
 
@@ -273,6 +316,7 @@ async function init() {
   });
 
   updateTriggerAvailability();
+  observeWishlistState();
 
   return true;
 }
