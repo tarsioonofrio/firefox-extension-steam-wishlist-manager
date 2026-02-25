@@ -51,16 +51,22 @@ let selectedPlatforms = new Set();
 let platformCounts = [];
 let selectedLanguages = new Set();
 let languageCounts = [];
+let languageSearchQuery = "";
 let selectedFullAudioLanguages = new Set();
 let fullAudioLanguageCounts = [];
+let fullAudioLanguageSearchQuery = "";
 let selectedSubtitleLanguages = new Set();
 let subtitleLanguageCounts = [];
+let subtitleLanguageSearchQuery = "";
 let selectedTechnologies = new Set();
 let technologyCounts = [];
+let technologySearchQuery = "";
 let selectedDevelopers = new Set();
 let developerCounts = [];
+let developerSearchQuery = "";
 let selectedPublishers = new Set();
 let publisherCounts = [];
+let publisherSearchQuery = "";
 let selectedReleaseYears = new Set();
 let releaseYearCounts = [];
 let ratingMin = 0;
@@ -1462,14 +1468,19 @@ async function ensureExtraFilterCounts() {
   setStatus("");
 }
 
-function renderCheckboxOptions(containerId, counts, selectedSet) {
+function renderCheckboxOptions(containerId, counts, selectedSet, query = "") {
   const optionsEl = document.getElementById(containerId);
   if (!optionsEl) {
     return;
   }
   optionsEl.innerHTML = "";
 
-  for (const item of counts) {
+  const normalizedQuery = String(query || "").toLowerCase();
+  const filteredCounts = normalizedQuery
+    ? counts.filter((item) => String(item.name || "").toLowerCase().includes(normalizedQuery))
+    : counts;
+
+  for (const item of filteredCounts) {
     const row = document.createElement("label");
     row.className = "tag-option";
 
@@ -1639,12 +1650,12 @@ function renderExtraFilterOptions() {
   renderCheckboxOptions("hardware-options", hardwareCounts, selectedHardware);
   renderCheckboxOptions("accessibility-options", accessibilityCounts, selectedAccessibility);
   renderCheckboxOptions("platforms-options", platformCounts, selectedPlatforms);
-  renderCheckboxOptions("languages-options", languageCounts, selectedLanguages);
-  renderCheckboxOptions("full-audio-languages-options", fullAudioLanguageCounts, selectedFullAudioLanguages);
-  renderCheckboxOptions("subtitle-languages-options", subtitleLanguageCounts, selectedSubtitleLanguages);
-  renderCheckboxOptions("technologies-options", technologyCounts, selectedTechnologies);
-  renderCheckboxOptions("developers-options", developerCounts, selectedDevelopers);
-  renderCheckboxOptions("publishers-options", publisherCounts, selectedPublishers);
+  renderCheckboxOptions("languages-options", languageCounts, selectedLanguages, languageSearchQuery);
+  renderCheckboxOptions("full-audio-languages-options", fullAudioLanguageCounts, selectedFullAudioLanguages, fullAudioLanguageSearchQuery);
+  renderCheckboxOptions("subtitle-languages-options", subtitleLanguageCounts, selectedSubtitleLanguages, subtitleLanguageSearchQuery);
+  renderCheckboxOptions("technologies-options", technologyCounts, selectedTechnologies, technologySearchQuery);
+  renderCheckboxOptions("developers-options", developerCounts, selectedDevelopers, developerSearchQuery);
+  renderCheckboxOptions("publishers-options", publisherCounts, selectedPublishers, publisherSearchQuery);
   renderCheckboxOptions("release-year-options", releaseYearCounts, selectedReleaseYears);
 }
 
@@ -2300,8 +2311,38 @@ function attachEvents() {
     selectedDevelopers.clear();
     selectedPublishers.clear();
     selectedReleaseYears.clear();
+    languageSearchQuery = "";
+    fullAudioLanguageSearchQuery = "";
+    subtitleLanguageSearchQuery = "";
+    technologySearchQuery = "";
+    developerSearchQuery = "";
+    publisherSearchQuery = "";
     tagSearchQuery = "";
     tagShowLimit = TAG_SHOW_STEP;
+    const languagesSearchInput = document.getElementById("languages-search-input");
+    const fullAudioSearchInput = document.getElementById("full-audio-languages-search-input");
+    const subtitleSearchInput = document.getElementById("subtitle-languages-search-input");
+    const technologiesSearchInput = document.getElementById("technologies-search-input");
+    const developersSearchInput = document.getElementById("developers-search-input");
+    const publishersSearchInput = document.getElementById("publishers-search-input");
+    if (languagesSearchInput) {
+      languagesSearchInput.value = "";
+    }
+    if (fullAudioSearchInput) {
+      fullAudioSearchInput.value = "";
+    }
+    if (subtitleSearchInput) {
+      subtitleSearchInput.value = "";
+    }
+    if (technologiesSearchInput) {
+      technologiesSearchInput.value = "";
+    }
+    if (developersSearchInput) {
+      developersSearchInput.value = "";
+    }
+    if (publishersSearchInput) {
+      publishersSearchInput.value = "";
+    }
     quickPopulateFiltersFromCache();
     refreshFilterOptionsInBackground();
     await render();
@@ -2447,6 +2488,36 @@ function attachEvents() {
   document.getElementById("tag-show-more-btn")?.addEventListener("click", () => {
     tagShowLimit += TAG_SHOW_STEP;
     renderTagOptions();
+  });
+
+  document.getElementById("languages-search-input")?.addEventListener("input", (event) => {
+    languageSearchQuery = String(event.target.value || "").trim();
+    renderExtraFilterOptions();
+  });
+
+  document.getElementById("full-audio-languages-search-input")?.addEventListener("input", (event) => {
+    fullAudioLanguageSearchQuery = String(event.target.value || "").trim();
+    renderExtraFilterOptions();
+  });
+
+  document.getElementById("subtitle-languages-search-input")?.addEventListener("input", (event) => {
+    subtitleLanguageSearchQuery = String(event.target.value || "").trim();
+    renderExtraFilterOptions();
+  });
+
+  document.getElementById("technologies-search-input")?.addEventListener("input", (event) => {
+    technologySearchQuery = String(event.target.value || "").trim();
+    renderExtraFilterOptions();
+  });
+
+  document.getElementById("developers-search-input")?.addEventListener("input", (event) => {
+    developerSearchQuery = String(event.target.value || "").trim();
+    renderExtraFilterOptions();
+  });
+
+  document.getElementById("publishers-search-input")?.addEventListener("input", (event) => {
+    publisherSearchQuery = String(event.target.value || "").trim();
+    renderExtraFilterOptions();
   });
 
   document.getElementById("refresh-page-btn")?.addEventListener("click", () => {
