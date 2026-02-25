@@ -16,6 +16,7 @@ let sortMode = "position";
 
 let metaCache = {};
 let wishlistAddedMap = {};
+let wishlistOrderedAppIds = [];
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -77,7 +78,10 @@ function formatUnixDate(timestamp) {
 
 function getCurrentSourceAppIds() {
   if (sourceMode === "wishlist") {
-    return Object.keys(wishlistAddedMap).sort((a, b) => Number(wishlistAddedMap[b] || 0) - Number(wishlistAddedMap[a] || 0));
+    if (wishlistOrderedAppIds.length > 0) {
+      return [...wishlistOrderedAppIds];
+    }
+    return Object.keys(wishlistAddedMap);
   }
 
   if (!state) {
@@ -209,10 +213,14 @@ async function loadWishlistAddedMap() {
     const nowIds = Array.isArray(userdata?.rgWishlist)
       ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
       : [];
+    wishlistOrderedAppIds = [...nowIds];
 
     // If we couldn't load current wishlist, keep existing cache to avoid destructive overwrite.
     if (nowIds.length === 0 && Object.keys(cachedMap).length > 0) {
       wishlistAddedMap = { ...cachedMap };
+      if (wishlistOrderedAppIds.length === 0) {
+        wishlistOrderedAppIds = Object.keys(cachedMap);
+      }
       return;
     }
 
@@ -272,6 +280,9 @@ async function loadWishlistAddedMap() {
     });
   } catch {
     wishlistAddedMap = { ...cachedMap };
+    if (wishlistOrderedAppIds.length === 0) {
+      wishlistOrderedAppIds = Object.keys(cachedMap);
+    }
   }
 }
 
@@ -772,11 +783,26 @@ async function renderCards() {
     return;
   }
 
-  const appIds = getFilteredAndSorted(getCurrentSourceAppIds());
+  const sourceIds = getCurrentSourceAppIds();
+  const needsMetaForSort = sortMode !== "position";
+  const needsMetaForSearch = Boolean(String(searchQuery || "").trim());
+
+  if (needsMetaForSort || needsMetaForSearch) {
+    setStatus("Loading metadata for sorting/search...");
+    await ensureMetaForAppIds(sourceIds, sourceIds.length);
+  }
+
+  const appIds = getFilteredAndSorted(sourceIds);
   renderPager(appIds.length);
 
   const start = (page - 1) * PAGE_SIZE;
   const pageIds = appIds.slice(start, start + PAGE_SIZE);
+
+  // Always hydrate visible items to avoid fallback "App {id}" titles.
+  await ensureMetaForAppIds(pageIds, pageIds.length);
+  if (needsMetaForSort || needsMetaForSearch) {
+    setStatus("");
+  }
 
   cardsEl.innerHTML = "";
   emptyEl.classList.toggle("hidden", pageIds.length > 0);
