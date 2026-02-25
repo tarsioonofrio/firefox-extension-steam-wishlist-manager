@@ -1,490 +1,253 @@
-const PANEL_ID = "swcm-wishlist-panel";
-const MODAL_ID = "swcm-collections-modal";
-const MANAGE_BUTTON_ID = "swcm-manage-collections";
-const ENABLE_MANAGE_COLLECTIONS = false;
-const WISHLIST_SELECTOR = "#wishlist_ctn, #wishlist_items, .wishlist_row";
-const REFRESH_DEBOUNCE_MS = 250;
-const PRUNE_INTERVAL_MS = 10000;
-const WISHLIST_API_CACHE_TTL_MS = 60000;
+if (!window.location.pathname.startsWith("/wishlist")) {
+  // Not a wishlist route.
+} else {
+  const PANEL_ID = "swcm-wishlist-panel";
+  const FILTER_ID = "swcm-filter-select";
+  const COUNT_ID = "swcm-filter-count";
 
-let observedListContainer = null;
-let observedListMutationObserver = null;
-let refreshTimer = 0;
-let lastPruneAt = 0;
-let wishlistApiCache = null;
-let wishlistApiCacheAt = 0;
-let wishlistApiInFlight = null;
+  let lastRowCount = -1;
 
-function extractAppId(row) {
-  const byData = row.getAttribute("data-app-id") || row.getAttribute("data-ds-appid");
-  if (byData) {
-    return String(byData);
+  function getRows() {
+    return Array.from(document.querySelectorAll(".wishlist_row, div[id^='game_'], div[data-ds-appid]"));
   }
 
-  const idMatch = (row.id || "").match(/(\d+)/);
-  return idMatch ? idMatch[1] : "";
-}
+  function extractAppId(row) {
+    const byData = row.getAttribute("data-app-id") || row.getAttribute("data-ds-appid");
+    if (byData) {
+      return String(byData);
+    }
 
-function getRows() {
-  return Array.from(document.querySelectorAll(".wishlist_row, div[id^='game_'], div[data-ds-appid]"));
-}
-
-function getListContainer() {
-  return document.querySelector("#wishlist_ctn") || document.querySelector("#wishlist_items") || null;
-}
-
-function invalidateWishlistApiCache() {
-  wishlistApiCache = null;
-  wishlistApiCacheAt = 0;
-}
-
-async function fetchWishlistAppIdsFromApi() {
-  const now = Date.now();
-  if (wishlistApiCache && now - wishlistApiCacheAt < WISHLIST_API_CACHE_TTL_MS) {
-    return wishlistApiCache;
+    const idMatch = (row.id || "").match(/(\d+)/);
+    return idMatch ? idMatch[1] : "";
   }
 
-  if (wishlistApiInFlight) {
-    return wishlistApiInFlight;
+  function getListContainer() {
+    return document.querySelector("#wishlist_ctn") || document.querySelector("#wishlist_items") || null;
   }
 
-  wishlistApiInFlight = fetch("https://store.steampowered.com/dynamicstore/userdata/", {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store"
-  })
-    .then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`dynamicstore/userdata failed: ${response.status}`);
+  function findVisibleElement(elements) {
+    return elements.find((el) => {
+      if (!el) {
+        return false;
       }
-
-      const payload = await response.json();
-      const wishlistArray = Array.isArray(payload?.rgWishlist) ? payload.rgWishlist : [];
-      const normalized = wishlistArray.map((appId) => String(appId));
-
-      wishlistApiCache = normalized;
-      wishlistApiCacheAt = Date.now();
-      return normalized;
-    })
-    .finally(() => {
-      wishlistApiInFlight = null;
-    });
-
-  return wishlistApiInFlight;
-}
-
-function createPanel() {
-  const panel = document.createElement("div");
-  panel.id = PANEL_ID;
-  panel.className = "swcm-panel";
-  panel.innerHTML = `
-    <strong>Collections</strong>
-    <select id="swcm-filter-select"></select>
-    <span id="swcm-filter-count">0 visible</span>
-  `;
-  return panel;
-}
-
-function createManageButton() {
-  const button = document.createElement("button");
-  button.id = MANAGE_BUTTON_ID;
-  button.className = "swcm-btn swcm-btn-inline";
-  button.type = "button";
-  button.textContent = "Manage Collections";
-  return button;
-}
-
-function createCollectionsModal() {
-  const overlay = document.createElement("div");
-  overlay.id = MODAL_ID;
-  overlay.className = "swcm-overlay swcm-hidden";
-
-  overlay.innerHTML = `
-    <div class="swcm-modal" role="dialog" aria-modal="true" aria-label="Manage collections">
-      <h3>Manage Collections</h3>
-      <label>
-        New collection name
-        <input id="swcm-new-collection-name" type="text" placeholder="e.g. High Priority" />
-      </label>
-      <div class="swcm-actions swcm-actions-left">
-        <button id="swcm-create-collection" type="button" class="swcm-btn">Create</button>
-      </div>
-      <label>
-        Remove collection
-        <select id="swcm-delete-collection-select"></select>
-      </label>
-      <div class="swcm-actions swcm-actions-left">
-        <button id="swcm-delete-collection" type="button" class="swcm-btn swcm-btn-danger">Remove</button>
-      </div>
-      <div class="swcm-actions">
-        <button id="swcm-close-collections" type="button" class="swcm-btn swcm-btn-secondary">Close</button>
-      </div>
-      <p id="swcm-collections-status" class="swcm-status" aria-live="polite"></p>
-    </div>
-  `;
-
-  return overlay;
-}
-
-function setCollectionsStatus(text, isError = false) {
-  const status = document.getElementById("swcm-collections-status");
-  if (!status) {
-    return;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden";
+    }) || null;
   }
 
-  status.textContent = text;
-  status.classList.toggle("swcm-status-error", isError);
-}
+  function getPanelAnchor() {
+    const wishlistRoot = document.querySelector("#wishlist_ctn") || document.body;
 
-function openCollectionsModal() {
-  const modal = document.getElementById(MODAL_ID);
-  modal?.classList.remove("swcm-hidden");
-}
+    const directHeader = findVisibleElement([
+      wishlistRoot.querySelector(".wishlist_header"),
+      wishlistRoot.querySelector("#wishlist_header"),
+      wishlistRoot.querySelector(".wishlist_title")
+    ]);
+    if (directHeader) {
+      return { node: directHeader, mode: "after" };
+    }
 
-function closeCollectionsModal() {
-  const modal = document.getElementById(MODAL_ID);
-  modal?.classList.add("swcm-hidden");
-}
+    const heading = findVisibleElement(
+      Array.from(wishlistRoot.querySelectorAll("h1, h2")).filter((el) =>
+        /\bwishlist\b/i.test(el.textContent || "")
+      )
+    );
+    if (heading) {
+      const block = heading.closest("div");
+      if (block) {
+        return { node: block, mode: "after" };
+      }
+    }
 
-async function loadState() {
-  return browser.runtime.sendMessage({ type: "get-state" });
-}
+    const searchInput = findVisibleElement([
+      wishlistRoot.querySelector("input[placeholder*='Search by name or tag']"),
+      wishlistRoot.querySelector("input[placeholder*='Search by name']")
+    ]);
+    if (searchInput) {
+      const row = searchInput.closest("div");
+      if (row) {
+        return { node: row, mode: "before" };
+      }
+    }
 
-async function saveActiveCollection(activeCollection) {
-  await browser.runtime.sendMessage({
-    type: "set-active-collection",
-    activeCollection
-  });
-}
-
-async function pruneCollectionsBySteamWishlist() {
-  const now = Date.now();
-  if (now - lastPruneAt < PRUNE_INTERVAL_MS) {
     return null;
   }
 
-  lastPruneAt = now;
+  function ensurePanelPosition(panel) {
+    const anchor = getPanelAnchor();
+    if (!anchor || !anchor.node) {
+      return;
+    }
 
-  try {
-    const appIds = await fetchWishlistAppIdsFromApi();
+    const expectedParent = anchor.node.parentElement;
+    if (!expectedParent) {
+      return;
+    }
 
-    const result = await browser.runtime.sendMessage({
-      type: "prune-items-not-in-wishlist",
-      appIds
-    });
+    const shouldMove = panel.parentElement !== expectedParent;
+    if (shouldMove) {
+      if (anchor.mode === "before") {
+        anchor.node.insertAdjacentElement("beforebegin", panel);
+      } else {
+        anchor.node.insertAdjacentElement("afterend", panel);
+      }
+      return;
+    }
 
-    return result?.state || null;
-  } catch {
-    return null;
-  }
-}
+    if (anchor.mode === "before") {
+      if (panel.nextElementSibling !== anchor.node) {
+        anchor.node.insertAdjacentElement("beforebegin", panel);
+      }
+      return;
+    }
 
-async function populateCollectionsManagement(state) {
-  const select = document.getElementById("swcm-delete-collection-select");
-  if (!select) {
-    return;
-  }
-
-  select.innerHTML = "";
-
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "-- choose collection --";
-  select.appendChild(placeholder);
-
-  for (const collectionName of state.collectionOrder || []) {
-    const option = document.createElement("option");
-    option.value = collectionName;
-    option.textContent = collectionName;
-    select.appendChild(option);
-  }
-}
-
-async function createCollection() {
-  const input = document.getElementById("swcm-new-collection-name");
-  const collectionName = String(input?.value || "").trim();
-
-  if (!collectionName) {
-    setCollectionsStatus("Type a collection name.", true);
-    return;
+    if (panel.previousElementSibling !== anchor.node) {
+      anchor.node.insertAdjacentElement("afterend", panel);
+    }
   }
 
-  await browser.runtime.sendMessage({
-    type: "create-collection",
-    collectionName
-  });
+  function ensurePanel() {
+    let panel = document.getElementById(PANEL_ID);
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = PANEL_ID;
+      panel.className = "swcm-panel";
+      panel.innerHTML = `
+        <strong>Collections</strong>
+        <select id="${FILTER_ID}"></select>
+        <span id="${COUNT_ID}">0/0 visible</span>
+      `;
 
-  if (input) {
-    input.value = "";
+      const select = panel.querySelector(`#${FILTER_ID}`);
+      select?.addEventListener("change", async () => {
+        const value = select.value || "__all__";
+        await browser.runtime.sendMessage({
+          type: "set-active-collection",
+          activeCollection: value
+        });
+        const state = await browser.runtime.sendMessage({ type: "get-state" });
+        applyCollection(state, value);
+      });
+    }
+
+    ensurePanelPosition(panel);
+    return panel;
   }
 
-  setCollectionsStatus(`Collection "${collectionName}" created.`);
-  await updateFilterOptions();
-}
-
-async function deleteCollection() {
-  const select = document.getElementById("swcm-delete-collection-select");
-  const collectionName = String(select?.value || "").trim();
-
-  if (!collectionName) {
-    setCollectionsStatus("Select a collection to remove.", true);
-    return;
+  function updateCount(visible, total) {
+    const el = document.getElementById(COUNT_ID);
+    if (el) {
+      el.textContent = `${visible}/${total} visible`;
+    }
   }
 
-  await browser.runtime.sendMessage({
-    type: "delete-collection",
-    collectionName
-  });
+  function applyCollection(state, collectionName) {
+    const rows = getRows();
+    const total = rows.length;
 
-  setCollectionsStatus(`Collection "${collectionName}" removed.`);
-  await updateFilterOptions();
-}
+    if (!collectionName || collectionName === "__all__") {
+      for (const row of rows) {
+        row.style.display = "";
+      }
+      updateCount(total, total);
+      return;
+    }
 
-function updateCount(visible, total) {
-  const el = document.getElementById("swcm-filter-count");
-  if (el) {
-    el.textContent = `${visible}/${total} visible`;
-  }
-}
+    const orderedIds = state.collections?.[collectionName] || [];
+    const allowed = new Set(orderedIds);
+    const rowByAppId = new Map();
+    let visibleCount = 0;
 
-function applyCollection(state, collectionName) {
-  const rows = getRows();
-  const total = rows.length;
-
-  if (!collectionName || collectionName === "__all__") {
     for (const row of rows) {
-      row.style.display = "";
-    }
-    updateCount(total, total);
-    return;
-  }
+      const appId = extractAppId(row);
+      if (appId) {
+        rowByAppId.set(appId, row);
+      }
 
-  const orderedIds = state.collections[collectionName] || [];
-  const allowed = new Set(orderedIds);
-  const rowByAppId = new Map();
-  let visibleCount = 0;
-
-  for (const row of rows) {
-    const appId = extractAppId(row);
-    if (appId) {
-      rowByAppId.set(appId, row);
-    }
-
-    const isVisible = allowed.has(appId);
-    row.style.display = isVisible ? "" : "none";
-    if (isVisible) {
-      visibleCount += 1;
-    }
-  }
-
-  const container = getListContainer();
-  if (container) {
-    for (const appId of orderedIds) {
-      const row = rowByAppId.get(appId);
-      if (row && row.parentElement === container) {
-        container.appendChild(row);
+      const isVisible = allowed.has(appId);
+      row.style.display = isVisible ? "" : "none";
+      if (isVisible) {
+        visibleCount += 1;
       }
     }
-  }
 
-  updateCount(visibleCount, total);
-}
-
-async function updateFilterOptions() {
-  attachManageButton();
-
-  const prunedState = await pruneCollectionsBySteamWishlist();
-  const state = prunedState || (await loadState());
-
-  const select = document.getElementById("swcm-filter-select");
-  if (!select) {
-    return;
-  }
-
-  select.innerHTML = "";
-
-  const allOption = document.createElement("option");
-  allOption.value = "__all__";
-  allOption.textContent = "All wishlist";
-  select.appendChild(allOption);
-
-  for (const collectionName of state.collectionOrder || []) {
-    const option = document.createElement("option");
-    option.value = collectionName;
-    const size = (state.collections[collectionName] || []).length;
-    option.textContent = `${collectionName} (${size})`;
-    select.appendChild(option);
-  }
-
-  const current = state.activeCollection || "__all__";
-  select.value = Array.from(select.options).some((o) => o.value === current)
-    ? current
-    : "__all__";
-
-  await populateCollectionsManagement(state);
-  applyCollection(state, select.value);
-}
-
-function scheduleRefresh() {
-  if (refreshTimer) {
-    window.clearTimeout(refreshTimer);
-  }
-
-  refreshTimer = window.setTimeout(() => {
-    refreshTimer = 0;
-    invalidateWishlistApiCache();
-    updateFilterOptions().catch(() => {});
-  }, REFRESH_DEBOUNCE_MS);
-}
-
-function observeWishlistContainer() {
-  const container = getListContainer();
-
-  if (!container || container === observedListContainer) {
-    return;
-  }
-
-  if (observedListMutationObserver) {
-    observedListMutationObserver.disconnect();
-  }
-
-  observedListContainer = container;
-  observedListMutationObserver = new MutationObserver(() => {
-    scheduleRefresh();
-  });
-
-  observedListMutationObserver.observe(container, {
-    childList: true,
-    subtree: true
-  });
-}
-
-function getWishlistTitleAnchor() {
-  const header = document.querySelector(".wishlist_header");
-  if (!header) {
-    return null;
-  }
-
-  const candidates = Array.from(header.querySelectorAll("h1, h2, div, span, a"));
-  for (const el of candidates) {
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim().toUpperCase();
-    const looksLikeUserWishlistTitle = /.+\sWISHLIST$/.test(text);
-
-    if (looksLikeUserWishlistTitle) {
-      return el;
+    const container = getListContainer();
+    if (container) {
+      for (const appId of orderedIds) {
+        const row = rowByAppId.get(appId);
+        if (row && row.parentElement === container) {
+          container.appendChild(row);
+        }
+      }
     }
+
+    updateCount(visibleCount, total);
   }
 
-  return null;
-}
+  async function refreshPanel() {
+    ensurePanel();
 
-function attachManageButton() {
-  if (!ENABLE_MANAGE_COLLECTIONS) {
-    return;
-  }
-
-  if (document.getElementById(MANAGE_BUTTON_ID)) {
-    return;
-  }
-
-  const button = createManageButton();
-  button.addEventListener("click", async () => {
-    setCollectionsStatus("");
-    await updateFilterOptions();
-    openCollectionsModal();
-  });
-
-  const titleAnchor = getWishlistTitleAnchor();
-  if (titleAnchor) {
-    titleAnchor.insertAdjacentElement("afterend", button);
-    return;
-  }
-
-  const countAnchor = document.querySelector(".wishlist_header .num, .wishlist_header .wishlist_count");
-  if (countAnchor?.parentElement) {
-    countAnchor.insertAdjacentElement("afterend", button);
-    return;
-  }
-
-  const headerAnchor = document.querySelector(".wishlist_header");
-  if (headerAnchor) {
-    headerAnchor.appendChild(button);
-    return;
-  }
-
-  const panel = document.getElementById(PANEL_ID);
-  if (panel) {
-    panel.appendChild(button);
-  }
-}
-
-function attachCollectionsModal() {
-  if (!ENABLE_MANAGE_COLLECTIONS) {
-    return;
-  }
-
-  if (document.getElementById(MODAL_ID)) {
-    return;
-  }
-
-  const modal = createCollectionsModal();
-  modal.addEventListener("click", (event) => {
-    if (event.target === modal) {
-      closeCollectionsModal();
+    const state = await browser.runtime.sendMessage({ type: "get-state" });
+    const select = document.getElementById(FILTER_ID);
+    if (!select) {
+      return;
     }
-  });
 
-  document.body.appendChild(modal);
+    select.innerHTML = "";
 
-  document.getElementById("swcm-close-collections")?.addEventListener("click", closeCollectionsModal);
-  document.getElementById("swcm-create-collection")?.addEventListener("click", () => {
-    createCollection().catch((error) => {
-      setCollectionsStatus(error?.message || "Failed to create collection.", true);
-    });
-  });
-  document.getElementById("swcm-delete-collection")?.addEventListener("click", () => {
-    deleteCollection().catch((error) => {
-      setCollectionsStatus(error?.message || "Failed to remove collection.", true);
-    });
-  });
-}
+    const allOption = document.createElement("option");
+    allOption.value = "__all__";
+    allOption.textContent = "All wishlist";
+    select.appendChild(allOption);
 
-async function init() {
-  if (!document.getElementById(PANEL_ID)) {
-    const panel = createPanel();
-    const target = document.querySelector(".wishlist_header") || document.body;
-    target.insertAdjacentElement("afterend", panel);
+    for (const collectionName of state.collectionOrder || []) {
+      const option = document.createElement("option");
+      option.value = collectionName;
+      const size = (state.collections[collectionName] || []).length;
+      option.textContent = `${collectionName} (${size})`;
+      select.appendChild(option);
+    }
 
-    const select = document.getElementById("swcm-filter-select");
-    select?.addEventListener("change", async () => {
-      const state = await loadState();
-      const value = select.value || "__all__";
-      await saveActiveCollection(value);
-      applyCollection(state, value);
-    });
+    const current = state.activeCollection || "__all__";
+    select.value = Array.from(select.options).some((o) => o.value === current)
+      ? current
+      : "__all__";
+
+    applyCollection(state, select.value);
   }
 
-  attachManageButton();
-  attachCollectionsModal();
-  observeWishlistContainer();
-  await updateFilterOptions();
-}
+  async function bootstrap() {
+    // Immediate attempt.
+    await refreshPanel().catch(() => {});
 
-const pageObserver = new MutationObserver(() => {
-  if (!document.querySelector(WISHLIST_SELECTOR)) {
-    return;
+    // Retry while Steam builds the page asynchronously.
+    let attempts = 0;
+    const timer = window.setInterval(async () => {
+      attempts += 1;
+
+      const rows = getRows();
+      if (rows.length !== lastRowCount) {
+        lastRowCount = rows.length;
+        await refreshPanel().catch(() => {});
+      } else {
+        ensurePanel();
+      }
+
+      if (attempts >= 120 && document.getElementById(PANEL_ID)) {
+        window.clearInterval(timer);
+      }
+    }, 500);
+
+    // Keep resilient to dynamic re-renders.
+    const observer = new MutationObserver(() => {
+      const panel = document.getElementById(PANEL_ID);
+      if (!panel) {
+        refreshPanel().catch(() => {});
+      }
+    });
+
+    observer.observe(document.documentElement, { childList: true, subtree: true });
   }
 
-  init().catch(() => {});
-  attachManageButton();
-});
-
-if (document.querySelector(WISHLIST_SELECTOR)) {
-  init().catch(() => {});
-  attachManageButton();
+  bootstrap().catch(() => {});
 }
-
-pageObserver.observe(document.documentElement, {
-  childList: true,
-  subtree: true
-});

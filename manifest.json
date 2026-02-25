@@ -6,6 +6,7 @@
   "permissions": ["storage"],
   "host_permissions": [
     "*://store.steampowered.com/app/*",
+    "*://store.steampowered.com/wishlist*",
     "*://store.steampowered.com/wishlist/*"
   ],
   "background": {
@@ -19,7 +20,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://store.steampowered.com/wishlist/*"],
+      "matches": ["*://store.steampowered.com/*"],
       "js": ["src/content/wishlist-page.js"],
       "css": ["src/styles/content.css"],
       "run_at": "document_idle"
