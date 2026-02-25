@@ -7,20 +7,88 @@ const DEFAULT_STATE = {
   activeCollection: "__all__"
 };
 
-async function getState() {
-  const stored = await browser.storage.local.get(STORAGE_KEY);
-  return {
+function normalizeCollectionName(name) {
+  return String(name || "").trim();
+}
+
+function normalizeState(rawState) {
+  const state = {
     ...DEFAULT_STATE,
-    ...(stored[STORAGE_KEY] || {})
+    ...(rawState || {})
+  };
+
+  if (!Array.isArray(state.collectionOrder)) {
+    state.collectionOrder = [];
+  }
+
+  if (!state.collections || typeof state.collections !== "object") {
+    state.collections = {};
+  }
+
+  if (!state.items || typeof state.items !== "object") {
+    state.items = {};
+  }
+
+  const validCollectionOrder = [];
+  const seenCollections = new Set();
+
+  for (const collectionName of state.collectionOrder) {
+    const normalized = normalizeCollectionName(collectionName);
+    if (!normalized || seenCollections.has(normalized)) {
+      continue;
+    }
+    seenCollections.add(normalized);
+    validCollectionOrder.push(normalized);
+  }
+
+  const normalizedCollections = {};
+  const referencedAppIds = new Set();
+
+  for (const collectionName of validCollectionOrder) {
+    const rawList = Array.isArray(state.collections[collectionName])
+      ? state.collections[collectionName]
+      : [];
+
+    const uniqueIds = [];
+    const seenIds = new Set();
+
+    for (const rawId of rawList) {
+      const appId = String(rawId || "").trim();
+      if (!appId || seenIds.has(appId)) {
+        continue;
+      }
+      seenIds.add(appId);
+      uniqueIds.push(appId);
+      referencedAppIds.add(appId);
+    }
+
+    normalizedCollections[collectionName] = uniqueIds;
+  }
+
+  const normalizedItems = {};
+  for (const appId of referencedAppIds) {
+    const existing = state.items[appId] || {};
+    normalizedItems[appId] = {
+      appId,
+      title: String(existing.title || "")
+    };
+  }
+
+  return {
+    collectionOrder: validCollectionOrder,
+    collections: normalizedCollections,
+    items: normalizedItems,
+    activeCollection: String(state.activeCollection || "__all__")
   };
 }
 
-async function setState(state) {
-  await browser.storage.local.set({ [STORAGE_KEY]: state });
+async function getState() {
+  const stored = await browser.storage.local.get(STORAGE_KEY);
+  return normalizeState(stored[STORAGE_KEY]);
 }
 
-function normalizeCollectionName(name) {
-  return String(name || "").trim();
+async function setState(state) {
+  await browser.storage.local.set({ [STORAGE_KEY]: normalizeState(state) });
 }
 
 function ensureCollection(state, name) {
@@ -88,9 +156,7 @@ browser.runtime.onMessage.addListener((message) => {
 
         state.items[appId] = {
           appId,
-          title: item.title || state.items[appId]?.title || "",
-          url: item.url || state.items[appId]?.url || "",
-          updatedAt: Date.now()
+          title: String(item.title || state.items[appId]?.title || "")
         };
 
         await setState(state);

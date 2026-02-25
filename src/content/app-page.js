@@ -1,5 +1,7 @@
 const EXT_ROOT_ID = "swcm-root";
 const MODAL_ID = "swcm-modal";
+const INIT_RETRY_INTERVAL_MS = 400;
+const MAX_INIT_ATTEMPTS = 20;
 
 function getAppIdFromUrl() {
   const match = window.location.pathname.match(/\/app\/(\d+)/);
@@ -141,8 +143,7 @@ async function saveToCollection() {
     collectionName,
     position: positionSelect?.value === "start" ? "start" : "end",
     item: {
-      title: getGameTitle(),
-      url: window.location.href
+      title: getGameTitle()
     }
   });
 
@@ -159,12 +160,12 @@ async function saveToCollection() {
 
 async function init() {
   if (document.getElementById(EXT_ROOT_ID)) {
-    return;
+    return true;
   }
 
   const anchor = getWishlistButton();
   if (!anchor) {
-    return;
+    return false;
   }
 
   const root = document.createElement("div");
@@ -196,11 +197,21 @@ async function init() {
       setStatus(error?.message || "Failed to save game.", true);
     });
   });
+
+  return true;
 }
 
-const appObserver = new MutationObserver(() => {
-  init().catch(() => {});
-});
+async function bootstrap() {
+  for (let attempt = 0; attempt < MAX_INIT_ATTEMPTS; attempt += 1) {
+    const initialized = await init().catch(() => false);
+    if (initialized) {
+      return;
+    }
 
-appObserver.observe(document.documentElement, { childList: true, subtree: true });
-init().catch(() => {});
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, INIT_RETRY_INTERVAL_MS);
+    });
+  }
+}
+
+bootstrap().catch(() => {});

@@ -1,4 +1,10 @@
 const PANEL_ID = "swcm-wishlist-panel";
+const WISHLIST_SELECTOR = "#wishlist_ctn, #wishlist_items";
+const REFRESH_DEBOUNCE_MS = 250;
+
+let observedListContainer = null;
+let observedListMutationObserver = null;
+let refreshTimer = 0;
 
 function extractAppId(row) {
   const byData = row.getAttribute("data-app-id") || row.getAttribute("data-ds-appid");
@@ -11,29 +17,11 @@ function extractAppId(row) {
 }
 
 function getRows() {
-  const selectors = [
-    ".wishlist_row",
-    "div[id^='game_']",
-    "div[data-ds-appid]"
-  ];
-
-  const rows = Array.from(document.querySelectorAll(selectors.join(",")));
-  const unique = [];
-  const seen = new Set();
-
-  for (const row of rows) {
-    if (seen.has(row)) {
-      continue;
-    }
-    seen.add(row);
-    unique.push(row);
-  }
-
-  return unique;
+  return Array.from(document.querySelectorAll(".wishlist_row, div[id^='game_'], div[data-ds-appid]"));
 }
 
 function getListContainer() {
-  return document.querySelector("#wishlist_ctn") || document.querySelector("#wishlist_items") || document.body;
+  return document.querySelector("#wishlist_ctn") || document.querySelector("#wishlist_items") || null;
 }
 
 function createPanel() {
@@ -81,6 +69,7 @@ function applyCollection(state, collectionName) {
   const orderedIds = state.collections[collectionName] || [];
   const allowed = new Set(orderedIds);
   const rowByAppId = new Map();
+  let visibleCount = 0;
 
   for (const row of rows) {
     const appId = extractAppId(row);
@@ -88,18 +77,24 @@ function applyCollection(state, collectionName) {
       rowByAppId.set(appId, row);
     }
 
-    row.style.display = allowed.has(appId) ? "" : "none";
-  }
-
-  const container = getListContainer();
-  for (const appId of orderedIds) {
-    const row = rowByAppId.get(appId);
-    if (row && row.parentElement === container) {
-      container.appendChild(row);
+    const isVisible = allowed.has(appId);
+    row.style.display = isVisible ? "" : "none";
+    if (isVisible) {
+      visibleCount += 1;
     }
   }
 
-  updateCount(allowed.size, total);
+  const container = getListContainer();
+  if (container) {
+    for (const appId of orderedIds) {
+      const row = rowByAppId.get(appId);
+      if (row && row.parentElement === container) {
+        container.appendChild(row);
+      }
+    }
+  }
+
+  updateCount(visibleCount, total);
 }
 
 async function updateFilterOptions() {
@@ -132,34 +127,72 @@ async function updateFilterOptions() {
   applyCollection(state, select.value);
 }
 
-async function init() {
-  if (document.getElementById(PANEL_ID)) {
-    await updateFilterOptions();
+function scheduleRefresh() {
+  if (refreshTimer) {
+    window.clearTimeout(refreshTimer);
+  }
+
+  refreshTimer = window.setTimeout(() => {
+    refreshTimer = 0;
+    updateFilterOptions().catch(() => {});
+  }, REFRESH_DEBOUNCE_MS);
+}
+
+function observeWishlistContainer() {
+  const container = getListContainer();
+
+  if (!container || container === observedListContainer) {
     return;
   }
 
-  const panel = createPanel();
-  const target = document.querySelector(".wishlist_header") || document.body;
-  target.insertAdjacentElement("afterend", panel);
+  if (observedListMutationObserver) {
+    observedListMutationObserver.disconnect();
+  }
 
-  const select = document.getElementById("swcm-filter-select");
-  select?.addEventListener("change", async () => {
-    const state = await loadState();
-    const value = select.value || "__all__";
-    await saveActiveCollection(value);
-    applyCollection(state, value);
+  observedListContainer = container;
+  observedListMutationObserver = new MutationObserver(() => {
+    scheduleRefresh();
   });
 
+  observedListMutationObserver.observe(container, {
+    childList: true,
+    subtree: true
+  });
+}
+
+async function init() {
+  if (!document.getElementById(PANEL_ID)) {
+    const panel = createPanel();
+    const target = document.querySelector(".wishlist_header") || document.body;
+    target.insertAdjacentElement("afterend", panel);
+
+    const select = document.getElementById("swcm-filter-select");
+    select?.addEventListener("change", async () => {
+      const state = await loadState();
+      const value = select.value || "__all__";
+      await saveActiveCollection(value);
+      applyCollection(state, value);
+    });
+  }
+
+  observeWishlistContainer();
   await updateFilterOptions();
 }
 
-const wishlistObserver = new MutationObserver(() => {
+const pageObserver = new MutationObserver(() => {
+  if (!document.querySelector(WISHLIST_SELECTOR)) {
+    return;
+  }
+
+  pageObserver.disconnect();
   init().catch(() => {});
 });
 
-wishlistObserver.observe(document.documentElement, {
-  childList: true,
-  subtree: true
-});
-
-init().catch(() => {});
+if (document.querySelector(WISHLIST_SELECTOR)) {
+  init().catch(() => {});
+} else {
+  pageObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true
+  });
+}
