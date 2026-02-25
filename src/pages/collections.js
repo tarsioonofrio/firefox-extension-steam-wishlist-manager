@@ -57,6 +57,8 @@ let selectedDevelopers = new Set();
 let developerCounts = [];
 let selectedPublishers = new Set();
 let publisherCounts = [];
+let selectedReleaseYears = new Set();
+let releaseYearCounts = [];
 let ratingMin = 0;
 let ratingMax = 100;
 let reviewsMin = 0;
@@ -65,8 +67,6 @@ let discountMin = 0;
 let discountMax = 100;
 let priceMin = 0;
 let priceMax = 9999999;
-let releaseYearMin = 1970;
-let releaseYearMax = 2100;
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -1178,6 +1178,25 @@ function buildArrayFieldCountsFromAppIds(appIds, fieldName) {
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
 }
 
+function buildReleaseYearCountsFromAppIds(appIds) {
+  const counts = new Map();
+  for (const appId of appIds) {
+    const unix = getMetaNumber(appId, "releaseUnix", 0);
+    if (!unix) {
+      continue;
+    }
+    const year = new Date(unix * 1000).getUTCFullYear();
+    if (!Number.isFinite(year) || year < 1970) {
+      continue;
+    }
+    const key = String(year);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => Number(b.name) - Number(a.name));
+}
+
 function getUnknownTypeAppIds(appIds) {
   return appIds.filter((appId) => {
     const raw = String(metaCache?.[appId]?.appTypeRaw || "").trim();
@@ -1269,6 +1288,7 @@ async function ensureExtraFilterCounts() {
     technologyCounts = Array.isArray(cachedBucket.technologyCounts) ? cachedBucket.technologyCounts : [];
     developerCounts = Array.isArray(cachedBucket.developerCounts) ? cachedBucket.developerCounts : [];
     publisherCounts = Array.isArray(cachedBucket.publisherCounts) ? cachedBucket.publisherCounts : [];
+    releaseYearCounts = Array.isArray(cachedBucket.releaseYearCounts) ? cachedBucket.releaseYearCounts : [];
     return;
   }
 
@@ -1286,6 +1306,7 @@ async function ensureExtraFilterCounts() {
   technologyCounts = buildArrayFieldCountsFromAppIds(appIds, "technologies");
   developerCounts = buildArrayFieldCountsFromAppIds(appIds, "developers");
   publisherCounts = buildArrayFieldCountsFromAppIds(appIds, "publishers");
+  releaseYearCounts = buildReleaseYearCountsFromAppIds(appIds);
 
   cache[bucket] = {
     day,
@@ -1299,7 +1320,8 @@ async function ensureExtraFilterCounts() {
     subtitleLanguageCounts,
     technologyCounts,
     developerCounts,
-    publisherCounts
+    publisherCounts,
+    releaseYearCounts
   };
   await browser.storage.local.set({ [EXTRA_FILTER_COUNTS_CACHE_KEY]: cache });
   setStatus("");
@@ -1407,6 +1429,7 @@ function renderExtraFilterOptions() {
   renderCheckboxOptions("technologies-options", technologyCounts, selectedTechnologies);
   renderCheckboxOptions("developers-options", developerCounts, selectedDevelopers);
   renderCheckboxOptions("publishers-options", publisherCounts, selectedPublishers);
+  renderCheckboxOptions("release-year-options", releaseYearCounts, selectedReleaseYears);
 }
 
 function passesTagFilter(appId) {
@@ -1491,16 +1514,15 @@ function passesPriceFilter(appId) {
 }
 
 function passesReleaseYearFilter(appId) {
-  const hasFilter = releaseYearMin > 1970 || releaseYearMax < 2100;
-  if (!hasFilter) {
+  if (selectedReleaseYears.size === 0) {
     return true;
   }
   const unix = getMetaNumber(appId, "releaseUnix", 0);
   if (!unix) {
     return false;
   }
-  const year = new Date(unix * 1000).getUTCFullYear();
-  return year >= releaseYearMin && year <= releaseYearMax;
+  const year = String(new Date(unix * 1000).getUTCFullYear());
+  return selectedReleaseYears.has(year);
 }
 
 function getFilteredAndSorted(ids) {
@@ -1958,8 +1980,6 @@ function renderRatingControls() {
   const discountMaxRange = document.getElementById("discount-max-range");
   const priceMinInput = document.getElementById("price-min-input");
   const priceMaxInput = document.getElementById("price-max-input");
-  const releaseYearMinInput = document.getElementById("release-year-min-input");
-  const releaseYearMaxInput = document.getElementById("release-year-max-input");
   if (minLabel) {
     minLabel.textContent = `${ratingMin}%`;
   }
@@ -1995,12 +2015,6 @@ function renderRatingControls() {
   }
   if (priceMaxInput) {
     priceMaxInput.value = String(priceMax);
-  }
-  if (releaseYearMinInput) {
-    releaseYearMinInput.value = String(releaseYearMin);
-  }
-  if (releaseYearMaxInput) {
-    releaseYearMaxInput.value = String(releaseYearMax);
   }
 }
 
@@ -2092,6 +2106,7 @@ function attachEvents() {
     selectedTechnologies.clear();
     selectedDevelopers.clear();
     selectedPublishers.clear();
+    selectedReleaseYears.clear();
     tagSearchQuery = "";
     tagShowLimit = TAG_SHOW_STEP;
     await ensureTagCounts();
@@ -2298,18 +2313,6 @@ function attachEvents() {
     const normMax = Number.isFinite(maxValue) && maxValue >= 0 ? maxValue : 9999999;
     priceMin = Math.min(normMin, normMax);
     priceMax = Math.max(normMin, normMax);
-    renderRatingControls();
-    page = 1;
-    await renderCards();
-  });
-
-  document.getElementById("apply-release-year-btn")?.addEventListener("click", async () => {
-    const minValue = parseNonNegativeInt(document.getElementById("release-year-min-input")?.value, 1970);
-    const maxValue = parseNonNegativeInt(document.getElementById("release-year-max-input")?.value, 2100);
-    const floor = Math.max(1970, Math.min(minValue, maxValue));
-    const ceil = Math.max(1970, Math.max(minValue, maxValue));
-    releaseYearMin = floor;
-    releaseYearMax = ceil;
     renderRatingControls();
     page = 1;
     await renderCards();
