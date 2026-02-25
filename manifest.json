@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Steam Wishlist Collections Manager",
+  "version": "0.1.0",
+  "description": "Organize Steam wishlist games into custom collections with independent ordering.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "*://store.steampowered.com/app/*",
+    "*://store.steampowered.com/wishlist/*"
+  ],
+  "background": {
+    "scripts": ["src/background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://store.steampowered.com/app/*"],
+      "js": ["src/content/app-page.js"],
+      "css": ["src/styles/content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://store.steampowered.com/wishlist/*"],
+      "js": ["src/content/wishlist-page.js"],
+      "css": ["src/styles/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "steam-wishlist-collections@tarsio.dev",
+      "strict_min_version": "109.0"
+    }
+  }
+}

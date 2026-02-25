@@ -1,0 +1,111 @@
+#swcm-root {
+  margin-top: 8px;
+}
+
+.swcm-btn {
+  background: linear-gradient(180deg, #7ea9c4 0%, #527791 100%);
+  border: 1px solid #29465e;
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.swcm-btn:hover {
+  filter: brightness(1.05);
+}
+
+.swcm-btn-secondary {
+  background: #3b4450;
+  border-color: #2a3139;
+}
+
+.swcm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.swcm-hidden {
+  display: none;
+}
+
+.swcm-modal {
+  width: min(420px, calc(100vw - 24px));
+  background: #1b2838;
+  border: 1px solid #2f445a;
+  border-radius: 6px;
+  padding: 14px;
+  color: #fff;
+  display: grid;
+  gap: 10px;
+}
+
+.swcm-modal h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.swcm-modal label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.swcm-modal input,
+.swcm-modal select {
+  background: #101822;
+  border: 1px solid #2f445a;
+  color: #fff;
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.swcm-checkbox-label {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.swcm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.swcm-status {
+  margin: 0;
+  min-height: 16px;
+  color: #9ddcff;
+  font-size: 12px;
+}
+
+.swcm-status-error {
+  color: #ff9696;
+}
+
+.swcm-panel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #101822;
+  border: 1px solid #2f445a;
+  border-radius: 4px;
+  padding: 8px;
+  margin: 10px 0;
+  color: #d6e7f7;
+  font-size: 12px;
+}
+
+.swcm-panel select {
+  background: #1b2838;
+  border: 1px solid #2f445a;
+  color: #fff;
+  border-radius: 3px;
+  padding: 4px 6px;
+}
