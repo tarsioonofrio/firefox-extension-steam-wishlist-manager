@@ -1249,8 +1249,10 @@ function getFilteredAndSorted(ids) {
 
 function renderCollectionSelect() {
   const select = document.getElementById("collection-select");
+  const selectBtn = document.getElementById("collection-select-btn");
+  const selectMenu = document.getElementById("collection-select-options");
   const deleteSelect = document.getElementById("delete-collection-select");
-  if (!select || !state) {
+  if (!select || !selectBtn || !selectMenu || !state) {
     return;
   }
 
@@ -1279,6 +1281,21 @@ function renderCollectionSelect() {
   }
 
   select.value = sourceMode === "wishlist" ? WISHLIST_SELECT_VALUE : activeCollection;
+  const selectedOption = select.options[select.selectedIndex];
+  selectBtn.textContent = `Collection: ${selectedOption?.textContent || "Select"}`;
+
+  selectMenu.innerHTML = "";
+  for (const option of Array.from(select.options)) {
+    const itemBtn = document.createElement("button");
+    itemBtn.type = "button";
+    itemBtn.className = "dropdown-option";
+    if (option.value === select.value) {
+      itemBtn.classList.add("active");
+    }
+    itemBtn.textContent = option.textContent || option.value;
+    itemBtn.dataset.value = option.value;
+    selectMenu.appendChild(itemBtn);
+  }
 
   if (deleteSelect) {
     deleteSelect.innerHTML = "";
@@ -1289,8 +1306,6 @@ function renderCollectionSelect() {
       deleteSelect.appendChild(option);
     }
   }
-
-  renderDropdownMenu("collection-select", "collection-dropdown-menu", "collection-dropdown-btn");
 }
 
 function renderPager(totalItems) {
@@ -1566,7 +1581,7 @@ async function render() {
     sortSelect.value = sortMode;
   }
 
-  renderDropdownMenu("sort-select", "sort-dropdown-menu", "sort-dropdown-btn");
+  renderSortMenu();
   renderCollectionSelect();
   const canRenameCurrent = sourceMode !== "wishlist" && activeCollection !== "__all__";
   if (renameActionBtn) {
@@ -1608,23 +1623,16 @@ function renderRatingControls() {
   }
 }
 
-function closeDropdownMenus() {
-  document.getElementById("collection-dropdown-menu")?.classList.add("hidden");
-  document.getElementById("sort-dropdown-menu")?.classList.add("hidden");
-}
-
-function renderDropdownMenu(selectId, menuId, buttonId) {
-  const select = document.getElementById(selectId);
-  const menu = document.getElementById(menuId);
-  const btn = document.getElementById(buttonId);
-  if (!select || !menu || !btn) {
+function renderSortMenu() {
+  const select = document.getElementById("sort-select");
+  const btn = document.getElementById("sort-menu-btn");
+  const menu = document.getElementById("sort-menu-options");
+  if (!select || !btn || !menu) {
     return;
   }
 
   const selectedOption = select.options[select.selectedIndex];
-  if (selectedOption) {
-    btn.textContent = selectedOption.textContent || "";
-  }
+  btn.textContent = `Sort by: ${selectedOption?.textContent || "Your order"}`;
 
   menu.innerHTML = "";
   for (const option of Array.from(select.options)) {
@@ -1640,34 +1648,22 @@ function renderDropdownMenu(selectId, menuId, buttonId) {
   }
 }
 
-function bindDropdown(selectId, menuId, buttonId) {
-  const select = document.getElementById(selectId);
-  const menu = document.getElementById(menuId);
-  const btn = document.getElementById(buttonId);
-  if (!select || !menu || !btn) {
+function toggleSortMenu(forceOpen = null) {
+  const panel = document.getElementById("sort-menu-panel");
+  if (!panel) {
     return;
   }
+  const open = forceOpen === null ? panel.classList.contains("hidden") : Boolean(forceOpen);
+  panel.classList.toggle("hidden", !open);
+}
 
-  btn.addEventListener("click", (event) => {
-    event.stopPropagation();
-    const willOpen = menu.classList.contains("hidden");
-    closeDropdownMenus();
-    menu.classList.toggle("hidden", !willOpen);
-  });
-
-  menu.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-    const value = target.dataset.value;
-    if (!value) {
-      return;
-    }
-    select.value = value;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    closeDropdownMenus();
-  });
+function toggleCollectionSelectMenu(forceOpen = null) {
+  const panel = document.getElementById("collection-select-panel");
+  if (!panel) {
+    return;
+  }
+  const open = forceOpen === null ? panel.classList.contains("hidden") : Boolean(forceOpen);
+  panel.classList.toggle("hidden", !open);
 }
 
 function hideCollectionMenuForms() {
@@ -1689,9 +1685,6 @@ function toggleCollectionMenu(forceOpen = null) {
 }
 
 function attachEvents() {
-  bindDropdown("collection-select", "collection-dropdown-menu", "collection-dropdown-btn");
-  bindDropdown("sort-select", "sort-dropdown-menu", "sort-dropdown-btn");
-
   document.getElementById("collection-select")?.addEventListener("change", async (event) => {
     const value = event.target.value || "__all__";
     sourceMode = value === WISHLIST_SELECT_VALUE ? "wishlist" : "collections";
@@ -1716,6 +1709,32 @@ function attachEvents() {
     await render();
   });
 
+  document.getElementById("collection-select-btn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleCollectionMenu(false);
+    toggleSortMenu(false);
+    toggleCollectionSelectMenu();
+  });
+
+  document.getElementById("collection-select-options")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const btn = target.closest("button[data-value]");
+    if (!(btn instanceof HTMLButtonElement)) {
+      return;
+    }
+    const value = String(btn.dataset.value || "");
+    const select = document.getElementById("collection-select");
+    if (!select || !value) {
+      return;
+    }
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    toggleCollectionSelectMenu(false);
+  });
+
   document.getElementById("search-input")?.addEventListener("input", async (event) => {
     searchQuery = String(event.target.value || "");
     page = 1;
@@ -1735,11 +1754,40 @@ function attachEvents() {
     ]);
     sortMode = allowed.has(event.target.value) ? event.target.value : "position";
     page = 1;
+    renderSortMenu();
     await render();
+  });
+
+  document.getElementById("sort-menu-btn")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleCollectionMenu(false);
+    toggleCollectionSelectMenu(false);
+    toggleSortMenu();
+  });
+
+  document.getElementById("sort-menu-options")?.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const btn = target.closest("button[data-value]");
+    if (!(btn instanceof HTMLButtonElement)) {
+      return;
+    }
+    const value = String(btn.dataset.value || "");
+    const select = document.getElementById("sort-select");
+    if (!select || !value) {
+      return;
+    }
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    toggleSortMenu(false);
   });
 
   document.getElementById("collection-menu-btn")?.addEventListener("click", (event) => {
     event.stopPropagation();
+    toggleCollectionSelectMenu(false);
+    toggleSortMenu(false);
     toggleCollectionMenu();
   });
 
@@ -1834,21 +1882,30 @@ function attachEvents() {
   });
 
   document.addEventListener("click", (event) => {
-    closeDropdownMenus();
-
     const panel = document.getElementById("collection-menu-panel");
     const btn = document.getElementById("collection-menu-btn");
-    if (!panel || !btn) {
-      return;
-    }
-    if (panel.classList.contains("hidden")) {
-      return;
-    }
     const target = event.target;
-    if (panel.contains(target) || btn.contains(target)) {
-      return;
+    if (panel && btn && !panel.classList.contains("hidden")) {
+      if (!(panel.contains(target) || btn.contains(target))) {
+        toggleCollectionMenu(false);
+      }
     }
-    toggleCollectionMenu(false);
+
+    const sortPanel = document.getElementById("sort-menu-panel");
+    const sortBtn = document.getElementById("sort-menu-btn");
+    if (sortPanel && sortBtn && !sortPanel.classList.contains("hidden")) {
+      if (!(sortPanel.contains(target) || sortBtn.contains(target))) {
+        toggleSortMenu(false);
+      }
+    }
+
+    const collectionSelectPanel = document.getElementById("collection-select-panel");
+    const collectionSelectBtn = document.getElementById("collection-select-btn");
+    if (collectionSelectPanel && collectionSelectBtn && !collectionSelectPanel.classList.contains("hidden")) {
+      if (!(collectionSelectPanel.contains(target) || collectionSelectBtn.contains(target))) {
+        toggleCollectionSelectMenu(false);
+      }
+    }
   });
 }
 

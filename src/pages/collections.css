@@ -49,10 +49,10 @@ body {
 
 .top-controls {
   display: grid;
-  grid-template-columns: minmax(320px, auto) minmax(220px, 1fr) minmax(150px, auto) auto;
+  grid-template-columns: minmax(300px, auto) minmax(220px, 1fr) minmax(150px, auto) auto;
   gap: 8px;
   align-items: center;
-  width: min(860px, 100%);
+  width: 100%;
   margin-bottom: 10px;
 }
 
@@ -66,30 +66,8 @@ body {
   display: none;
 }
 
-.dropdown {
-  position: relative;
-}
-
-.dropdown-btn {
-  width: 100%;
-  text-align: left;
-}
-
-.dropdown-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  z-index: 50;
-  border: 1px solid #2f445a;
-  border-radius: 6px;
-  background: #162232;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
-  padding: 4px;
-  display: grid;
-  gap: 4px;
-  max-height: 260px;
-  overflow-y: auto;
+#refresh-page-btn {
+  justify-self: end;
 }
 
 .dropdown-option {
@@ -148,6 +126,20 @@ body {
 
 .menu-actions button {
   width: auto;
+}
+
+#sort-menu-panel .menu-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+#collection-select-panel .menu-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+#sort-menu-panel .dropdown-option {
+  width: 100%;
 }
 
 .menu-form {
@@ -220,6 +212,12 @@ button.danger,
   border-top: 1px solid #2f445a;
   margin-top: 10px;
   padding-top: 10px;
+}
+
+.filter-group:first-of-type {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
 }
 
 .filter-group summary {
