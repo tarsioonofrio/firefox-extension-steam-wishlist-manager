@@ -11,7 +11,11 @@
     <main class="content">
       <header class="content-header">
         <h1>Collections</h1>
-        <button id="refresh-page-btn" type="button" class="header-btn">Refresh Page Data</button>
+        <div class="top-controls">
+          <select id="collection-select"></select>
+          <input id="search-input" type="search" placeholder="Search by title or appid">
+          <button id="refresh-page-btn" type="button" class="header-btn">Refresh Page Data</button>
+        </div>
       </header>
       <section id="cards" class="cards"></section>
       <p id="empty" class="empty hidden">No items found for this collection/filter.</p>
@@ -26,14 +30,6 @@
       <div class="sidebar-inner">
         <h2>Tools</h2>
         <div class="controls">
-          <label>
-            Collection
-            <select id="collection-select"></select>
-          </label>
-          <label>
-            Search
-            <input id="search-input" type="search" placeholder="Search by title or appid">
-          </label>
           <label>
             Sort
             <select id="sort-select">
