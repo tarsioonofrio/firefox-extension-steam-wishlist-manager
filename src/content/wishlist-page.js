@@ -7,8 +7,35 @@ if (!window.location.pathname.startsWith("/wishlist")) {
 
   let lastRowCount = -1;
 
+  function uniqueElements(elements) {
+    return Array.from(new Set(elements.filter(Boolean)));
+  }
+
   function getRows() {
-    return Array.from(document.querySelectorAll(".wishlist_row, div[id^='game_'], div[data-ds-appid]"));
+    const primary = uniqueElements(
+      Array.from(document.querySelectorAll(".wishlist_row, div[id^='game_'], div[data-ds-appid]"))
+    );
+    if (primary.length > 0) {
+      return primary;
+    }
+
+    const wishlistRoot = getListContainer() || document;
+    const links = Array.from(wishlistRoot.querySelectorAll("a[href*='/app/']"));
+    const fallbackRows = [];
+
+    for (const link of links) {
+      const row =
+        link.closest(".wishlist_row") ||
+        link.closest("div[id^='game_']") ||
+        link.closest("[data-ds-appid]") ||
+        link.closest(".wishlist_row_ctn") ||
+        link.closest(".Panel");
+      if (row) {
+        fallbackRows.push(row);
+      }
+    }
+
+    return uniqueElements(fallbackRows);
   }
 
   function extractAppId(row) {
@@ -18,7 +45,14 @@ if (!window.location.pathname.startsWith("/wishlist")) {
     }
 
     const idMatch = (row.id || "").match(/(\d+)/);
-    return idMatch ? idMatch[1] : "";
+    if (idMatch) {
+      return idMatch[1];
+    }
+
+    const appLink = row.querySelector("a[href*='/app/']");
+    const href = appLink?.getAttribute("href") || "";
+    const hrefMatch = href.match(/\/app\/(\d+)/);
+    return hrefMatch ? hrefMatch[1] : "";
   }
 
   function getListContainer() {
@@ -134,10 +168,14 @@ if (!window.location.pathname.startsWith("/wishlist")) {
     return panel;
   }
 
-  function updateCount(visible, total) {
+  function updateCount(visible, total, missingFromPage = 0) {
     const el = document.getElementById(COUNT_ID);
     if (el) {
-      el.textContent = `${visible}/${total} visible`;
+      if (missingFromPage > 0) {
+        el.textContent = `${visible}/${total} visible (${missingFromPage} not loaded yet, scroll down)`;
+      } else {
+        el.textContent = `${visible}/${total} visible`;
+      }
     }
   }
 
@@ -181,7 +219,14 @@ if (!window.location.pathname.startsWith("/wishlist")) {
       }
     }
 
-    updateCount(visibleCount, total);
+    let missingFromPage = 0;
+    for (const appId of orderedIds) {
+      if (!rowByAppId.has(appId)) {
+        missingFromPage += 1;
+      }
+    }
+
+    updateCount(visibleCount, total, missingFromPage);
   }
 
   async function refreshPanel() {
