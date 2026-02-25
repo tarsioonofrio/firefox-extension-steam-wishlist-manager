@@ -1,6 +1,8 @@
 const PAGE_SIZE = 30;
 const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV3";
 const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV1";
+const WISHLIST_ADDED_CACHE_TTL_MS = 30 * 60 * 1000;
 
 let state = null;
 let activeCollection = "__all__";
@@ -8,6 +10,7 @@ let page = 1;
 let searchQuery = "";
 let sortMode = "position";
 let metaCache = {};
+let wishlistAddedMap = {};
 
 function formatCompactCount(value) {
   const n = Number(value || 0);
@@ -34,6 +37,94 @@ function setStatus(text, isError = false) {
 
 function normalizeCollectionName(name) {
   return String(name || "").replace(/\s+/g, " ").trim().slice(0, 64);
+}
+
+function formatUnixDate(timestamp) {
+  const n = Number(timestamp || 0);
+  if (!Number.isFinite(n) || n <= 0) {
+    return "-";
+  }
+  return new Date(n * 1000).toLocaleDateString("pt-BR");
+}
+
+async function loadWishlistAddedMap() {
+  const now = Date.now();
+  const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+  const cached = stored[WISHLIST_ADDED_CACHE_KEY];
+  if (cached && now - Number(cached.cachedAt || 0) < WISHLIST_ADDED_CACHE_TTL_MS) {
+    wishlistAddedMap = cached.map || {};
+    return;
+  }
+
+  async function resolveSteamIdFromStoreHtml() {
+    try {
+      const response = await fetch("https://store.steampowered.com/", {
+        credentials: "include",
+        cache: "no-store"
+      });
+      const html = await response.text();
+      const match = html.match(/g_steamID\\s*=\\s*\"(\\d{10,20})\"/);
+      return match ? match[1] : "";
+    } catch {
+      return "";
+    }
+  }
+
+  try {
+    const userdataResponse = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
+      credentials: "include",
+      cache: "no-store"
+    });
+    const userdata = await userdataResponse.json();
+    let steamId =
+      String(
+        userdata?.steamid
+        || userdata?.strSteamId
+        || userdata?.str_steamid
+        || userdata?.webapi_token_steamid
+        || ""
+      ).trim();
+    if (!steamId) {
+      steamId = await resolveSteamIdFromStoreHtml();
+    }
+    if (!steamId) {
+      wishlistAddedMap = {};
+      return;
+    }
+
+    const map = {};
+    for (let pageIndex = 0; pageIndex < 200; pageIndex += 1) {
+      const wishlistResponse = await fetch(
+        `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
+        {
+          credentials: "include",
+          cache: "no-store"
+        }
+      );
+      const wishlistPayload = await wishlistResponse.json();
+      const entries = Object.entries(wishlistPayload || {});
+      if (entries.length === 0) {
+        break;
+      }
+
+      for (const [appId, value] of entries) {
+        const added = Number(value?.added || 0);
+        if (added > 0) {
+          map[String(appId)] = added;
+        }
+      }
+    }
+
+    wishlistAddedMap = map;
+    await browser.storage.local.set({
+      [WISHLIST_ADDED_CACHE_KEY]: {
+        cachedAt: now,
+        map
+      }
+    });
+  } catch {
+    wishlistAddedMap = {};
+  }
 }
 
 async function loadMetaCache() {
@@ -254,6 +345,7 @@ async function renderCards() {
     const tagsRowEl = fragment.querySelector(".tags-row");
     const reviewEl = fragment.querySelector(".review");
     const releaseEl = fragment.querySelector(".release");
+    const wishlistAddedEl = fragment.querySelector(".wishlist-added");
     const removeBtn = fragment.querySelector(".remove-btn");
 
     if (coverLink) {
@@ -270,6 +362,9 @@ async function renderCards() {
     }
     if (appidEl) {
       appidEl.textContent = `AppID: ${appId}`;
+    }
+    if (wishlistAddedEl) {
+      wishlistAddedEl.textContent = `Wishlist: ${formatUnixDate(wishlistAddedMap[appId])}`;
     }
     if (removeBtn) {
       removeBtn.addEventListener("click", async () => {
@@ -416,6 +511,7 @@ function attachEvents() {
 
 async function bootstrap() {
   await loadMetaCache();
+  await loadWishlistAddedMap();
   await refreshState();
   activeCollection = state.activeCollection || "__all__";
   attachEvents();

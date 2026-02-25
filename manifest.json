@@ -8,6 +8,7 @@
     "*://store.steampowered.com/app/*",
     "*://store.steampowered.com/appreviews/*",
     "*://store.steampowered.com/api/*",
+    "*://store.steampowered.com/dynamicstore/*",
     "*://store.steampowered.com/wishlist*",
     "*://store.steampowered.com/wishlist/*"
   ],
