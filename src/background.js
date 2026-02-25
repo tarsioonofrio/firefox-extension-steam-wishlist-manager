@@ -1,4 +1,8 @@
 const STORAGE_KEY = "steamWishlistCollectionsState";
+const MAX_COLLECTION_NAME_LENGTH = 64;
+const MAX_COLLECTIONS = 100;
+const MAX_ITEMS_PER_COLLECTION = 5000;
+const VALID_APP_ID_PATTERN = /^\d{1,10}$/;
 
 const DEFAULT_STATE = {
   collectionOrder: [],
@@ -8,7 +12,28 @@ const DEFAULT_STATE = {
 };
 
 function normalizeCollectionName(name) {
-  return String(name || "").trim();
+  const normalized = String(name || "").replace(/\s+/g, " ").trim();
+  return normalized.slice(0, MAX_COLLECTION_NAME_LENGTH);
+}
+
+function isTrustedSender(sender) {
+  const senderId = sender?.id || "";
+  if (senderId && senderId !== browser.runtime.id) {
+    return false;
+  }
+
+  const senderUrl = String(sender?.url || "");
+  if (!senderUrl) {
+    return false;
+  }
+
+  return /^https:\/\/store\.steampowered\.com\/(app|wishlist)\//.test(senderUrl);
+}
+
+function validateAppId(appId) {
+  if (!VALID_APP_ID_PATTERN.test(appId)) {
+    throw new Error("Invalid appId.");
+  }
 }
 
 function normalizeState(rawState) {
@@ -98,6 +123,9 @@ function ensureCollection(state, name) {
   }
 
   if (!state.collections[normalized]) {
+    if (state.collectionOrder.length >= MAX_COLLECTIONS) {
+      throw new Error("Maximum number of collections reached.");
+    }
     state.collections[normalized] = [];
   }
 
@@ -116,10 +144,14 @@ function removeFromAllCollections(state, appId) {
   }
 }
 
-browser.runtime.onMessage.addListener((message) => {
+browser.runtime.onMessage.addListener((message, sender) => {
   return (async () => {
     if (!message || typeof message !== "object") {
       throw new Error("Invalid message.");
+    }
+
+    if (!isTrustedSender(sender)) {
+      throw new Error("Untrusted message sender.");
     }
 
     const state = await getState();
@@ -130,8 +162,11 @@ browser.runtime.onMessage.addListener((message) => {
       }
 
       case "set-active-collection": {
-        const activeCollection = message.activeCollection || "__all__";
-        state.activeCollection = activeCollection;
+        const activeCollection = normalizeCollectionName(message.activeCollection || "") || "__all__";
+        const isValid =
+          activeCollection === "__all__" || state.collectionOrder.includes(activeCollection);
+
+        state.activeCollection = isValid ? activeCollection : "__all__";
         await setState(state);
         return { ok: true };
       }
@@ -145,6 +180,7 @@ browser.runtime.onMessage.addListener((message) => {
         if (!appId) {
           throw new Error("appId is required.");
         }
+        validateAppId(appId);
 
         removeFromAllCollections(state, appId);
 
@@ -154,9 +190,13 @@ browser.runtime.onMessage.addListener((message) => {
           state.collections[collectionName].push(appId);
         }
 
+        if (state.collections[collectionName].length > MAX_ITEMS_PER_COLLECTION) {
+          state.collections[collectionName] = state.collections[collectionName].slice(0, MAX_ITEMS_PER_COLLECTION);
+        }
+
         state.items[appId] = {
           appId,
-          title: String(item.title || state.items[appId]?.title || "")
+          title: String(item.title || state.items[appId]?.title || "").slice(0, 200)
         };
 
         await setState(state);

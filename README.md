@@ -31,9 +31,16 @@ Useful commands:
 3. Click **Load Temporary Add-on...**.
 4. Select `manifest.json` from this project.
 
+## Wishlist Membership Validation
+
+- Primary source: `https://store.steampowered.com/dynamicstore/userdata/` (`rgWishlist`) from your logged-in session.
+- Local cache: 60 seconds to reduce network/CPU overhead.
+- Cache is invalidated when Steam wishlist UI state changes on the app page.
+- Fallback: conservative UI-based check only if `dynamicstore/userdata` is unavailable.
+
 ## Current limitations
 
-- Steam DOM changes may break selectors.
+- `dynamicstore/userdata` is an internal Steam endpoint and may change in the future.
 - Reordering/filtering is visual and local; it does not modify Steam server-side data.
 - Storage is local to your browser profile unless sync is implemented later.
 

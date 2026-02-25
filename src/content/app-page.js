@@ -2,9 +2,13 @@ const EXT_ROOT_ID = "swcm-root";
 const MODAL_ID = "swcm-modal";
 const INIT_RETRY_INTERVAL_MS = 400;
 const MAX_INIT_ATTEMPTS = 20;
+const WISHLIST_API_CACHE_TTL_MS = 60000;
 
 let wishlistStateObserver = null;
 let wishlistStateRefreshTimer = 0;
+let wishlistApiCache = null;
+let wishlistApiCacheAt = 0;
+let wishlistApiInFlight = null;
 
 function getAppIdFromUrl() {
   const match = window.location.pathname.match(/\/app\/(\d+)/);
@@ -24,6 +28,46 @@ function getWishlistButton() {
   );
 }
 
+function invalidateWishlistApiCache() {
+  wishlistApiCache = null;
+  wishlistApiCacheAt = 0;
+}
+
+async function fetchWishlistSetFromApi() {
+  const now = Date.now();
+  if (wishlistApiCache && now - wishlistApiCacheAt < WISHLIST_API_CACHE_TTL_MS) {
+    return wishlistApiCache;
+  }
+
+  if (wishlistApiInFlight) {
+    return wishlistApiInFlight;
+  }
+
+  wishlistApiInFlight = fetch("https://store.steampowered.com/dynamicstore/userdata/", {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store"
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`dynamicstore/userdata failed: ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const wishlistArray = Array.isArray(payload?.rgWishlist) ? payload.rgWishlist : [];
+      const normalized = new Set(wishlistArray.map((appId) => String(appId)));
+
+      wishlistApiCache = normalized;
+      wishlistApiCacheAt = Date.now();
+      return normalized;
+    })
+    .finally(() => {
+      wishlistApiInFlight = null;
+    });
+
+  return wishlistApiInFlight;
+}
+
 function isElementVisible(element) {
   if (!element) {
     return false;
@@ -37,7 +81,7 @@ function isElementVisible(element) {
   return element.offsetWidth > 0 || element.offsetHeight > 0;
 }
 
-function isOnSteamWishlist() {
+function isOnSteamWishlistFromUi() {
   const area = document.querySelector("#add_to_wishlist_area");
   const successArea = document.querySelector("#add_to_wishlist_area_success");
 
@@ -51,46 +95,62 @@ function isOnSteamWishlist() {
   }
 
   const buttonText = (button.textContent || "").toLowerCase();
-  const buttonClass = (button.className || "").toLowerCase();
   const ariaPressed = button.getAttribute("aria-pressed");
 
-  const looksLikeAddAction =
-    /add to your wishlist/.test(buttonText) ||
-    /adicionar a( sua)? lista de desejos/.test(buttonText) ||
-    /adicionar a lista de desejos/.test(buttonText);
+  const addActionPatterns = [
+    /add to your wishlist/,
+    /adicionar a( sua)? lista de desejos/,
+    /adicionar a lista de desejos/
+  ];
 
-  if (looksLikeAddAction) {
+  const onWishlistPatterns = [
+    /on wishlist/,
+    /in your wishlist/,
+    /na sua lista de desejos/,
+    /em sua lista de desejos/
+  ];
+
+  if (addActionPatterns.some((pattern) => pattern.test(buttonText))) {
     return false;
   }
 
-  return (
-    ariaPressed === "true" ||
-    buttonClass.includes("disabled") ||
-    buttonClass.includes("btn_disabled") ||
-    buttonClass.includes("active")
-  );
+  if (onWishlistPatterns.some((pattern) => pattern.test(buttonText))) {
+    return true;
+  }
+
+  return ariaPressed === "true";
 }
 
-function updateTriggerAvailability() {
+async function isOnSteamWishlist(appId) {
+  try {
+    const wishlistSet = await fetchWishlistSetFromApi();
+    return wishlistSet.has(appId);
+  } catch {
+    // Fail-safe fallback when internal endpoint is unavailable.
+    return isOnSteamWishlistFromUi();
+  }
+}
+
+async function updateTriggerAvailability(appId) {
   const triggerButton = document.getElementById("swcm-open-modal");
   if (!triggerButton) {
     return;
   }
 
-  const onSteamWishlist = isOnSteamWishlist();
+  const onSteamWishlist = await isOnSteamWishlist(appId);
   triggerButton.disabled = !onSteamWishlist;
   triggerButton.title = onSteamWishlist
     ? "Add this game to a collection"
     : "Game is not in Steam wishlist. Add it on Steam first.";
 }
 
-function updateSaveAvailability() {
+async function updateSaveAvailability(appId) {
   const saveButton = document.getElementById("swcm-save");
   if (!saveButton) {
     return;
   }
 
-  const onSteamWishlist = isOnSteamWishlist();
+  const onSteamWishlist = await isOnSteamWishlist(appId);
   saveButton.disabled = !onSteamWishlist;
 
   if (!onSteamWishlist) {
@@ -98,19 +158,20 @@ function updateSaveAvailability() {
   }
 }
 
-function refreshAvailabilitySoon() {
+function refreshAvailabilitySoon(appId) {
   if (wishlistStateRefreshTimer) {
     window.clearTimeout(wishlistStateRefreshTimer);
   }
 
   wishlistStateRefreshTimer = window.setTimeout(() => {
     wishlistStateRefreshTimer = 0;
-    updateTriggerAvailability();
-    updateSaveAvailability();
+    invalidateWishlistApiCache();
+    updateTriggerAvailability(appId).catch(() => {});
+    updateSaveAvailability(appId).catch(() => {});
   }, 60);
 }
 
-function observeWishlistState() {
+function observeWishlistState(appId) {
   const area = document.querySelector("#add_to_wishlist_area");
   const successArea = document.querySelector("#add_to_wishlist_area_success");
   const parent = area?.parentElement || null;
@@ -125,7 +186,7 @@ function observeWishlistState() {
   }
 
   wishlistStateObserver = new MutationObserver(() => {
-    refreshAvailabilitySoon();
+    refreshAvailabilitySoon(appId);
   });
 
   for (const target of targets) {
@@ -231,13 +292,12 @@ async function fillCollectionSelect() {
   }
 }
 
-async function saveToCollection() {
-  if (!isOnSteamWishlist()) {
+async function saveToCollection(appId) {
+  if (!(await isOnSteamWishlist(appId))) {
     setStatus("Game is not in Steam wishlist. Add it on Steam first.", true);
     return;
   }
 
-  const appId = getAppIdFromUrl();
   if (!appId) {
     setStatus("Could not detect Steam app id on this page.", true);
     return;
@@ -274,6 +334,11 @@ async function init() {
     return true;
   }
 
+  const appId = getAppIdFromUrl();
+  if (!appId) {
+    return false;
+  }
+
   const anchor = getWishlistButton();
   if (!anchor) {
     return false;
@@ -292,7 +357,7 @@ async function init() {
     await fillCollectionSelect();
     setStatus("");
     openModal();
-    updateSaveAvailability();
+    await updateSaveAvailability(appId);
   });
 
   const modal = createModal();
@@ -310,13 +375,13 @@ async function init() {
 
   document.getElementById("swcm-cancel")?.addEventListener("click", closeModal);
   document.getElementById("swcm-save")?.addEventListener("click", () => {
-    saveToCollection().catch((error) => {
+    saveToCollection(appId).catch((error) => {
       setStatus(error?.message || "Failed to save game.", true);
     });
   });
 
-  updateTriggerAvailability();
-  observeWishlistState();
+  await updateTriggerAvailability(appId);
+  observeWishlistState(appId);
 
   return true;
 }
