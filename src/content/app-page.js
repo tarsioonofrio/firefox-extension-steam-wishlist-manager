@@ -37,6 +37,33 @@ function getWishlistButton() {
   );
 }
 
+function getActiveWishlistContainer() {
+  const area = document.querySelector("#add_to_wishlist_area");
+  const success = document.querySelector("#add_to_wishlist_area_success");
+
+  if (isElementVisible(success)) {
+    return success;
+  }
+
+  return area;
+}
+
+function ensureAddButtonPosition() {
+  const root = document.getElementById(EXT_ROOT_ID);
+  if (!root) {
+    return;
+  }
+
+  const container = getActiveWishlistContainer();
+  if (!container) {
+    return;
+  }
+
+  if (root.previousElementSibling !== container) {
+    container.insertAdjacentElement("afterend", root);
+  }
+}
+
 function getCommunityHubAnchor() {
   const candidates = Array.from(document.querySelectorAll("a, span, div"));
   for (const el of candidates) {
@@ -251,6 +278,7 @@ function observeWishlistState(appId) {
   }
 
   wishlistStateObserver = new MutationObserver(() => {
+    ensureAddButtonPosition();
     refreshAvailabilitySoon(appId);
   });
 
@@ -570,6 +598,7 @@ function attachAppManageUi() {
 
 async function init() {
   if (document.getElementById(EXT_ROOT_ID)) {
+    ensureAddButtonPosition();
     attachAppManageUi();
     return true;
   }
@@ -579,8 +608,8 @@ async function init() {
     return false;
   }
 
-  const wishlistAnchor = getWishlistButton();
-  if (!wishlistAnchor) {
+  const wishlistContainer = getActiveWishlistContainer() || getWishlistButton();
+  if (!wishlistContainer) {
     return false;
   }
 
@@ -610,8 +639,9 @@ async function init() {
   root.appendChild(button);
   document.body.appendChild(modal);
 
-  const target = wishlistAnchor.closest("a") || wishlistAnchor;
+  const target = wishlistContainer;
   target.insertAdjacentElement("afterend", root);
+  ensureAddButtonPosition();
 
   document.getElementById("swcm-cancel")?.addEventListener("click", closeModal);
   document.getElementById("swcm-save")?.addEventListener("click", () => {

@@ -1,5 +1,8 @@
 #swcm-root {
-  margin-top: 8px;
+  margin-top: 0;
+  margin-left: 8px;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .swcm-btn {
