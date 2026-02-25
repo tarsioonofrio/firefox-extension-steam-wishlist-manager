@@ -494,14 +494,32 @@ async function ensureWishlistMetaFromSnapshot(appIds) {
     return;
   }
 
+  function needsSnapshotBySort(meta) {
+    if (sortMode === "title") {
+      return !String(meta?.titleText || "").trim();
+    }
+    if (sortMode === "price") {
+      const isFree = String(meta?.priceText || "").trim().toLowerCase() === "free";
+      const hasPrice = Number.isFinite(Number(meta?.priceFinal)) && Number(meta?.priceFinal) > 0;
+      return !isFree && !hasPrice;
+    }
+    if (sortMode === "discount") {
+      return !Number.isFinite(Number(meta?.discountPercent));
+    }
+    if (sortMode === "release-date") {
+      return !Number.isFinite(Number(meta?.releaseUnix)) || Number(meta?.releaseUnix) <= 0;
+    }
+    if (sortMode === "review-score") {
+      return !Number.isFinite(Number(meta?.reviewPositivePct));
+    }
+    return false;
+  }
+
   const unresolved = new Set(
     appIds.filter((appId) => {
       const meta = metaCache?.[appId];
-      const hasTitle = Boolean(String(meta?.titleText || "").trim());
-      if (sortMode === "title" || String(searchQuery || "").trim()) {
-        return !hasTitle;
-      }
-      return false;
+      const needsSearchTitle = String(searchQuery || "").trim() && !String(meta?.titleText || "").trim();
+      return needsSearchTitle || needsSnapshotBySort(meta);
     })
   );
 
@@ -514,7 +532,7 @@ async function ensureWishlistMetaFromSnapshot(appIds) {
     return;
   }
 
-  setStatus("Loading wishlist titles...");
+  setStatus("Loading wishlist snapshot metadata...");
   let changed = false;
 
   for (let pageIndex = 0; pageIndex < 200 && unresolved.size > 0; pageIndex += 1) {
@@ -1076,9 +1094,17 @@ async function renderCards() {
   const sourceIds = getCurrentSourceAppIds();
   const needsMetaForSort = sortMode !== "position";
   const needsMetaForSearch = Boolean(String(searchQuery || "").trim());
-  const shouldSkipHeavyMetaHydration = sourceMode === "wishlist" && sortMode === "title";
+  const shouldUseWishlistSnapshot = sourceMode === "wishlist" && (
+    sortMode === "title"
+    || sortMode === "price"
+    || sortMode === "discount"
+    || sortMode === "release-date"
+    || sortMode === "review-score"
+    || needsMetaForSearch
+  );
+  const shouldSkipHeavyMetaHydration = shouldUseWishlistSnapshot;
 
-  if (sourceMode === "wishlist" && (sortMode === "title" || needsMetaForSearch)) {
+  if (shouldUseWishlistSnapshot) {
     await ensureWishlistMetaFromSnapshot(sourceIds);
   }
 
