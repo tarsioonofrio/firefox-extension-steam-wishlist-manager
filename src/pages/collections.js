@@ -8,9 +8,13 @@ const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
 const TAG_SHOW_STEP = 12;
 const SAFE_FETCH_CONCURRENCY = 4;
+const SAFE_FETCH_CONCURRENCY_FORCE = 1;
 const SAFE_FETCH_BASE_DELAY_MS = 350;
 const SAFE_FETCH_JITTER_MS = 220;
 const SAFE_FETCH_MAX_RETRIES = 3;
+const SAFE_FETCH_FORCE_BASE_DELAY_MS = 700;
+const SAFE_FETCH_FORCE_JITTER_MS = 500;
+const SAFE_FETCH_BLOCK_COOLDOWN_MS = 12_000;
 const WISHLIST_SELECT_VALUE = "__wishlist__";
 
 let state = null;
@@ -107,13 +111,31 @@ function shouldRetryStatus(status) {
   return [403, 429, 500, 502, 503, 504].includes(Number(status));
 }
 
+let steamCooldownUntil = 0;
+
+async function waitSteamCooldownIfNeeded() {
+  const now = Date.now();
+  if (steamCooldownUntil > now) {
+    await sleep(steamCooldownUntil - now);
+  }
+}
+
+function bumpSteamCooldown(ms = SAFE_FETCH_BLOCK_COOLDOWN_MS) {
+  const now = Date.now();
+  steamCooldownUntil = Math.max(steamCooldownUntil, now + ms);
+}
+
 async function fetchSteamJson(url, options = {}) {
   let attempt = 0;
   while (true) {
     try {
+      await waitSteamCooldownIfNeeded();
       const response = await fetch(url, { cache: "no-store", ...options });
       if (response.ok) {
         return await response.json();
+      }
+      if (response.status === 403 || response.status === 429) {
+        bumpSteamCooldown(SAFE_FETCH_BLOCK_COOLDOWN_MS + (attempt * 3000));
       }
       if (attempt < SAFE_FETCH_MAX_RETRIES && shouldRetryStatus(response.status)) {
         await sleep(nextBackoffDelay(attempt));
@@ -135,9 +157,13 @@ async function fetchSteamText(url, options = {}) {
   let attempt = 0;
   while (true) {
     try {
+      await waitSteamCooldownIfNeeded();
       const response = await fetch(url, { cache: "no-store", ...options });
       if (response.ok) {
         return await response.text();
+      }
+      if (response.status === 403 || response.status === 429) {
+        bumpSteamCooldown(SAFE_FETCH_BLOCK_COOLDOWN_MS + (attempt * 3000));
       }
       if (attempt < SAFE_FETCH_MAX_RETRIES && shouldRetryStatus(response.status)) {
         await sleep(nextBackoffDelay(attempt));
@@ -818,7 +844,7 @@ async function refreshWholeDatabase() {
   }
 
   setStatus(`Refreshing metadata for ${allIds.length} items...`);
-  await ensureMetaForAppIds(allIds, allIds.length, true);
+  await ensureMetaForAppIds(allIds, allIds.length, true, "Refreshing full database:");
   await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY, EXTRA_FILTER_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
 
@@ -838,7 +864,7 @@ async function refreshCurrentPageItems() {
   }
 
   setStatus(`Refreshing ${ids.length} visible items...`);
-  await ensureMetaForAppIds(ids, ids.length, true);
+  await ensureMetaForAppIds(ids, ids.length, true, "Refreshing visible items:");
   await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY, EXTRA_FILTER_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
   await Promise.allSettled([ensureTagCounts(), ensureTypeCounts(), ensureExtraFilterCounts()]);
@@ -1093,7 +1119,7 @@ async function fetchAppMeta(appId, options = {}) {
   }
 }
 
-async function ensureMetaForAppIds(appIds, limit = 400, force = false) {
+async function ensureMetaForAppIds(appIds, limit = 400, force = false, progressLabel = "") {
   const now = Date.now();
   const missing = [];
 
@@ -1111,15 +1137,42 @@ async function ensureMetaForAppIds(appIds, limit = 400, force = false) {
     }
   }
 
-  const concurrency = SAFE_FETCH_CONCURRENCY;
+  const concurrency = force ? SAFE_FETCH_CONCURRENCY_FORCE : SAFE_FETCH_CONCURRENCY;
+  const total = missing.length;
+  if (total === 0) {
+    return;
+  }
+
   let cursor = 0;
+  let completed = 0;
+  let lastProgressAt = 0;
+
+  function updateProgress(forceNow = false) {
+    if (!progressLabel) {
+      return;
+    }
+    const nowTs = Date.now();
+    if (!forceNow && nowTs - lastProgressAt < 120) {
+      return;
+    }
+    const pct = Math.round((completed / total) * 100);
+    setStatus(`${progressLabel} ${completed}/${total} (${pct}%)`);
+    lastProgressAt = nowTs;
+  }
+
+  updateProgress(true);
 
   async function worker() {
     while (cursor < missing.length) {
       const idx = cursor;
       cursor += 1;
       await fetchAppMeta(missing[idx], { force });
-      await sleep(80 + Math.floor(Math.random() * 100));
+      completed += 1;
+      updateProgress();
+      const perItemDelay = force
+        ? SAFE_FETCH_FORCE_BASE_DELAY_MS + Math.floor(Math.random() * SAFE_FETCH_FORCE_JITTER_MS)
+        : 80 + Math.floor(Math.random() * 100);
+      await sleep(perItemDelay);
     }
   }
 
@@ -1128,6 +1181,7 @@ async function ensureMetaForAppIds(appIds, limit = 400, force = false) {
     workers.push(worker());
   }
   await Promise.all(workers);
+  updateProgress(true);
 }
 
 function buildTagCountsFromAppIds(appIds) {
@@ -1213,15 +1267,28 @@ async function ensureTagCounts() {
   const cache = storage[TAG_COUNTS_CACHE_KEY] || {};
   const cachedBucket = cache[bucket];
 
+  if (appIds.length === 0) {
+    if (cachedBucket && Array.isArray(cachedBucket.counts) && cachedBucket.counts.length > 0) {
+      tagCounts = cachedBucket.counts;
+    }
+    return;
+  }
+
   if (cachedBucket && cachedBucket.day === day && cachedBucket.appCount === appIds.length) {
     tagCounts = Array.isArray(cachedBucket.counts) ? cachedBucket.counts : [];
     return;
   }
 
   setStatus("Recalculating tag frequencies for full wishlist...");
-  await ensureMetaForAppIds(appIds, 2000);
+  await ensureMetaForAppIds(appIds, 2000, false, "Recalculating tag frequencies:");
 
-  tagCounts = buildTagCountsFromAppIds(appIds);
+  const nextCounts = buildTagCountsFromAppIds(appIds);
+  if (nextCounts.length === 0 && cachedBucket && Array.isArray(cachedBucket.counts) && cachedBucket.counts.length > 0) {
+    tagCounts = cachedBucket.counts;
+    setStatus("Steam blocked metadata refresh. Keeping previous tag filters.", true);
+    return;
+  }
+  tagCounts = nextCounts;
 
   cache[bucket] = {
     day,
@@ -1242,21 +1309,34 @@ async function ensureTypeCounts() {
   const cache = storage[TYPE_COUNTS_CACHE_KEY] || {};
   const cachedBucket = cache[bucket];
 
+  if (appIds.length === 0) {
+    if (cachedBucket && Array.isArray(cachedBucket.counts) && cachedBucket.counts.length > 0) {
+      typeCounts = cachedBucket.counts;
+    }
+    return;
+  }
+
   if (cachedBucket && cachedBucket.day === day) {
     typeCounts = Array.isArray(cachedBucket.counts) ? cachedBucket.counts : [];
     return;
   }
 
   setStatus("Loading full wishlist metadata for type frequencies...");
-  await ensureMetaForAppIds(appIds, appIds.length);
+  await ensureMetaForAppIds(appIds, appIds.length, false, "Loading type frequencies:");
 
   const unknownTypeIds = getUnknownTypeAppIds(appIds);
   if (unknownTypeIds.length > 0) {
     setStatus("Refreshing unresolved app types...");
-    await ensureMetaForAppIds(unknownTypeIds, unknownTypeIds.length, true);
+    await ensureMetaForAppIds(unknownTypeIds, unknownTypeIds.length, true, "Refreshing unresolved types:");
   }
 
-  typeCounts = buildTypeCountsFromAppIds(appIds);
+  const nextCounts = buildTypeCountsFromAppIds(appIds);
+  if (nextCounts.length === 0 && cachedBucket && Array.isArray(cachedBucket.counts) && cachedBucket.counts.length > 0) {
+    typeCounts = cachedBucket.counts;
+    setStatus("Steam blocked metadata refresh. Keeping previous type filters.", true);
+    return;
+  }
+  typeCounts = nextCounts;
 
   cache[bucket] = {
     day,
@@ -1276,6 +1356,24 @@ async function ensureExtraFilterCounts() {
   const cache = storage[EXTRA_FILTER_COUNTS_CACHE_KEY] || {};
   const cachedBucket = cache[bucket];
 
+  if (appIds.length === 0) {
+    if (cachedBucket && cachedBucket.day) {
+      playerCounts = Array.isArray(cachedBucket.playerCounts) ? cachedBucket.playerCounts : [];
+      featureCounts = Array.isArray(cachedBucket.featureCounts) ? cachedBucket.featureCounts : [];
+      hardwareCounts = Array.isArray(cachedBucket.hardwareCounts) ? cachedBucket.hardwareCounts : [];
+      accessibilityCounts = Array.isArray(cachedBucket.accessibilityCounts) ? cachedBucket.accessibilityCounts : [];
+      platformCounts = Array.isArray(cachedBucket.platformCounts) ? cachedBucket.platformCounts : [];
+      languageCounts = Array.isArray(cachedBucket.languageCounts) ? cachedBucket.languageCounts : [];
+      fullAudioLanguageCounts = Array.isArray(cachedBucket.fullAudioLanguageCounts) ? cachedBucket.fullAudioLanguageCounts : [];
+      subtitleLanguageCounts = Array.isArray(cachedBucket.subtitleLanguageCounts) ? cachedBucket.subtitleLanguageCounts : [];
+      technologyCounts = Array.isArray(cachedBucket.technologyCounts) ? cachedBucket.technologyCounts : [];
+      developerCounts = Array.isArray(cachedBucket.developerCounts) ? cachedBucket.developerCounts : [];
+      publisherCounts = Array.isArray(cachedBucket.publisherCounts) ? cachedBucket.publisherCounts : [];
+      releaseYearCounts = Array.isArray(cachedBucket.releaseYearCounts) ? cachedBucket.releaseYearCounts : [];
+    }
+    return;
+  }
+
   if (cachedBucket && cachedBucket.day === day) {
     playerCounts = Array.isArray(cachedBucket.playerCounts) ? cachedBucket.playerCounts : [];
     featureCounts = Array.isArray(cachedBucket.featureCounts) ? cachedBucket.featureCounts : [];
@@ -1293,20 +1391,57 @@ async function ensureExtraFilterCounts() {
   }
 
   setStatus("Loading metadata for extra filters...");
-  await ensureMetaForAppIds(appIds, 2000);
+  await ensureMetaForAppIds(appIds, 2000, false, "Loading extra filters:");
 
-  playerCounts = buildArrayFieldCountsFromAppIds(appIds, "players");
-  featureCounts = buildArrayFieldCountsFromAppIds(appIds, "features");
-  hardwareCounts = buildArrayFieldCountsFromAppIds(appIds, "hardware");
-  accessibilityCounts = buildArrayFieldCountsFromAppIds(appIds, "accessibility");
-  platformCounts = buildArrayFieldCountsFromAppIds(appIds, "platforms");
-  languageCounts = buildArrayFieldCountsFromAppIds(appIds, "languages");
-  fullAudioLanguageCounts = buildArrayFieldCountsFromAppIds(appIds, "fullAudioLanguages");
-  subtitleLanguageCounts = buildArrayFieldCountsFromAppIds(appIds, "subtitleLanguages");
-  technologyCounts = buildArrayFieldCountsFromAppIds(appIds, "technologies");
-  developerCounts = buildArrayFieldCountsFromAppIds(appIds, "developers");
-  publisherCounts = buildArrayFieldCountsFromAppIds(appIds, "publishers");
-  releaseYearCounts = buildReleaseYearCountsFromAppIds(appIds);
+  const nextPlayerCounts = buildArrayFieldCountsFromAppIds(appIds, "players");
+  const nextFeatureCounts = buildArrayFieldCountsFromAppIds(appIds, "features");
+  const nextHardwareCounts = buildArrayFieldCountsFromAppIds(appIds, "hardware");
+  const nextAccessibilityCounts = buildArrayFieldCountsFromAppIds(appIds, "accessibility");
+  const nextPlatformCounts = buildArrayFieldCountsFromAppIds(appIds, "platforms");
+  const nextLanguageCounts = buildArrayFieldCountsFromAppIds(appIds, "languages");
+  const nextFullAudioLanguageCounts = buildArrayFieldCountsFromAppIds(appIds, "fullAudioLanguages");
+  const nextSubtitleLanguageCounts = buildArrayFieldCountsFromAppIds(appIds, "subtitleLanguages");
+  const nextTechnologyCounts = buildArrayFieldCountsFromAppIds(appIds, "technologies");
+  const nextDeveloperCounts = buildArrayFieldCountsFromAppIds(appIds, "developers");
+  const nextPublisherCounts = buildArrayFieldCountsFromAppIds(appIds, "publishers");
+  const nextReleaseYearCounts = buildReleaseYearCountsFromAppIds(appIds);
+
+  const totalNext =
+    nextPlayerCounts.length + nextFeatureCounts.length + nextHardwareCounts.length
+    + nextAccessibilityCounts.length + nextPlatformCounts.length + nextLanguageCounts.length
+    + nextFullAudioLanguageCounts.length + nextSubtitleLanguageCounts.length
+    + nextTechnologyCounts.length + nextDeveloperCounts.length + nextPublisherCounts.length
+    + nextReleaseYearCounts.length;
+
+  if (totalNext === 0 && cachedBucket && cachedBucket.day) {
+    playerCounts = Array.isArray(cachedBucket.playerCounts) ? cachedBucket.playerCounts : [];
+    featureCounts = Array.isArray(cachedBucket.featureCounts) ? cachedBucket.featureCounts : [];
+    hardwareCounts = Array.isArray(cachedBucket.hardwareCounts) ? cachedBucket.hardwareCounts : [];
+    accessibilityCounts = Array.isArray(cachedBucket.accessibilityCounts) ? cachedBucket.accessibilityCounts : [];
+    platformCounts = Array.isArray(cachedBucket.platformCounts) ? cachedBucket.platformCounts : [];
+    languageCounts = Array.isArray(cachedBucket.languageCounts) ? cachedBucket.languageCounts : [];
+    fullAudioLanguageCounts = Array.isArray(cachedBucket.fullAudioLanguageCounts) ? cachedBucket.fullAudioLanguageCounts : [];
+    subtitleLanguageCounts = Array.isArray(cachedBucket.subtitleLanguageCounts) ? cachedBucket.subtitleLanguageCounts : [];
+    technologyCounts = Array.isArray(cachedBucket.technologyCounts) ? cachedBucket.technologyCounts : [];
+    developerCounts = Array.isArray(cachedBucket.developerCounts) ? cachedBucket.developerCounts : [];
+    publisherCounts = Array.isArray(cachedBucket.publisherCounts) ? cachedBucket.publisherCounts : [];
+    releaseYearCounts = Array.isArray(cachedBucket.releaseYearCounts) ? cachedBucket.releaseYearCounts : [];
+    setStatus("Steam blocked metadata refresh. Keeping previous advanced filters.", true);
+    return;
+  }
+
+  playerCounts = nextPlayerCounts;
+  featureCounts = nextFeatureCounts;
+  hardwareCounts = nextHardwareCounts;
+  accessibilityCounts = nextAccessibilityCounts;
+  platformCounts = nextPlatformCounts;
+  languageCounts = nextLanguageCounts;
+  fullAudioLanguageCounts = nextFullAudioLanguageCounts;
+  subtitleLanguageCounts = nextSubtitleLanguageCounts;
+  technologyCounts = nextTechnologyCounts;
+  developerCounts = nextDeveloperCounts;
+  publisherCounts = nextPublisherCounts;
+  releaseYearCounts = nextReleaseYearCounts;
 
   cache[bucket] = {
     day,
@@ -1713,7 +1848,7 @@ async function renderCards() {
   if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
     setStatus("Loading metadata for sorting/search...");
     try {
-      await ensureMetaForAppIds(sourceIds, sourceIds.length);
+      await ensureMetaForAppIds(sourceIds, sourceIds.length, false, "Loading metadata for sorting/search:");
     } catch {
       setStatus("Metadata loading partially failed.", true);
     }
@@ -1728,7 +1863,7 @@ async function renderCards() {
 
   // Always hydrate visible items to avoid fallback "App {id}" titles.
   try {
-    await ensureMetaForAppIds(pageIds, pageIds.length);
+    await ensureMetaForAppIds(pageIds, pageIds.length, false, "Loading visible metadata:");
   } catch {
     setStatus("Some visible items could not be refreshed.", true);
   }
