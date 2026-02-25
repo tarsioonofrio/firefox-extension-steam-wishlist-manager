@@ -5,6 +5,11 @@ if (!window.location.pathname.startsWith("/wishlist")) {
   const FILTER_ID = "swcm-filter-select";
   const COUNT_ID = "swcm-filter-count";
   const FALLBACK_ID = "swcm-wishlist-fallback";
+  const MANAGE_BUTTON_ID = "swcm-wishlist-manage-btn";
+  const MANAGE_MODAL_ID = "swcm-wishlist-manage-modal";
+  const MANAGE_NEW_INPUT_ID = "swcm-wishlist-new-collection-name";
+  const MANAGE_DELETE_SELECT_ID = "swcm-wishlist-delete-collection-select";
+  const MANAGE_STATUS_ID = "swcm-wishlist-collections-status";
 
   let lastRowCount = -1;
 
@@ -149,6 +154,7 @@ if (!window.location.pathname.startsWith("/wishlist")) {
       panel.className = "swcm-panel";
       panel.innerHTML = `
         <strong>Collections</strong>
+        <button id="${MANAGE_BUTTON_ID}" type="button" class="swcm-btn swcm-btn-inline">Manage</button>
         <select id="${FILTER_ID}"></select>
         <span id="${COUNT_ID}">0/0 visible</span>
       `;
@@ -163,10 +169,158 @@ if (!window.location.pathname.startsWith("/wishlist")) {
         const state = await browser.runtime.sendMessage({ type: "get-state" });
         applyCollection(state, value);
       });
+
+      const manageButton = panel.querySelector(`#${MANAGE_BUTTON_ID}`);
+      manageButton?.addEventListener("click", async () => {
+        setManageStatus("");
+        await populateManageDeleteSelect();
+        openManageModal();
+      });
     }
 
     ensurePanelPosition(panel);
+    ensureManageModal();
     return panel;
+  }
+
+  function ensureManageModal() {
+    if (document.getElementById(MANAGE_MODAL_ID)) {
+      return;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.id = MANAGE_MODAL_ID;
+    overlay.className = "swcm-overlay swcm-hidden";
+    overlay.innerHTML = `
+      <div class="swcm-modal" role="dialog" aria-modal="true" aria-label="Manage collections">
+        <h3>Manage Collections</h3>
+        <label>
+          New collection name
+          <input id="${MANAGE_NEW_INPUT_ID}" type="text" placeholder="e.g. High Priority" />
+        </label>
+        <div class="swcm-actions swcm-actions-left">
+          <button id="swcm-wishlist-create-collection" type="button" class="swcm-btn">Create</button>
+        </div>
+        <label>
+          Remove collection
+          <select id="${MANAGE_DELETE_SELECT_ID}"></select>
+        </label>
+        <div class="swcm-actions swcm-actions-left">
+          <button id="swcm-wishlist-delete-collection" type="button" class="swcm-btn swcm-btn-danger">Remove</button>
+        </div>
+        <div class="swcm-actions">
+          <button id="swcm-wishlist-close-collections" type="button" class="swcm-btn swcm-btn-secondary">Close</button>
+        </div>
+        <p id="${MANAGE_STATUS_ID}" class="swcm-status" aria-live="polite"></p>
+      </div>
+    `;
+
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        closeManageModal();
+      }
+    });
+
+    document.body.appendChild(overlay);
+
+    document
+      .getElementById("swcm-wishlist-close-collections")
+      ?.addEventListener("click", closeManageModal);
+    document
+      .getElementById("swcm-wishlist-create-collection")
+      ?.addEventListener("click", () => {
+        createCollectionFromManageModal().catch((error) => {
+          setManageStatus(error?.message || "Failed to create collection.", true);
+        });
+      });
+    document
+      .getElementById("swcm-wishlist-delete-collection")
+      ?.addEventListener("click", () => {
+        deleteCollectionFromManageModal().catch((error) => {
+          setManageStatus(error?.message || "Failed to remove collection.", true);
+        });
+      });
+  }
+
+  function openManageModal() {
+    const modal = document.getElementById(MANAGE_MODAL_ID);
+    modal?.classList.remove("swcm-hidden");
+  }
+
+  function closeManageModal() {
+    const modal = document.getElementById(MANAGE_MODAL_ID);
+    modal?.classList.add("swcm-hidden");
+  }
+
+  function setManageStatus(text, isError = false) {
+    const status = document.getElementById(MANAGE_STATUS_ID);
+    if (!status) {
+      return;
+    }
+    status.textContent = text;
+    status.classList.toggle("swcm-status-error", isError);
+  }
+
+  async function populateManageDeleteSelect() {
+    const select = document.getElementById(MANAGE_DELETE_SELECT_ID);
+    if (!select) {
+      return;
+    }
+
+    const state = await browser.runtime.sendMessage({ type: "get-state" });
+    select.innerHTML = "";
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "-- choose collection --";
+    select.appendChild(placeholder);
+
+    for (const collectionName of state.collectionOrder || []) {
+      const option = document.createElement("option");
+      option.value = collectionName;
+      option.textContent = collectionName;
+      select.appendChild(option);
+    }
+  }
+
+  async function createCollectionFromManageModal() {
+    const input = document.getElementById(MANAGE_NEW_INPUT_ID);
+    const collectionName = String(input?.value || "").trim();
+    if (!collectionName) {
+      setManageStatus("Type a collection name.", true);
+      return;
+    }
+
+    await browser.runtime.sendMessage({
+      type: "create-collection",
+      collectionName
+    });
+
+    if (input) {
+      input.value = "";
+    }
+
+    setManageStatus(`Collection "${collectionName}" created.`);
+    await populateManageDeleteSelect();
+    await refreshPanel();
+  }
+
+  async function deleteCollectionFromManageModal() {
+    const select = document.getElementById(MANAGE_DELETE_SELECT_ID);
+    const collectionName = String(select?.value || "").trim();
+    if (!collectionName) {
+      setManageStatus("Select a collection to remove.", true);
+      return;
+    }
+
+    await browser.runtime.sendMessage({
+      type: "delete-collection",
+      collectionName
+    });
+
+    setManageStatus(`Collection "${collectionName}" removed.`);
+    await populateManageDeleteSelect();
+    await refreshPanel();
   }
 
   function ensureFallbackBox() {
