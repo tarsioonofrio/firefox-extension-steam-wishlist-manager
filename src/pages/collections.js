@@ -214,6 +214,27 @@ function getMetaNumber(appId, key, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function isMetaIncomplete(meta) {
+  if (!meta) {
+    return true;
+  }
+
+  const title = String(meta.titleText || "").trim();
+  const release = String(meta.releaseText || "").trim();
+  const price = String(meta.priceText || "").trim();
+
+  if (!title) {
+    return true;
+  }
+
+  // Known bad cache state for games where appdetails failed/partial.
+  if (release === "-" && price === "-") {
+    return true;
+  }
+
+  return false;
+}
+
 async function loadWishlistAddedMap() {
   const now = Date.now();
   const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
@@ -370,19 +391,45 @@ async function fetchAppMeta(appId, options = {}) {
   const cached = metaCache[appId];
   const now = Date.now();
 
-  if (!force && cached && now - cached.cachedAt < META_CACHE_TTL_MS) {
+  if (!force && cached && now - cached.cachedAt < META_CACHE_TTL_MS && !isMetaIncomplete(cached)) {
     return cached;
   }
 
+  async function fetchAppDetailsDataWithFallback() {
+    const urls = [
+      `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=pt-BR`,
+      `https://store.steampowered.com/api/appdetails?appids=${appId}&l=en`,
+      `https://store.steampowered.com/api/appdetails?appids=${appId}`
+    ];
+
+    for (const url of urls) {
+      try {
+        const payload = await fetchSteamJson(url);
+        const data = payload?.[appId]?.data;
+        if (data) {
+          return data;
+        }
+      } catch {
+        // Try next fallback URL.
+      }
+    }
+
+    return null;
+  }
+
   try {
-    const [detailsResult, reviewsResult] = await Promise.allSettled([
-      fetchSteamJson(`https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=pt-BR`),
+    const [detailsDataResult, reviewsResult] = await Promise.allSettled([
+      fetchAppDetailsDataWithFallback(),
       fetchSteamJson(`https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`)
     ]);
 
-    let detailsPayload = null;
-    if (detailsResult.status === "fulfilled") {
-      detailsPayload = detailsResult.value;
+    let appData = null;
+    if (detailsDataResult.status === "fulfilled") {
+      appData = detailsDataResult.value;
+    }
+
+    if (!appData) {
+      throw new Error("No appdetails payload");
     }
 
     let reviewsPayload = null;
@@ -390,7 +437,6 @@ async function fetchAppMeta(appId, options = {}) {
       reviewsPayload = reviewsResult.value;
     }
 
-    const appData = detailsPayload?.[appId]?.data;
     const reviewSummary = reviewsPayload?.query_summary || {};
 
     const genres = Array.isArray(appData?.genres)
@@ -473,7 +519,10 @@ async function ensureMetaForAppIds(appIds, limit = 400, force = false) {
 
   for (const appId of appIds) {
     const cached = metaCache[appId];
-    const fresh = cached && now - Number(cached.cachedAt || 0) < META_CACHE_TTL_MS && !force;
+    const fresh = cached
+      && now - Number(cached.cachedAt || 0) < META_CACHE_TTL_MS
+      && !force
+      && !isMetaIncomplete(cached);
     if (!fresh) {
       missing.push(appId);
     }
