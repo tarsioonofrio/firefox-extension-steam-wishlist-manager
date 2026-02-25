@@ -22,6 +22,8 @@ let metaCache = {};
 let wishlistAddedMap = {};
 let wishlistOrderedAppIds = [];
 let wishlistPriorityMap = {};
+let wishlistSortSignature = "";
+let wishlistSortOrders = {};
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -168,6 +170,27 @@ function getCurrentSourceAppIds() {
   return [...(state.collections?.[activeCollection] || [])];
 }
 
+function hashStringToUint32(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function buildWishlistSignature(appIds) {
+  const ids = Array.isArray(appIds) ? appIds : [];
+  let acc = 2166136261;
+  for (let index = 0; index < ids.length; index += 1) {
+    const appId = ids[index];
+    const added = Number(wishlistAddedMap?.[appId] || 0);
+    acc ^= hashStringToUint32(`${index}:${appId}:${added}`);
+    acc = Math.imul(acc, 16777619);
+  }
+  return `${ids.length}:${acc >>> 0}`;
+}
+
 function sortByWishlistPriority(appIds) {
   const indexed = appIds.map((id, index) => ({ id, index }));
   indexed.sort((a, b) => {
@@ -187,6 +210,44 @@ function sortByWishlistPriority(appIds) {
     return a.index - b.index;
   });
   return indexed.map((entry) => entry.id);
+}
+
+function buildWishlistSortOrders(appIds) {
+  const ids = Array.isArray(appIds) ? [...appIds] : [];
+  const basePosition = sortByWishlistPriority(ids);
+
+  function stableSorted(compareFn) {
+    const indexed = ids.map((id, index) => ({ id, index }));
+    indexed.sort((a, b) => {
+      const byRule = compareFn(a.id, b.id);
+      if (byRule !== 0) {
+        return byRule;
+      }
+      return a.index - b.index;
+    });
+    return indexed.map((entry) => entry.id);
+  }
+
+  return {
+    position: basePosition,
+    title: stableSorted((a, b) => {
+      const ta = String(state?.items?.[a]?.title || metaCache?.[a]?.titleText || a);
+      const tb = String(state?.items?.[b]?.title || metaCache?.[b]?.titleText || b);
+      return ta.localeCompare(tb, "pt-BR", { sensitivity: "base" });
+    }),
+    price: stableSorted((a, b) => getEffectiveSortPrice(a) - getEffectiveSortPrice(b)),
+    discount: stableSorted((a, b) => getMetaNumber(b, "discountPercent", 0) - getMetaNumber(a, "discountPercent", 0)),
+    "date-added": stableSorted((a, b) => Number(wishlistAddedMap[b] || 0) - Number(wishlistAddedMap[a] || 0)),
+    "top-selling": stableSorted((a, b) => getMetaNumber(b, "recommendationsTotal", 0) - getMetaNumber(a, "recommendationsTotal", 0)),
+    "release-date": stableSorted((a, b) => getMetaNumber(b, "releaseUnix", 0) - getMetaNumber(a, "releaseUnix", 0)),
+    "review-score": stableSorted((a, b) => {
+      const pctDiff = getMetaNumber(b, "reviewPositivePct", -1) - getMetaNumber(a, "reviewPositivePct", -1);
+      if (pctDiff !== 0) {
+        return pctDiff;
+      }
+      return getMetaNumber(b, "reviewTotalVotes", 0) - getMetaNumber(a, "reviewTotalVotes", 0);
+    })
+  };
 }
 
 function buildTagCacheBucketKey() {
@@ -365,6 +426,8 @@ async function loadWishlistAddedMap() {
       : [];
     wishlistOrderedAppIds = [...nowIds];
     wishlistPriorityMap = {};
+    wishlistSortSignature = "";
+    wishlistSortOrders = {};
 
     // If we couldn't load current wishlist, keep existing cache to avoid destructive overwrite.
     if (nowIds.length === 0 && Object.keys(cachedMap).length > 0) {
@@ -434,6 +497,8 @@ async function loadWishlistAddedMap() {
     if (wishlistOrderedAppIds.length === 0) {
       wishlistOrderedAppIds = Object.keys(cachedMap);
     }
+    wishlistSortSignature = "";
+    wishlistSortOrders = {};
   }
 }
 
@@ -456,6 +521,7 @@ async function ensureWishlistOrderFromSnapshot(appIds) {
   }
 
   setStatus("Loading wishlist order...");
+  let orderRank = 0;
   for (let pageIndex = 0; pageIndex < 200 && missing.size > 0; pageIndex += 1) {
     const payload = await fetchSteamJson(
       `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
@@ -471,12 +537,12 @@ async function ensureWishlistOrderFromSnapshot(appIds) {
 
     for (const [appId, entry] of entries) {
       if (!missing.has(appId)) {
+        orderRank += 1;
         continue;
       }
-      const priority = Number(entry?.priority);
-      if (Number.isFinite(priority)) {
-        wishlistPriorityMap[appId] = priority;
-      }
+      // Use snapshot traversal order to mirror Steam wishlist ranking.
+      wishlistPriorityMap[appId] = orderRank;
+      orderRank += 1;
       missing.delete(appId);
     }
   }
@@ -565,42 +631,7 @@ async function ensureWishlistMetaFromSnapshot(appIds) {
   if (sourceMode !== "wishlist" || !Array.isArray(appIds) || appIds.length === 0) {
     return;
   }
-
-  function needsSnapshotBySort(meta) {
-    if (sortMode === "title") {
-      return !String(meta?.titleText || "").trim();
-    }
-    if (sortMode === "price") {
-      const isFree = String(meta?.priceText || "").trim().toLowerCase() === "free";
-      const hasPrice = Number.isFinite(Number(meta?.priceFinal)) && Number(meta?.priceFinal) > 0;
-      return !isFree && !hasPrice;
-    }
-    if (sortMode === "discount") {
-      return !Number.isFinite(Number(meta?.discountPercent));
-    }
-    if (sortMode === "release-date") {
-      return !Number.isFinite(Number(meta?.releaseUnix)) || Number(meta?.releaseUnix) <= 0;
-    }
-    if (sortMode === "review-score") {
-      return !Number.isFinite(Number(meta?.reviewPositivePct));
-    }
-    if (sortMode === "top-selling") {
-      return !Number.isFinite(Number(meta?.recommendationsTotal));
-    }
-    return false;
-  }
-
-  const unresolved = new Set(
-    appIds.filter((appId) => {
-      const meta = metaCache?.[appId];
-      const needsSearchTitle = String(searchQuery || "").trim() && !String(meta?.titleText || "").trim();
-      return needsSearchTitle || needsSnapshotBySort(meta);
-    })
-  );
-
-  if (unresolved.size === 0) {
-    return;
-  }
+  const unresolved = new Set(appIds);
 
   const steamId = await resolveCurrentSteamId();
   if (!steamId) {
@@ -609,6 +640,7 @@ async function ensureWishlistMetaFromSnapshot(appIds) {
 
   setStatus("Loading wishlist snapshot metadata...");
   let changed = false;
+  let orderRank = 0;
 
   for (let pageIndex = 0; pageIndex < 200 && unresolved.size > 0; pageIndex += 1) {
     const payload = await fetchSteamJson(
@@ -624,12 +656,14 @@ async function ensureWishlistMetaFromSnapshot(appIds) {
     }
 
     for (const [appId, entry] of entries) {
-      if (!unresolved.has(appId)) {
-        continue;
+      if (unresolved.has(appId)) {
+        mergeMetaFromWishlistEntry(appId, entry);
+        unresolved.delete(appId);
+        changed = true;
       }
-      mergeMetaFromWishlistEntry(appId, entry);
-      unresolved.delete(appId);
-      changed = true;
+      // Keep ranking for all items seen in snapshot pages.
+      wishlistPriorityMap[appId] = orderRank;
+      orderRank += 1;
     }
   }
 
@@ -637,7 +671,24 @@ async function ensureWishlistMetaFromSnapshot(appIds) {
     await saveMetaCache();
   }
 
+  wishlistOrderedAppIds = sortByWishlistPriority(appIds);
+
   setStatus("");
+}
+
+async function ensureWishlistPrecomputedSorts(appIds) {
+  if (sourceMode !== "wishlist" || !Array.isArray(appIds) || appIds.length === 0) {
+    return;
+  }
+
+  const signature = buildWishlistSignature(appIds);
+  if (wishlistSortSignature === signature && wishlistSortOrders?.position?.length) {
+    return;
+  }
+
+  await ensureWishlistMetaFromSnapshot(appIds);
+  wishlistSortOrders = buildWishlistSortOrders(appIds);
+  wishlistSortSignature = signature;
 }
 
 async function loadMetaCache() {
@@ -1051,12 +1102,19 @@ function passesReviewFilter(appId) {
 
 function getFilteredAndSorted(ids) {
   const normalizedQuery = searchQuery.toLowerCase();
+  const baseIds = (sourceMode === "wishlist" && wishlistSortOrders?.[sortMode]?.length)
+    ? wishlistSortOrders[sortMode]
+    : ids;
 
-  const list = ids.filter((appId) => {
+  const list = baseIds.filter((appId) => {
     const title = String(state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || "").toLowerCase();
     const textOk = !normalizedQuery || title.includes(normalizedQuery) || appId.includes(normalizedQuery);
     return textOk && passesTagFilter(appId) && passesTypeFilter(appId) && passesReviewFilter(appId);
   });
+
+  if (sourceMode === "wishlist" && wishlistSortOrders?.[sortMode]?.length) {
+    return list;
+  }
 
   if (sortMode === "title") {
     list.sort((a, b) => {
@@ -1173,22 +1231,10 @@ async function renderCards() {
   const sourceIds = getCurrentSourceAppIds();
   const needsMetaForSort = sortMode !== "position";
   const needsMetaForSearch = Boolean(String(searchQuery || "").trim());
-  const shouldUseWishlistSnapshot = sourceMode === "wishlist" && (
-    sortMode === "title"
-    || sortMode === "price"
-    || sortMode === "discount"
-    || sortMode === "release-date"
-    || sortMode === "review-score"
-    || sortMode === "top-selling"
-    || needsMetaForSearch
-  );
-  const shouldSkipHeavyMetaHydration = shouldUseWishlistSnapshot;
+  const shouldSkipHeavyMetaHydration = sourceMode === "wishlist";
 
-  if (shouldUseWishlistSnapshot) {
-    await ensureWishlistMetaFromSnapshot(sourceIds);
-  }
-  if (sourceMode === "wishlist" && sortMode === "position") {
-    await ensureWishlistOrderFromSnapshot(sourceIds);
+  if (sourceMode === "wishlist") {
+    await ensureWishlistPrecomputedSorts(sourceIds);
   }
 
   if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
