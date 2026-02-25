@@ -133,3 +133,31 @@
   border-radius: 3px;
   padding: 4px 6px;
 }
+
+.swcm-fallback {
+  background: #0c1622;
+  border: 1px solid #2f445a;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin: 8px 0 10px;
+  color: #c7d5e0;
+  font-size: 12px;
+}
+
+.swcm-fallback ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.swcm-fallback li {
+  margin: 3px 0;
+}
+
+.swcm-fallback a {
+  color: #8fbcff;
+  text-decoration: none;
+}
+
+.swcm-fallback a:hover {
+  text-decoration: underline;
+}

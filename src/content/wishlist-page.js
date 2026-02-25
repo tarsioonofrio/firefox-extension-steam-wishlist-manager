@@ -4,6 +4,7 @@ if (!window.location.pathname.startsWith("/wishlist")) {
   const PANEL_ID = "swcm-wishlist-panel";
   const FILTER_ID = "swcm-filter-select";
   const COUNT_ID = "swcm-filter-count";
+  const FALLBACK_ID = "swcm-wishlist-fallback";
 
   let lastRowCount = -1;
 
@@ -168,6 +169,52 @@ if (!window.location.pathname.startsWith("/wishlist")) {
     return panel;
   }
 
+  function ensureFallbackBox() {
+    let box = document.getElementById(FALLBACK_ID);
+    if (!box) {
+      box = document.createElement("div");
+      box.id = FALLBACK_ID;
+      box.className = "swcm-fallback swcm-hidden";
+      box.setAttribute("aria-live", "polite");
+    }
+
+    const panel = ensurePanel();
+    if (panel.parentElement && box.parentElement !== panel.parentElement) {
+      panel.insertAdjacentElement("afterend", box);
+    } else if (panel.nextElementSibling !== box) {
+      panel.insertAdjacentElement("afterend", box);
+    }
+
+    return box;
+  }
+
+  function renderFallbackList(state, collectionName, missingIds) {
+    const box = ensureFallbackBox();
+    if (!box) {
+      return;
+    }
+
+    if (!collectionName || collectionName === "__all__" || missingIds.length === 0) {
+      box.classList.add("swcm-hidden");
+      box.innerHTML = "";
+      return;
+    }
+
+    const items = missingIds.slice(0, 25).map((appId) => {
+      const title = state.items?.[appId]?.title || `App ${appId}`;
+      return `<li><a href="https://store.steampowered.com/app/${appId}/" target="_blank" rel="noopener noreferrer">${title}</a></li>`;
+    });
+    const extraCount = Math.max(0, missingIds.length - 25);
+    const extraText = extraCount > 0 ? `<p>+${extraCount} more items in this collection.</p>` : "";
+
+    box.innerHTML = `
+      <strong>Collection items not loaded in current Steam list:</strong>
+      <ul>${items.join("")}</ul>
+      ${extraText}
+    `;
+    box.classList.remove("swcm-hidden");
+  }
+
   function updateCount(visible, total, missingFromPage = 0) {
     const el = document.getElementById(COUNT_ID);
     if (el) {
@@ -187,6 +234,7 @@ if (!window.location.pathname.startsWith("/wishlist")) {
       for (const row of rows) {
         row.style.display = "";
       }
+      renderFallbackList(state, "__all__", []);
       updateCount(total, total);
       return;
     }
@@ -219,14 +267,15 @@ if (!window.location.pathname.startsWith("/wishlist")) {
       }
     }
 
-    let missingFromPage = 0;
+    const missingIds = [];
     for (const appId of orderedIds) {
       if (!rowByAppId.has(appId)) {
-        missingFromPage += 1;
+        missingIds.push(appId);
       }
     }
 
-    updateCount(visibleCount, total, missingFromPage);
+    renderFallbackList(state, collectionName, visibleCount === 0 ? missingIds : []);
+    updateCount(visibleCount, total, missingIds.length);
   }
 
   async function refreshPanel() {
@@ -238,6 +287,7 @@ if (!window.location.pathname.startsWith("/wishlist")) {
       return;
     }
 
+    const previousSelected = select.value || "__all__";
     select.innerHTML = "";
 
     const allOption = document.createElement("option");
@@ -254,9 +304,9 @@ if (!window.location.pathname.startsWith("/wishlist")) {
     }
 
     const current = state.activeCollection || "__all__";
-    select.value = Array.from(select.options).some((o) => o.value === current)
-      ? current
-      : "__all__";
+    const hasPrevious = Array.from(select.options).some((o) => o.value === previousSelected);
+    const hasCurrent = Array.from(select.options).some((o) => o.value === current);
+    select.value = hasPrevious ? previousSelected : (hasCurrent ? current : "__all__");
 
     applyCollection(state, select.value);
   }
