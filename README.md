@@ -2,6 +2,32 @@
 
 Firefox extension to organize Steam wishlist games into custom local collections with independent ordering and filters.
 
+## What This Extension Is For
+
+If your Steam wishlist is very large, it becomes hard to track what is truly important.  
+This extension helps you turn one huge wishlist into manageable views:
+
+- Static collections: you manually pick games (for example: `Hype`, `Buy Soon`, `Indie Support`).
+- Dynamic collections: saved views generated from current sort + filters.
+- Fast filtering and sorting on a dedicated collections page.
+
+Main goal: make prioritization practical without changing your Steam account data.
+
+## What It Does (User View)
+
+- Opens a dedicated **Collections** page from the extension icon.
+- Reads your wishlist rank from Steam API (`Your rank`), and enriches game metadata locally.
+- Lets you add/remove a game to/from static collections from card and line views.
+- Supports batch add/remove for multiple visible games.
+- Supports saved dynamic collections based on current filters/sort.
+- Keeps all collection data local in your browser profile.
+
+## What It Does Not Do
+
+- It does not rewrite Steam server-side wishlist order.
+- It does not send your custom collections to Steam.
+- It does not perform automated account actions.
+
 ## Core Behavior
 
 - Collection data is local-only (`browser.storage.local`).
