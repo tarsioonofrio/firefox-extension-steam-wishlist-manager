@@ -2005,109 +2005,125 @@ async function renderCards() {
   emptyEl.classList.toggle("hidden", pageIds.length > 0);
 
   for (const appId of pageIds) {
-    const fragment = template.content.cloneNode(true);
+    const card = createCardNodes(template, appId);
+    fillCardStatic(card, appId);
+    bindCardActions(card, appId);
+    cardsEl.appendChild(card.fragment);
+    hydrateCardMeta(card, appId);
+  }
+}
 
-    const title = state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || `App ${appId}`;
-    const link = getAppLink(appId);
+function createCardNodes(template, appId) {
+  const fragment = template.content.cloneNode(true);
+  return {
+    appId,
+    fragment,
+    title: state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || `App ${appId}`,
+    link: getAppLink(appId),
+    coverLink: fragment.querySelector(".cover-link"),
+    cover: fragment.querySelector(".cover"),
+    titleEl: fragment.querySelector(".title"),
+    appidEl: fragment.querySelector(".appid"),
+    pricingEl: fragment.querySelector(".pricing"),
+    discountEl: fragment.querySelector(".discount"),
+    tagsRowEl: fragment.querySelector(".tags-row"),
+    reviewEl: fragment.querySelector(".review"),
+    releaseEl: fragment.querySelector(".release"),
+    wishlistAddedEl: fragment.querySelector(".wishlist-added"),
+    refreshItemBtn: fragment.querySelector(".refresh-item-btn"),
+    removeBtn: fragment.querySelector(".remove-btn")
+  };
+}
 
-    const coverLink = fragment.querySelector(".cover-link");
-    const cover = fragment.querySelector(".cover");
-    const titleEl = fragment.querySelector(".title");
-    const appidEl = fragment.querySelector(".appid");
-    const pricingEl = fragment.querySelector(".pricing");
-    const discountEl = fragment.querySelector(".discount");
-    const tagsRowEl = fragment.querySelector(".tags-row");
-    const reviewEl = fragment.querySelector(".review");
-    const releaseEl = fragment.querySelector(".release");
-    const wishlistAddedEl = fragment.querySelector(".wishlist-added");
-    const refreshItemBtn = fragment.querySelector(".refresh-item-btn");
-    const removeBtn = fragment.querySelector(".remove-btn");
+function fillCardStatic(card, appId) {
+  if (card.coverLink) {
+    card.coverLink.href = card.link;
+  }
+  if (card.cover) {
+    card.cover.src = getCardImageUrl(appId);
+    card.cover.alt = card.title;
+    card.cover.loading = "lazy";
+  }
+  if (card.titleEl) {
+    card.titleEl.textContent = card.title;
+    card.titleEl.href = card.link;
+  }
+  if (card.appidEl) {
+    card.appidEl.textContent = `AppID: ${appId}`;
+  }
+  if (card.wishlistAddedEl) {
+    card.wishlistAddedEl.textContent = `Wishlist: ${formatUnixDate(wishlistAddedMap[appId])}`;
+  }
+}
 
-    if (coverLink) {
-      coverLink.href = link;
-    }
-    if (cover) {
-      cover.src = getCardImageUrl(appId);
-      cover.alt = title;
-      cover.loading = "lazy";
-    }
-    if (titleEl) {
-      titleEl.textContent = title;
-      titleEl.href = link;
-    }
-    if (appidEl) {
-      appidEl.textContent = `AppID: ${appId}`;
-    }
-    if (wishlistAddedEl) {
-      wishlistAddedEl.textContent = `Wishlist: ${formatUnixDate(wishlistAddedMap[appId])}`;
-    }
-
-    if (refreshItemBtn) {
-      refreshItemBtn.addEventListener("click", () => {
-        refreshSingleItem(appId).catch(() => setStatus("Failed to refresh item.", true));
-      });
-    }
-
-    if (removeBtn) {
-      removeBtn.style.display = sourceMode === "wishlist" ? "none" : "";
-      removeBtn.addEventListener("click", async () => {
-        if (sourceMode === "wishlist") {
-          return;
-        }
-
-        const collectionName = activeCollection;
-        if (!collectionName || collectionName === "__all__") {
-          setStatus("Select a specific collection to remove items.", true);
-          return;
-        }
-
-        const confirmed = window.confirm(`Remove AppID ${appId} from collection "${collectionName}"?`);
-        if (!confirmed) {
-          return;
-        }
-
-        await browser.runtime.sendMessage({
-          type: "remove-item-from-collection",
-          appId,
-          collectionName
-        });
-
-        await refreshState();
-        quickPopulateFiltersFromCache();
-        refreshFilterOptionsInBackground();
-        await render();
-      });
-    }
-
-    cardsEl.appendChild(fragment);
-
-    fetchAppMeta(appId).then((meta) => {
-      if (titleEl && !state?.items?.[appId]?.title && meta.titleText) {
-        titleEl.textContent = meta.titleText;
-      }
-      if (pricingEl) {
-        pricingEl.textContent = `Price: ${meta.priceText || "-"}`;
-      }
-      if (discountEl) {
-        discountEl.textContent = `Discount: ${meta.discountText || "-"}`;
-      }
-      if (reviewEl) {
-        reviewEl.textContent = `Reviews: ${meta.reviewText || "-"}`;
-      }
-      if (releaseEl) {
-        releaseEl.textContent = `Release: ${meta.releaseText || "-"}`;
-      }
-      if (tagsRowEl) {
-        tagsRowEl.innerHTML = "";
-        for (const tag of meta.tags || []) {
-          const chip = document.createElement("span");
-          chip.className = "tag-chip";
-          chip.textContent = tag;
-          tagsRowEl.appendChild(chip);
-        }
-      }
+function bindCardActions(card, appId) {
+  if (card.refreshItemBtn) {
+    card.refreshItemBtn.addEventListener("click", () => {
+      refreshSingleItem(appId).catch(() => setStatus("Failed to refresh item.", true));
     });
   }
+
+  if (!card.removeBtn) {
+    return;
+  }
+
+  card.removeBtn.style.display = sourceMode === "wishlist" ? "none" : "";
+  card.removeBtn.addEventListener("click", async () => {
+    if (sourceMode === "wishlist") {
+      return;
+    }
+
+    const collectionName = activeCollection;
+    if (!collectionName || collectionName === "__all__") {
+      setStatus("Select a specific collection to remove items.", true);
+      return;
+    }
+
+    const confirmed = window.confirm(`Remove AppID ${appId} from collection "${collectionName}"?`);
+    if (!confirmed) {
+      return;
+    }
+
+    await browser.runtime.sendMessage({
+      type: "remove-item-from-collection",
+      appId,
+      collectionName
+    });
+
+    await refreshState();
+    quickPopulateFiltersFromCache();
+    refreshFilterOptionsInBackground();
+    await render();
+  });
+}
+
+function hydrateCardMeta(card, appId) {
+  fetchAppMeta(appId).then((meta) => {
+    if (card.titleEl && !state?.items?.[appId]?.title && meta.titleText) {
+      card.titleEl.textContent = meta.titleText;
+    }
+    if (card.pricingEl) {
+      card.pricingEl.textContent = `Price: ${meta.priceText || "-"}`;
+    }
+    if (card.discountEl) {
+      card.discountEl.textContent = `Discount: ${meta.discountText || "-"}`;
+    }
+    if (card.reviewEl) {
+      card.reviewEl.textContent = `Reviews: ${meta.reviewText || "-"}`;
+    }
+    if (card.releaseEl) {
+      card.releaseEl.textContent = `Release: ${meta.releaseText || "-"}`;
+    }
+    if (card.tagsRowEl) {
+      card.tagsRowEl.innerHTML = "";
+      for (const tag of meta.tags || []) {
+        const chip = document.createElement("span");
+        chip.className = "tag-chip";
+        chip.textContent = tag;
+        card.tagsRowEl.appendChild(chip);
+      }
+    }
+  });
 }
 
 async function refreshState() {
