@@ -369,6 +369,10 @@ main {
   overflow: hidden;
 }
 
+.cards.batch-mode .card {
+  grid-template-columns: 24px 184px 1fr;
+}
+
 .order-col {
   display: grid;
   grid-template-rows: auto auto auto auto;
@@ -442,20 +446,36 @@ main {
   padding: 0 6px;
 }
 
-.card-batch-checkbox {
+.batch-col {
   display: none;
-  width: 16px;
-  height: 16px;
-  justify-self: center;
+  align-items: center;
+  justify-content: center;
+  grid-column: 1;
+  grid-row: 1 / span 2;
 }
 
-.cards.batch-mode .card-batch-checkbox {
-  display: block;
+.cards.batch-mode .batch-col {
+  display: flex;
+}
+
+.card-batch-checkbox {
+  width: 16px;
+  height: 16px;
+}
+
+.cards.batch-mode .cover-link,
+.cards.batch-mode .cover {
+  grid-column: 2;
 }
 
 .cards.batch-mode .order-col {
+  grid-column: 2;
   border-top: 1px solid #2f445a;
   padding-top: 6px;
+}
+
+.cards.batch-mode .info {
+  grid-column: 3;
 }
 
 .cards.batch-mode .order-col .order-up-btn,
@@ -463,16 +483,6 @@ main {
 .cards.batch-mode .order-col .order-position-row {
   opacity: 0.45;
   pointer-events: none;
-}
-
-.batch-col {
-  display: none;
-  align-items: center;
-  justify-content: center;
-}
-
-.cards.batch-mode .batch-col {
-  display: flex;
 }
 
 .cover-link,

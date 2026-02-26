@@ -218,6 +218,9 @@
 
   <template id="card-template">
     <article class="card">
+      <div class="batch-col">
+        <input class="card-batch-checkbox" type="checkbox" aria-label="Select card for batch action">
+      </div>
       <div class="order-col">
         <div class="order-card-actions">
           <button class="refresh-item-btn" type="button">Refresh</button>
@@ -232,7 +235,6 @@
         </div>
         </div>
         <div class="collections-dropdown hidden"></div>
-        <input class="card-batch-checkbox" type="checkbox" aria-label="Select card for batch action">
       </div>
       <a class="cover-link" target="_blank" rel="noopener noreferrer">
         <img class="cover" alt="">
