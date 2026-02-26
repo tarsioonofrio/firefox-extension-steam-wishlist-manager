@@ -1,5 +1,10 @@
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+const PAGE_FETCH_REQ = "SWCM_PAGE_FETCH_ARRAYBUFFER";
+const PAGE_FETCH_RES = "SWCM_PAGE_FETCH_RESULT";
+let pageFetchSeq = 0;
+const pageFetchPending = new Map();
+let pageBridgeInstalled = false;
 
 function encodeVarint(value) {
   let n = 0n;
@@ -76,6 +81,109 @@ function toBase64(bytes) {
     binary += String.fromCharCode(...slice);
   }
   return btoa(binary);
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(String(base64 || ""));
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    out[i] = binary.charCodeAt(i);
+  }
+  return out;
+}
+
+function ensurePageFetchBridge() {
+  if (pageBridgeInstalled) {
+    return;
+  }
+  pageBridgeInstalled = true;
+
+  const script = document.createElement("script");
+  script.textContent = `
+    (() => {
+      if (window.__swcmPageFetchBridgeInstalled) return;
+      window.__swcmPageFetchBridgeInstalled = true;
+      window.addEventListener("message", async (event) => {
+        const data = event && event.data;
+        if (event.source !== window || !data || data.type !== "${PAGE_FETCH_REQ}") return;
+        const requestId = String(data.requestId || "");
+        const url = String(data.url || "");
+        try {
+          const response = await fetch(url, { cache: "no-store" });
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          let binary = "";
+          const chunkSize = 0x8000;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            const slice = bytes.subarray(i, i + chunkSize);
+            binary += String.fromCharCode(...slice);
+          }
+          window.postMessage({
+            type: "${PAGE_FETCH_RES}",
+            requestId,
+            ok: true,
+            status: response.status,
+            bodyBase64: btoa(binary)
+          }, "*");
+        } catch (error) {
+          window.postMessage({
+            type: "${PAGE_FETCH_RES}",
+            requestId,
+            ok: false,
+            error: String(error && error.message ? error.message : error)
+          }, "*");
+        }
+      });
+    })();
+  `;
+  document.documentElement.appendChild(script);
+  script.remove();
+
+  window.addEventListener("message", (event) => {
+    const data = event && event.data;
+    if (event.source !== window || !data || data.type !== PAGE_FETCH_RES) {
+      return;
+    }
+    const requestId = String(data.requestId || "");
+    const pending = pageFetchPending.get(requestId);
+    if (!pending) {
+      return;
+    }
+    pageFetchPending.delete(requestId);
+    if (!data.ok) {
+      pending.reject(new Error(String(data.error || "page fetch failed")));
+      return;
+    }
+    pending.resolve({
+      status: Number(data.status || 0),
+      bytes: base64ToBytes(String(data.bodyBase64 || ""))
+    });
+  });
+}
+
+function pageFetchBytes(url, timeoutMs = 20000) {
+  ensurePageFetchBridge();
+  const requestId = `req-${Date.now()}-${pageFetchSeq += 1}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pageFetchPending.delete(requestId);
+      reject(new Error("page fetch timeout"));
+    }, timeoutMs);
+    pageFetchPending.set(requestId, {
+      resolve: (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      reject: (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+    window.postMessage({
+      type: PAGE_FETCH_REQ,
+      requestId,
+      url: String(url || "")
+    }, "*");
+  });
 }
 
 function decodeWishlistSortedFilteredItem(bytes) {
@@ -252,11 +360,11 @@ async function fetchWishlistOrderFromService(steamId) {
     url.searchParams.set("origin", "https://store.steampowered.com");
     url.searchParams.set("input_protobuf_encoded", toBase64(requestBytes));
 
-    const response = await fetch(url.toString(), { cache: "no-store" });
-    if (!response.ok) {
-      throw new Error(`Wishlist order request failed (${response.status})`);
+    const pageResponse = await pageFetchBytes(url.toString());
+    if (!pageResponse || pageResponse.status < 200 || pageResponse.status >= 300) {
+      throw new Error(`Wishlist order request failed (${pageResponse?.status || 0})`);
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    const bytes = pageResponse.bytes;
     const items = decodeWishlistSortedFilteredResponse(bytes);
     if (items.length === 0) {
       break;
@@ -311,7 +419,9 @@ async function syncWishlistOrderCache() {
         ...cached,
         orderedAppIds,
         priorityMap,
-        priorityCachedAt: now
+        priorityCachedAt: now,
+        priorityLastError: "",
+        steamId
       }
     });
   } catch {
