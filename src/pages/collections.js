@@ -17,6 +17,7 @@ const filterStateUtils = window.SWMCollectionsFilterState || null;
 const actionsUtils = window.SWMCollectionsActions || null;
 const crudUtils = window.SWMCollectionsCrud || null;
 const initUtils = window.SWMCollectionsInit || null;
+const selectionBindingsUtils = window.SWMCollectionsSelectionBindings || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -2180,67 +2181,26 @@ async function handleSortChange(value) {
 }
 
 function bindCollectionControls() {
-  document.getElementById("collection-select")?.addEventListener("change", async (event) => {
-    const value = event.target.value || "__all__";
-    await handleCollectionChange(value);
-  });
-
-  document.getElementById("collection-select-btn")?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    toggleCollectionMenu(false);
-    toggleSortMenu(false);
-    toggleCollectionSelectMenu();
-  });
-
-  document.getElementById("collection-select-options")?.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-    const btn = target.closest("button[data-value]");
-    if (!(btn instanceof HTMLButtonElement)) {
-      return;
-    }
-    const value = String(btn.dataset.value || "");
-    const select = document.getElementById("collection-select");
-    if (!select || !value) {
-      return;
-    }
-    select.value = value;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    toggleCollectionSelectMenu(false);
+  selectionBindingsUtils.bindCollectionControls({
+    onCollectionChange: handleCollectionChange,
+    closeMenusBeforeOpenCollectionSelect: () => {
+      toggleCollectionMenu(false);
+      toggleSortMenu(false);
+    },
+    toggleCollectionSelectMenu: () => toggleCollectionSelectMenu(),
+    closeCollectionSelectMenu: () => toggleCollectionSelectMenu(false)
   });
 }
 
 function bindSortControls() {
-  document.getElementById("sort-select")?.addEventListener("change", async (event) => {
-    await handleSortChange(event.target.value);
-  });
-
-  document.getElementById("sort-menu-btn")?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    toggleCollectionMenu(false);
-    toggleCollectionSelectMenu(false);
-    toggleSortMenu();
-  });
-
-  document.getElementById("sort-menu-options")?.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-    const btn = target.closest("button[data-value]");
-    if (!(btn instanceof HTMLButtonElement)) {
-      return;
-    }
-    const value = String(btn.dataset.value || "");
-    const select = document.getElementById("sort-select");
-    if (!select || !value || btn.disabled) {
-      return;
-    }
-    select.value = value;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-    toggleSortMenu(false);
+  selectionBindingsUtils.bindSortControls({
+    onSortChange: handleSortChange,
+    closeMenusBeforeOpenSort: () => {
+      toggleCollectionMenu(false);
+      toggleCollectionSelectMenu(false);
+    },
+    toggleSortMenu: () => toggleSortMenu(),
+    closeSortMenu: () => toggleSortMenu(false)
   });
 }
 
