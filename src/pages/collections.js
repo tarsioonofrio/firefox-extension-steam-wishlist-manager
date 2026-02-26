@@ -2079,6 +2079,7 @@ function createLineRow(options) {
   const appId = String(options?.appId || "");
   const title = String(options?.title || `App ${appId}`);
   const link = String(options?.link || "#");
+  const imageUrl = String(options?.imageUrl || "");
   const reorderEnabled = Boolean(options?.reorderEnabled);
   const itemPosition = Number(options?.itemPosition || 0);
   const totalItems = Number(options?.totalItems || 0);
@@ -2149,6 +2150,17 @@ function createLineRow(options) {
 
   const center = document.createElement("div");
   center.className = "line-center";
+  const thumbWrap = document.createElement("a");
+  thumbWrap.className = "line-thumb";
+  thumbWrap.href = link;
+  thumbWrap.target = "_blank";
+  thumbWrap.rel = "noopener noreferrer";
+  const thumbImg = document.createElement("img");
+  thumbImg.className = "line-thumb-img";
+  thumbImg.alt = title;
+  thumbImg.loading = "lazy";
+  thumbImg.src = imageUrl;
+  thumbWrap.appendChild(thumbImg);
   const titleEl = document.createElement("a");
   titleEl.className = "line-title";
   titleEl.href = link;
@@ -2158,6 +2170,7 @@ function createLineRow(options) {
   const reviewEl = document.createElement("span");
   reviewEl.className = "line-review";
   reviewEl.textContent = "-";
+  center.appendChild(thumbWrap);
   center.appendChild(titleEl);
   center.appendChild(reviewEl);
 
@@ -2409,6 +2422,7 @@ async function renderCards() {
         appId,
         title,
         link: getAppLink(appId),
+        imageUrl: getCardImageUrl(appId),
         reorderEnabled: manualReorderEnabled,
         itemPosition: Number(orderIndex.get(appId) || 0),
         totalItems: activeOrder.length,
