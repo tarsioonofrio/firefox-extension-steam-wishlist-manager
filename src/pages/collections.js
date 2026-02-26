@@ -4,8 +4,9 @@ const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const WISHLIST_RANK_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const WISHLIST_RANK_SOURCE = "wishlist-api-v1";
-const WISHLIST_RANK_SOURCE_VERSION = 3;
+const rankUtils = window.SWMWishlistRank || null;
+const WISHLIST_RANK_SOURCE = rankUtils?.RANK_SOURCE || "wishlist-api-v1";
+const WISHLIST_RANK_SOURCE_VERSION = rankUtils?.RANK_SOURCE_VERSION || 3;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -198,327 +199,6 @@ async function fetchSteamText(url, options = {}) {
   }
 }
 
-async function fetchSteamBytes(url, options = {}) {
-  let attempt = 0;
-  while (true) {
-    try {
-      await waitSteamCooldownIfNeeded();
-      const response = await fetch(url, { cache: "no-store", ...options });
-      if (response.ok) {
-        return new Uint8Array(await response.arrayBuffer());
-      }
-      if (response.status === 403 || response.status === 429) {
-        bumpSteamCooldown(SAFE_FETCH_BLOCK_COOLDOWN_MS + (attempt * 3000));
-      }
-      if (attempt < SAFE_FETCH_MAX_RETRIES && shouldRetryStatus(response.status)) {
-        await sleep(nextBackoffDelay(attempt));
-        attempt += 1;
-        continue;
-      }
-      throw new Error(`HTTP ${response.status}`);
-    } catch (error) {
-      if (attempt >= SAFE_FETCH_MAX_RETRIES) {
-        throw error;
-      }
-      await sleep(nextBackoffDelay(attempt));
-      attempt += 1;
-    }
-  }
-}
-
-function encodeVarint(value) {
-  let n = 0n;
-  if (typeof value === "bigint") {
-    n = value;
-  } else if (typeof value === "string") {
-    n = BigInt(value || "0");
-  } else {
-    n = BigInt(Number(value || 0));
-  }
-  if (n < 0n) {
-    n = 0n;
-  }
-  const out = [];
-  while (n >= 0x80n) {
-    out.push(Number((n & 0x7fn) | 0x80n));
-    n >>= 7n;
-  }
-  out.push(Number(n));
-  return out;
-}
-
-function decodeVarint(bytes, startIndex) {
-  let value = 0n;
-  let shift = 0n;
-  let index = startIndex;
-  while (index < bytes.length) {
-    const b = bytes[index];
-    index += 1;
-    value |= BigInt(b & 0x7f) << shift;
-    if ((b & 0x80) === 0) {
-      return { value, next: index };
-    }
-    shift += 7n;
-  }
-  return null;
-}
-
-function encodeUtf8(text) {
-  return new TextEncoder().encode(String(text || ""));
-}
-
-function concatBytes(chunks) {
-  const size = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-  const out = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return out;
-}
-
-function fieldVarint(field, value) {
-  return Uint8Array.from([
-    ...encodeVarint((BigInt(field) << 3n) | 0n),
-    ...encodeVarint(value)
-  ]);
-}
-
-function fieldBytes(field, bytes) {
-  return concatBytes([
-    Uint8Array.from(encodeVarint((BigInt(field) << 3n) | 2n)),
-    Uint8Array.from(encodeVarint(bytes.length)),
-    bytes
-  ]);
-}
-
-function toBase64(bytes) {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const slice = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...slice);
-  }
-  return btoa(binary);
-}
-
-function decodeWishlistSortedFilteredItem(bytes) {
-  const item = {
-    appid: 0,
-    priority: null,
-    dateAdded: 0
-  };
-  let index = 0;
-  while (index < bytes.length) {
-    const tag = decodeVarint(bytes, index);
-    if (!tag) {
-      break;
-    }
-    index = tag.next;
-    const field = Number(tag.value >> 3n);
-    const wireType = Number(tag.value & 0x7n);
-
-    if (wireType === 0) {
-      const value = decodeVarint(bytes, index);
-      if (!value) {
-        break;
-      }
-      index = value.next;
-      const n = Number(value.value);
-      if (field === 1) {
-        item.appid = n;
-      } else if (field === 2) {
-        item.priority = n;
-      } else if (field === 3) {
-        item.dateAdded = n;
-      }
-      continue;
-    }
-
-    if (wireType === 2) {
-      const len = decodeVarint(bytes, index);
-      if (!len) {
-        break;
-      }
-      index = len.next + Number(len.value);
-      continue;
-    }
-
-    if (wireType === 5) {
-      index += 4;
-      continue;
-    }
-    if (wireType === 1) {
-      index += 8;
-      continue;
-    }
-    break;
-  }
-  return item;
-}
-
-function decodeWishlistSortedFilteredResponse(bytes) {
-  const items = [];
-  let index = 0;
-  while (index < bytes.length) {
-    const tag = decodeVarint(bytes, index);
-    if (!tag) {
-      break;
-    }
-    index = tag.next;
-    const field = Number(tag.value >> 3n);
-    const wireType = Number(tag.value & 0x7n);
-
-    if (field === 1 && wireType === 2) {
-      const len = decodeVarint(bytes, index);
-      if (!len) {
-        break;
-      }
-      index = len.next;
-      const itemBytes = bytes.subarray(index, index + Number(len.value));
-      index += Number(len.value);
-      const item = decodeWishlistSortedFilteredItem(itemBytes);
-      if (Number.isFinite(item.appid) && item.appid > 0) {
-        items.push(item);
-      }
-      continue;
-    }
-
-    if (wireType === 0) {
-      const value = decodeVarint(bytes, index);
-      if (!value) {
-        break;
-      }
-      index = value.next;
-      continue;
-    }
-
-    if (wireType === 2) {
-      const len = decodeVarint(bytes, index);
-      if (!len) {
-        break;
-      }
-      index = len.next + Number(len.value);
-      continue;
-    }
-
-    if (wireType === 5) {
-      index += 4;
-      continue;
-    }
-    if (wireType === 1) {
-      index += 8;
-      continue;
-    }
-    break;
-  }
-  return items;
-}
-
-function encodeWishlistSortedFilteredRequest({ steamId, startIndex = 0, pageSize = 500 }) {
-  const context = concatBytes([
-    fieldBytes(1, encodeUtf8("english")),
-    fieldBytes(3, encodeUtf8("BR"))
-  ]);
-  const dataRequest = concatBytes([
-    fieldVarint(1, 1),
-    fieldVarint(2, 1),
-    fieldVarint(3, 1),
-    fieldVarint(6, 1),
-    fieldVarint(8, 20),
-    fieldVarint(9, 1)
-  ]);
-  const filters = concatBytes([
-    fieldVarint(25, 4),
-    fieldVarint(25, 3)
-  ]);
-
-  return concatBytes([
-    fieldVarint(1, steamId),
-    fieldBytes(2, context),
-    fieldBytes(3, dataRequest),
-    fieldBytes(5, filters),
-    fieldVarint(6, startIndex),
-    fieldVarint(7, pageSize)
-  ]);
-}
-
-async function fetchWishlistOrderFromService(steamId, targetCount = 0) {
-  const pageSize = 500;
-  const maxPages = Math.max(1, Math.ceil(Math.max(1, targetCount) / pageSize) + 2);
-  const orderedIds = [];
-  const seen = new Set();
-  const priorityMap = {};
-  const wishlistNowIds = Array.isArray(userdata?.rgWishlist)
-    ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
-    : [];
-  const wishlistNowSet = new Set(wishlistNowIds);
-  let accessToken = "";
-  try {
-    const userdata = await fetchSteamJson("https://store.steampowered.com/dynamicstore/userdata/", {
-      credentials: "include",
-      cache: "no-store"
-    });
-    accessToken = String(
-      userdata?.webapi_token
-      || userdata?.webapiToken
-      || userdata?.webapi_access_token
-      || ""
-    ).trim();
-  } catch {
-    accessToken = "";
-  }
-
-  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-    const startIndex = pageIndex * pageSize;
-    const requestBytes = encodeWishlistSortedFilteredRequest({
-      steamId,
-      startIndex,
-      pageSize
-    });
-    const url = new URL("https://api.steampowered.com/IWishlistService/GetWishlistSortedFiltered/v1");
-    url.searchParams.set("origin", "https://store.steampowered.com");
-    url.searchParams.set("input_protobuf_encoded", toBase64(requestBytes));
-    if (accessToken) {
-      url.searchParams.set("access_token", accessToken);
-    }
-
-    const responseBytes = await fetchSteamBytes(url.toString(), {
-      credentials: "omit"
-    });
-    const items = decodeWishlistSortedFilteredResponse(responseBytes);
-    if (items.length === 0) {
-      break;
-    }
-
-    for (let i = 0; i < items.length; i += 1) {
-      const item = items[i];
-      const rawIdNum = Number(item.appid || 0);
-      let appId = String(rawIdNum || "").trim();
-      if (rawIdNum > 0 && !wishlistNowSet.has(appId) && rawIdNum % 10 === 0) {
-        const div10 = String(Math.floor(rawIdNum / 10));
-        if (wishlistNowSet.has(div10)) {
-          appId = div10;
-        }
-      }
-      if (!appId || seen.has(appId)) {
-        continue;
-      }
-      seen.add(appId);
-      orderedIds.push(appId);
-      priorityMap[appId] = Number.isFinite(item.priority)
-        ? Number(item.priority)
-        : (startIndex + i);
-    }
-
-    if (items.length < pageSize) {
-      break;
-    }
-  }
-
-  return { orderedIds, priorityMap };
-}
 
 async function fetchWishlistSnapshotFromApi(steamId) {
   const sid = String(steamId || "").trim();
@@ -538,61 +218,17 @@ async function fetchWishlistSnapshotFromApi(steamId) {
     throw new Error("Wishlist API returned no items.");
   }
 
-  const normalized = [];
-  for (let i = 0; i < rawItems.length; i += 1) {
-    const item = rawItems[i] || {};
-    const appId = String(item.appid || "").trim();
-    if (!/^\d{1,10}$/.test(appId)) {
-      continue;
-    }
-    const priority = Number(item.priority);
-    const dateAdded = Number(item.date_added || 0);
-    normalized.push({
-      appId,
-      priority: Number.isFinite(priority) ? priority : 0,
-      dateAdded: Number.isFinite(dateAdded) && dateAdded > 0 ? dateAdded : 0,
-      index: i
-    });
-  }
-
-  if (normalized.length === 0) {
+  const snapshot = rankUtils?.normalizeWishlistSnapshotPayload
+    ? rankUtils.normalizeWishlistSnapshotPayload(payload)
+    : {
+      orderedAppIds: [],
+      priorityMap: {},
+      addedMap: {}
+    };
+  if (!Array.isArray(snapshot.orderedAppIds) || snapshot.orderedAppIds.length === 0) {
     throw new Error("Wishlist API returned no valid appids.");
   }
-
-  // Steam wishlist rank: lower non-zero priority means closer to top.
-  // Priority 0 is treated as "unranked" and pushed to the end.
-  normalized.sort((a, b) => {
-    const aRank = a.priority === 0 ? Number.POSITIVE_INFINITY : a.priority;
-    const bRank = b.priority === 0 ? Number.POSITIVE_INFINITY : b.priority;
-    if (aRank !== bRank) {
-      return aRank - bRank;
-    }
-    if (b.dateAdded !== a.dateAdded) {
-      return b.dateAdded - a.dateAdded;
-    }
-    return a.index - b.index;
-  });
-
-  const orderedAppIds = [];
-  const priorityMap = {};
-  const addedMap = {};
-  const seen = new Set();
-
-  for (const entry of normalized) {
-    if (seen.has(entry.appId)) {
-      continue;
-    }
-    seen.add(entry.appId);
-    orderedAppIds.push(entry.appId);
-    priorityMap[entry.appId] = orderedAppIds.length - 1;
-    addedMap[entry.appId] = entry.dateAdded;
-  }
-
-  return {
-    orderedAppIds,
-    priorityMap,
-    addedMap
-  };
+  return snapshot;
 }
 
 function setStatus(text, isError = false) {
@@ -623,30 +259,27 @@ function formatUnixDate(timestamp) {
 }
 
 function isWishlistRankReady(appIds = null) {
-  if (wishlistPrioritySource !== WISHLIST_RANK_SOURCE || Number(wishlistPrioritySourceVersion) !== WISHLIST_RANK_SOURCE_VERSION) {
-    return false;
+  if (rankUtils?.isRankReady) {
+    return rankUtils.isRankReady(
+      {
+        prioritySource: wishlistPrioritySource,
+        prioritySourceVersion: wishlistPrioritySourceVersion,
+        orderedAppIds: wishlistOrderedAppIds,
+        priorityMap: wishlistPriorityMap
+      },
+      Array.isArray(appIds) ? appIds : Object.keys(wishlistAddedMap || {})
+    );
   }
-  const ids = Array.isArray(appIds) ? appIds : Object.keys(wishlistAddedMap || {});
-  if (ids.length === 0) {
-    return false;
-  }
-  if (!Array.isArray(wishlistOrderedAppIds) || wishlistOrderedAppIds.length === 0) {
-    return false;
-  }
-  for (const appId of ids) {
-    if (!Number.isFinite(Number(wishlistPriorityMap?.[appId]))) {
-      return false;
-    }
-  }
-  return true;
+  return false;
 }
 
 function getWishlistRankUnavailableReason() {
-  if (wishlistPrioritySource !== WISHLIST_RANK_SOURCE || Number(wishlistPrioritySourceVersion) !== WISHLIST_RANK_SOURCE_VERSION) {
-    return "Your rank cache is outdated; syncing latest ranking from API.";
-  }
-  if (wishlistPriorityLastError) {
-    return `Your rank unavailable: ${wishlistPriorityLastError}`;
+  if (rankUtils?.getUnavailableReason) {
+    return rankUtils.getUnavailableReason({
+      prioritySource: wishlistPrioritySource,
+      prioritySourceVersion: wishlistPrioritySourceVersion,
+      priorityLastError: wishlistPriorityLastError
+    });
   }
   return "Your rank is still syncing; temporarily showing Title order.";
 }
@@ -717,18 +350,6 @@ function sortByWishlistPriority(appIds) {
     return a.index - b.index;
   });
   return indexed.map((entry) => entry.id);
-}
-
-function getWishlistEntryPriority(entry, fallback = null) {
-  const raw = Number(entry?.priority);
-  if (Number.isFinite(raw) && raw >= 0) {
-    return raw;
-  }
-  const rank = Number(entry?.rank ?? entry?.order ?? entry?.sort_order ?? entry?.wishlist_rank);
-  if (Number.isFinite(rank) && rank >= 0) {
-    return rank;
-  }
-  return fallback;
 }
 
 function extractWishlistAppIdsInTextOrder(rawText) {
@@ -1180,101 +801,6 @@ async function loadWishlistAddedMap() {
     wishlistSortOrders = {};
     wishlistSnapshotDay = "";
   }
-}
-
-async function ensureWishlistOrderFromSnapshot(appIds) {
-  if (sourceMode !== "wishlist" || !Array.isArray(appIds) || appIds.length === 0) {
-    return;
-  }
-
-  const missing = new Set(
-    appIds.filter((appId) => !Number.isFinite(Number(wishlistPriorityMap?.[appId])))
-  );
-  if (missing.size === 0) {
-    wishlistOrderedAppIds = sortByWishlistPriority(appIds);
-    return;
-  }
-
-  const steamId = await resolveCurrentSteamId();
-  if (!steamId) {
-    return;
-  }
-
-  setStatus("Loading wishlist order...");
-  let orderedIds = [];
-  try {
-    const fromService = await fetchWishlistOrderFromService(steamId, appIds.length);
-    if (fromService?.orderedIds?.length) {
-      orderedIds = fromService.orderedIds;
-      wishlistPriorityMap = {
-        ...wishlistPriorityMap,
-        ...(fromService.priorityMap || {})
-      };
-      for (const appId of orderedIds) {
-        if (missing.has(appId)) {
-          missing.delete(appId);
-        }
-      }
-    }
-  } catch {
-    // Fallback below for older/blocked API flow.
-  }
-
-  if (orderedIds.length === 0) {
-    let orderRank = 0;
-    const orderedSeen = new Set();
-    for (let pageIndex = 0; pageIndex < 200 && missing.size > 0; pageIndex += 1) {
-      const raw = await fetchSteamText(
-        `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
-        {
-          credentials: "include",
-          cache: "no-store"
-        }
-      );
-      const idsInOrder = extractWishlistAppIdsInTextOrder(raw);
-      if (idsInOrder.length === 0) {
-        break;
-      }
-
-      for (const appId of idsInOrder) {
-        if (!orderedSeen.has(appId)) {
-          orderedSeen.add(appId);
-          orderedIds.push(appId);
-        }
-        wishlistPriorityMap[appId] = orderRank;
-        if (missing.has(appId)) {
-          missing.delete(appId);
-        }
-        orderRank += 1;
-      }
-    }
-  }
-
-  if (orderedIds.length > 0) {
-    const requestedSet = new Set(appIds.map((id) => String(id)));
-    const base = orderedIds.filter((id) => requestedSet.has(id));
-    for (const id of appIds) {
-      if (!base.includes(id)) {
-        base.push(id);
-      }
-    }
-    wishlistOrderedAppIds = base;
-    try {
-      const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
-      const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
-      await browser.storage.local.set({
-        [WISHLIST_ADDED_CACHE_KEY]: {
-          ...cached,
-          orderedAppIds: wishlistOrderedAppIds,
-          priorityMap: wishlistPriorityMap,
-          priorityCachedAt: Date.now()
-        }
-      });
-    } catch {
-      // Ignore storage persistence issues for ordering cache.
-    }
-  }
-  setStatus("");
 }
 
 async function resolveCurrentSteamId() {
