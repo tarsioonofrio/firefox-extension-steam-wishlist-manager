@@ -3,6 +3,7 @@ const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
+const WISHLIST_ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_COLLECTION_NAME_LENGTH = 64;
 const MAX_COLLECTIONS = 100;
 const MAX_ITEMS_PER_COLLECTION = 5000;
@@ -252,6 +253,299 @@ function renameCollection(state, fromName, toName) {
   return to;
 }
 
+function encodeVarint(value) {
+  let n = 0n;
+  if (typeof value === "bigint") {
+    n = value;
+  } else if (typeof value === "string") {
+    n = BigInt(value || "0");
+  } else {
+    n = BigInt(Number(value || 0));
+  }
+  if (n < 0n) {
+    n = 0n;
+  }
+  const out = [];
+  while (n >= 0x80n) {
+    out.push(Number((n & 0x7fn) | 0x80n));
+    n >>= 7n;
+  }
+  out.push(Number(n));
+  return out;
+}
+
+function decodeVarint(bytes, startIndex) {
+  let value = 0n;
+  let shift = 0n;
+  let index = startIndex;
+  while (index < bytes.length) {
+    const b = bytes[index];
+    index += 1;
+    value |= BigInt(b & 0x7f) << shift;
+    if ((b & 0x80) === 0) {
+      return { value, next: index };
+    }
+    shift += 7n;
+  }
+  return null;
+}
+
+function encodeUtf8(text) {
+  return new TextEncoder().encode(String(text || ""));
+}
+
+function concatBytes(chunks) {
+  const size = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+  const out = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+function fieldVarint(field, value) {
+  return Uint8Array.from([
+    ...encodeVarint((BigInt(field) << 3n) | 0n),
+    ...encodeVarint(value)
+  ]);
+}
+
+function fieldBytes(field, bytes) {
+  return concatBytes([
+    Uint8Array.from(encodeVarint((BigInt(field) << 3n) | 2n)),
+    Uint8Array.from(encodeVarint(bytes.length)),
+    bytes
+  ]);
+}
+
+function toBase64(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
+}
+
+function decodeWishlistSortedFilteredItem(bytes) {
+  const item = {
+    appid: 0,
+    priority: null
+  };
+  let index = 0;
+  while (index < bytes.length) {
+    const tag = decodeVarint(bytes, index);
+    if (!tag) {
+      break;
+    }
+    index = tag.next;
+    const field = Number(tag.value >> 3n);
+    const wireType = Number(tag.value & 0x7n);
+
+    if (wireType === 0) {
+      const value = decodeVarint(bytes, index);
+      if (!value) {
+        break;
+      }
+      index = value.next;
+      const n = Number(value.value);
+      if (field === 1) {
+        item.appid = n;
+      } else if (field === 2) {
+        item.priority = n;
+      }
+      continue;
+    }
+
+    if (wireType === 2) {
+      const len = decodeVarint(bytes, index);
+      if (!len) {
+        break;
+      }
+      index = len.next + Number(len.value);
+      continue;
+    }
+
+    if (wireType === 5) {
+      index += 4;
+      continue;
+    }
+    if (wireType === 1) {
+      index += 8;
+      continue;
+    }
+    break;
+  }
+  return item;
+}
+
+function decodeWishlistSortedFilteredResponse(bytes) {
+  const items = [];
+  let index = 0;
+  while (index < bytes.length) {
+    const tag = decodeVarint(bytes, index);
+    if (!tag) {
+      break;
+    }
+    index = tag.next;
+    const field = Number(tag.value >> 3n);
+    const wireType = Number(tag.value & 0x7n);
+
+    if (field === 1 && wireType === 2) {
+      const len = decodeVarint(bytes, index);
+      if (!len) {
+        break;
+      }
+      index = len.next;
+      const itemBytes = bytes.subarray(index, index + Number(len.value));
+      index += Number(len.value);
+      const item = decodeWishlistSortedFilteredItem(itemBytes);
+      if (Number.isFinite(item.appid) && item.appid > 0) {
+        items.push(item);
+      }
+      continue;
+    }
+
+    if (wireType === 0) {
+      const value = decodeVarint(bytes, index);
+      if (!value) {
+        break;
+      }
+      index = value.next;
+      continue;
+    }
+
+    if (wireType === 2) {
+      const len = decodeVarint(bytes, index);
+      if (!len) {
+        break;
+      }
+      index = len.next + Number(len.value);
+      continue;
+    }
+
+    if (wireType === 5) {
+      index += 4;
+      continue;
+    }
+    if (wireType === 1) {
+      index += 8;
+      continue;
+    }
+    break;
+  }
+  return items;
+}
+
+function buildWishlistSortedFilteredRequest(steamId, startIndex = 0, pageSize = 500) {
+  const context = concatBytes([
+    fieldBytes(1, encodeUtf8("english")),
+    fieldBytes(3, encodeUtf8("BR"))
+  ]);
+  const dataRequest = concatBytes([
+    fieldVarint(1, 1),
+    fieldVarint(2, 1),
+    fieldVarint(3, 1),
+    fieldVarint(6, 1),
+    fieldVarint(8, 20),
+    fieldVarint(9, 1)
+  ]);
+  const filters = concatBytes([
+    fieldVarint(25, 4),
+    fieldVarint(25, 3)
+  ]);
+  return concatBytes([
+    fieldVarint(1, steamId),
+    fieldBytes(2, context),
+    fieldBytes(3, dataRequest),
+    fieldBytes(5, filters),
+    fieldVarint(6, startIndex),
+    fieldVarint(7, pageSize)
+  ]);
+}
+
+async function syncWishlistOrderCache(force = false) {
+  const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+  const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+  const now = Date.now();
+  const last = Number(cached.priorityCachedAt || 0);
+  if (!force && now - last < WISHLIST_ORDER_SYNC_INTERVAL_MS) {
+    return { ok: true, skipped: true };
+  }
+
+  const userDataResponse = await fetch("https://store.steampowered.com/dynamicstore/userdata/", { cache: "no-store" });
+  if (!userDataResponse.ok) {
+    throw new Error(`Failed to fetch userdata (${userDataResponse.status})`);
+  }
+  const userData = await userDataResponse.json();
+  const steamId = String(
+    userData?.steamid
+    || userData?.strSteamId
+    || userData?.str_steamid
+    || userData?.webapi_token_steamid
+    || ""
+  ).trim();
+  if (!steamId) {
+    throw new Error("Could not resolve steamid for wishlist order sync.");
+  }
+
+  const orderedAppIds = [];
+  const priorityMap = {};
+  const seen = new Set();
+  const pageSize = 500;
+
+  for (let page = 0; page < 20; page += 1) {
+    const requestBytes = buildWishlistSortedFilteredRequest(steamId, page * pageSize, pageSize);
+    const url = new URL("https://api.steampowered.com/IWishlistService/GetWishlistSortedFiltered/v1");
+    url.searchParams.set("origin", "https://store.steampowered.com");
+    url.searchParams.set("input_protobuf_encoded", toBase64(requestBytes));
+
+    const response = await fetch(url.toString(), { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`Wishlist order request failed (${response.status})`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const items = decodeWishlistSortedFilteredResponse(bytes);
+    if (items.length === 0) {
+      break;
+    }
+
+    for (const item of items) {
+      const appId = String(item.appid || "").trim();
+      if (!appId || seen.has(appId)) {
+        continue;
+      }
+      seen.add(appId);
+      orderedAppIds.push(appId);
+      priorityMap[appId] = Number.isFinite(item.priority)
+        ? Number(item.priority)
+        : (orderedAppIds.length - 1);
+    }
+
+    if (items.length < pageSize) {
+      break;
+    }
+  }
+
+  if (orderedAppIds.length === 0) {
+    throw new Error("Wishlist order response had no items.");
+  }
+
+  await browser.storage.local.set({
+    [WISHLIST_ADDED_CACHE_KEY]: {
+      ...cached,
+      orderedAppIds,
+      priorityMap,
+      priorityCachedAt: now
+    }
+  });
+
+  return { ok: true, updated: orderedAppIds.length };
+}
+
 browser.runtime.onMessage.addListener((message, sender) => {
   return (async () => {
     if (!message || typeof message !== "object") {
@@ -379,6 +673,10 @@ browser.runtime.onMessage.addListener((message, sender) => {
       case "clear-all-data": {
         await browser.storage.local.clear();
         return { ok: true };
+      }
+
+      case "sync-wishlist-order-cache": {
+        return await syncWishlistOrderCache(Boolean(message.force));
       }
 
       default:

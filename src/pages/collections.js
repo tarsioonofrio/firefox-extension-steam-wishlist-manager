@@ -804,6 +804,14 @@ function isMetaIncomplete(meta) {
 }
 
 async function loadWishlistAddedMap() {
+  try {
+    await browser.runtime.sendMessage({
+      type: "sync-wishlist-order-cache"
+    });
+  } catch {
+    // Non-fatal: keep existing fallback flow.
+  }
+
   const now = Date.now();
   const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
   const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
