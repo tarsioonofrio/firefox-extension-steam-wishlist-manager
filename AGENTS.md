@@ -6,10 +6,27 @@
 - `src/content/app-page.js`: UI/actions on Steam app pages (`/app/...`) for collection assignment.
 - `src/content/wishlist-page.js`: filtering and visual ordering logic on wishlist pages (`/wishlist/...`).
 - `src/pages/collections.html|css|js`: dedicated collections management page and Steam-like card list.
+- `src/pages/steam-fetch.js`: shared Steam fetch with retry/cooldown behavior.
+- `src/pages/wishlist-rank.js`: wishlist rank normalization/readiness (`GetWishlist/v1`).
+- `src/pages/wishlist-sort.js`: deterministic sort strategies for wishlist/collections.
+- `src/pages/meta-parsers.js`: app metadata normalization/parsers.
+- `src/pages/collections-filters.js`: filter engine and filtered/sorted list output.
+- `src/pages/collections-ui-controls.js`: collection select/sort menu/pager rendering.
+- `src/pages/collections-panels.js`: panel toggles and outside-click close behavior.
+- `src/pages/collections-range-controls.js`: rating/review/discount/price range UI bindings.
+- `src/pages/collections-filter-state.js`: filter reset and search input clear helpers.
+- `src/pages/collections-actions.js`: source/sort transition rules.
+- `src/pages/collections-crud.js`: create/rename/delete collection flows.
+- `src/pages/collections-init.js`: bootstrap initializer for collections page.
 - `src/popup/popup.html|css|js`: browser action popup that opens the collections page.
 - `src/styles/content.css`: shared styles for injected UI.
 - `README.md`: MVP usage notes and current limitations.
 - `logs/`: local runtime logs; ignored in git.
+
+### Collections Page Layering
+- `collections.js` should stay as orchestrator/composition layer.
+- Prefer placing new business logic in one of the focused modules above.
+- When adding a new page module, register it in `collections.html` script order and document it in `README.md`.
 
 ## Build, Test, and Development Commands
 This repository uses `web-ext` via npm scripts.
@@ -39,6 +56,7 @@ This repository uses `web-ext` via npm scripts.
   2. Validate insertion at beginning/end.
   3. Confirm optional native wishlist click still works.
   4. On wishlist page, filter by collection and verify visual ordering.
+  5. On collections page, verify source switch, sort, filters, CRUD menu, and refresh actions.
 - If adding test infrastructure later, place tests under `tests/` with `*.test.js` naming.
 
 ## Commit & Pull Request Guidelines
