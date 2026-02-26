@@ -4,22 +4,22 @@ const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const WISHLIST_RANK_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const rankUtils = window.SWMWishlistRank || null;
-const WISHLIST_RANK_SOURCE = rankUtils?.RANK_SOURCE || "wishlist-api-v1";
-const WISHLIST_RANK_SOURCE_VERSION = rankUtils?.RANK_SOURCE_VERSION || 3;
-const sortUtils = window.SWMWishlistSort || null;
-const parserUtils = window.SWMMetaParsers || null;
-const filtersUtils = window.SWMCollectionsFilters || null;
-const uiControlsUtils = window.SWMCollectionsUiControls || null;
-const panelsUtils = window.SWMCollectionsPanels || null;
-const rangeControlsUtils = window.SWMCollectionsRangeControls || null;
-const filterStateUtils = window.SWMCollectionsFilterState || null;
-const actionsUtils = window.SWMCollectionsActions || null;
-const crudUtils = window.SWMCollectionsCrud || null;
-const initUtils = window.SWMCollectionsInit || null;
-const selectionBindingsUtils = window.SWMCollectionsSelectionBindings || null;
-const generalBindingsUtils = window.SWMCollectionsGeneralBindings || null;
-const menuBindingsUtils = window.SWMCollectionsMenuBindings || null;
+const rankUtils = window.SWMWishlistRank;
+const WISHLIST_RANK_SOURCE = rankUtils.RANK_SOURCE;
+const WISHLIST_RANK_SOURCE_VERSION = rankUtils.RANK_SOURCE_VERSION;
+const sortUtils = window.SWMWishlistSort;
+const parserUtils = window.SWMMetaParsers;
+const filtersUtils = window.SWMCollectionsFilters;
+const uiControlsUtils = window.SWMCollectionsUiControls;
+const panelsUtils = window.SWMCollectionsPanels;
+const rangeControlsUtils = window.SWMCollectionsRangeControls;
+const filterStateUtils = window.SWMCollectionsFilterState;
+const actionsUtils = window.SWMCollectionsActions;
+const crudUtils = window.SWMCollectionsCrud;
+const initUtils = window.SWMCollectionsInit;
+const selectionBindingsUtils = window.SWMCollectionsSelectionBindings;
+const generalBindingsUtils = window.SWMCollectionsGeneralBindings;
+const menuBindingsUtils = window.SWMCollectionsMenuBindings;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -29,7 +29,7 @@ const SAFE_FETCH_CONCURRENCY_FORCE = 1;
 const SAFE_FETCH_FORCE_BASE_DELAY_MS = 700;
 const SAFE_FETCH_FORCE_JITTER_MS = 500;
 const WISHLIST_SELECT_VALUE = "__wishlist__";
-const steamFetchUtils = window.SWMSteamFetch || null;
+const steamFetchUtils = window.SWMSteamFetch;
 
 let state = null;
 let activeCollection = "__all__";
@@ -131,25 +131,11 @@ function sleep(ms) {
 }
 
 async function fetchSteamJson(url, options = {}) {
-  if (steamFetchUtils?.fetchJson) {
-    return steamFetchUtils.fetchJson(url, options);
-  }
-  const response = await fetch(url, { cache: "no-store", ...options });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
+  return steamFetchUtils.fetchJson(url, options);
 }
 
 async function fetchSteamText(url, options = {}) {
-  if (steamFetchUtils?.fetchText) {
-    return steamFetchUtils.fetchText(url, options);
-  }
-  const response = await fetch(url, { cache: "no-store", ...options });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.text();
+  return steamFetchUtils.fetchText(url, options);
 }
 
 
@@ -171,13 +157,7 @@ async function fetchWishlistSnapshotFromApi(steamId) {
     throw new Error("Wishlist API returned no items.");
   }
 
-  const snapshot = rankUtils?.normalizeWishlistSnapshotPayload
-    ? rankUtils.normalizeWishlistSnapshotPayload(payload)
-    : {
-      orderedAppIds: [],
-      priorityMap: {},
-      addedMap: {}
-    };
+  const snapshot = rankUtils.normalizeWishlistSnapshotPayload(payload);
   if (!Array.isArray(snapshot.orderedAppIds) || snapshot.orderedAppIds.length === 0) {
     throw new Error("Wishlist API returned no valid appids.");
   }
@@ -212,29 +192,23 @@ function formatUnixDate(timestamp) {
 }
 
 function isWishlistRankReady(appIds = null) {
-  if (rankUtils?.isRankReady) {
-    return rankUtils.isRankReady(
-      {
-        prioritySource: wishlistPrioritySource,
-        prioritySourceVersion: wishlistPrioritySourceVersion,
-        orderedAppIds: wishlistOrderedAppIds,
-        priorityMap: wishlistPriorityMap
-      },
-      Array.isArray(appIds) ? appIds : Object.keys(wishlistAddedMap || {})
-    );
-  }
-  return false;
+  return rankUtils.isRankReady(
+    {
+      prioritySource: wishlistPrioritySource,
+      prioritySourceVersion: wishlistPrioritySourceVersion,
+      orderedAppIds: wishlistOrderedAppIds,
+      priorityMap: wishlistPriorityMap
+    },
+    Array.isArray(appIds) ? appIds : Object.keys(wishlistAddedMap || {})
+  );
 }
 
 function getWishlistRankUnavailableReason() {
-  if (rankUtils?.getUnavailableReason) {
-    return rankUtils.getUnavailableReason({
-      prioritySource: wishlistPrioritySource,
-      prioritySourceVersion: wishlistPrioritySourceVersion,
-      priorityLastError: wishlistPriorityLastError
-    });
-  }
-  return "Your rank is still syncing; temporarily showing Title order.";
+  return rankUtils.getUnavailableReason({
+    prioritySource: wishlistPrioritySource,
+    prioritySourceVersion: wishlistPrioritySourceVersion,
+    priorityLastError: wishlistPriorityLastError
+  });
 }
 
 function getCurrentSourceAppIds() {
@@ -295,10 +269,7 @@ function getSortContext() {
 }
 
 function sortByWishlistPriority(appIds) {
-  if (sortUtils?.sortByWishlistPriority) {
-    return sortUtils.sortByWishlistPriority(appIds, wishlistPriorityMap);
-  }
-  return Array.isArray(appIds) ? [...appIds] : [];
+  return sortUtils.sortByWishlistPriority(appIds, wishlistPriorityMap);
 }
 
 function extractWishlistAppIdsInTextOrder(rawText) {
@@ -319,20 +290,7 @@ function extractWishlistAppIdsInTextOrder(rawText) {
 }
 
 function buildWishlistSortOrders(appIds) {
-  if (sortUtils?.buildWishlistSortOrders) {
-    return sortUtils.buildWishlistSortOrders(appIds, getSortContext());
-  }
-  const ids = Array.isArray(appIds) ? [...appIds] : [];
-  return {
-    position: ids,
-    title: ids,
-    price: ids,
-    discount: ids,
-    "date-added": ids,
-    "top-selling": ids,
-    "release-date": ids,
-    "review-score": ids
-  };
+  return sortUtils.buildWishlistSortOrders(appIds, getSortContext());
 }
 
 function buildTagCacheBucketKey() {
@@ -346,10 +304,7 @@ function getMetaTags(appId) {
 
 function getMetaType(appId) {
   const value = metaCache[appId]?.appType;
-  if (parserUtils?.normalizeAppTypeLabel) {
-    return parserUtils.normalizeAppTypeLabel(value);
-  }
-  return String(value || "").trim() || "Unknown";
+  return parserUtils.normalizeAppTypeLabel(value);
 }
 
 function getMetaNumber(appId, key, fallback = 0) {
@@ -363,38 +318,23 @@ function getMetaArray(appId, key) {
 }
 
 function normalizeAppTypeLabel(value) {
-  if (parserUtils?.normalizeAppTypeLabel) {
-    return parserUtils.normalizeAppTypeLabel(value);
-  }
-  return String(value || "").trim() || "Unknown";
+  return parserUtils.normalizeAppTypeLabel(value);
 }
 
 function parseSupportedLanguages(rawHtml) {
-  if (parserUtils?.parseSupportedLanguages) {
-    return parserUtils.parseSupportedLanguages(rawHtml);
-  }
-  return [];
+  return parserUtils.parseSupportedLanguages(rawHtml);
 }
 
 function parseFullAudioLanguages(rawHtml) {
-  if (parserUtils?.parseFullAudioLanguages) {
-    return parserUtils.parseFullAudioLanguages(rawHtml);
-  }
-  return [];
+  return parserUtils.parseFullAudioLanguages(rawHtml);
 }
 
 function parseLooseInteger(value, fallback = 0) {
-  if (parserUtils?.parseLooseInteger) {
-    return parserUtils.parseLooseInteger(value, fallback);
-  }
-  return fallback;
+  return parserUtils.parseLooseInteger(value, fallback);
 }
 
 function extractPriceTextFromDiscountBlock(blockHtml) {
-  if (parserUtils?.extractPriceTextFromDiscountBlock) {
-    return parserUtils.extractPriceTextFromDiscountBlock(blockHtml);
-  }
-  return "";
+  return parserUtils.extractPriceTextFromDiscountBlock(blockHtml);
 }
 
 function isMetaIncomplete(meta) {
