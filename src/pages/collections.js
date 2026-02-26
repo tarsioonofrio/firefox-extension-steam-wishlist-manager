@@ -2525,6 +2525,9 @@ function createLineRow(options) {
   const onMoveToPosition = options?.onMoveToPosition || (() => Promise.resolve());
   const setStatus = options?.setStatus || (() => {});
   const maxPositionDigits = Math.max(1, Number(options?.maxPositionDigits || 1));
+  const allCollectionNames = Array.isArray(options?.allCollectionNames) ? options.allCollectionNames : [];
+  const selectedCollectionNames = new Set(Array.isArray(options?.selectedCollectionNames) ? options.selectedCollectionNames : []);
+  const onToggleCollection = options?.onToggleCollection || (() => Promise.resolve());
 
   const row = document.createElement("article");
   row.className = "line-row";
@@ -2582,6 +2585,59 @@ function createLineRow(options) {
   left.appendChild(downBtn);
   left.appendChild(posInput);
 
+  const collectionsBtn = document.createElement("button");
+  collectionsBtn.type = "button";
+  collectionsBtn.className = "line-btn line-collections-btn";
+  collectionsBtn.textContent = "Collections";
+  collectionsBtn.disabled = allCollectionNames.length === 0;
+  left.appendChild(collectionsBtn);
+
+  const collectionsDropdown = document.createElement("div");
+  collectionsDropdown.className = "collections-dropdown line-collections-dropdown hidden";
+  if (allCollectionNames.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "collections-dropdown-empty";
+    empty.textContent = "No static collections yet.";
+    collectionsDropdown.appendChild(empty);
+  } else {
+    for (const collectionName of allCollectionNames) {
+      const rowEl = document.createElement("label");
+      rowEl.className = "collection-checkbox-row";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = selectedCollectionNames.has(collectionName);
+      checkbox.addEventListener("change", async () => {
+        try {
+          await onToggleCollection(appId, collectionName, checkbox.checked);
+          if (checkbox.checked) {
+            selectedCollectionNames.add(collectionName);
+          } else {
+            selectedCollectionNames.delete(collectionName);
+          }
+        } catch (error) {
+          checkbox.checked = !checkbox.checked;
+          setStatus(String(error?.message || "Failed to update collections."), true);
+        }
+      });
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "collection-checkbox-name";
+      nameEl.textContent = collectionName;
+
+      rowEl.appendChild(checkbox);
+      rowEl.appendChild(nameEl);
+      collectionsDropdown.appendChild(rowEl);
+    }
+  }
+  collectionsBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    collectionsDropdown.classList.toggle("hidden");
+  });
+  collectionsDropdown.addEventListener("click", (event) => event.stopPropagation());
+  row.addEventListener("click", () => collectionsDropdown.classList.add("hidden"));
+  left.appendChild(collectionsDropdown);
+
   const center = document.createElement("div");
   center.className = "line-center";
   const thumbWrap = document.createElement("a");
@@ -2616,8 +2672,8 @@ function createLineRow(options) {
   const discountEl = document.createElement("span");
   discountEl.className = "line-discount";
   discountEl.textContent = "-";
-  right.appendChild(priceEl);
   right.appendChild(discountEl);
+  right.appendChild(priceEl);
 
   row.appendChild(batchWrap);
   row.appendChild(left);
@@ -2877,6 +2933,33 @@ async function renderCards() {
         onMoveUp: (id) => moveCollectionItemByDelta(id, -1),
         onMoveDown: (id) => moveCollectionItemByDelta(id, 1),
         onMoveToPosition: (id, position) => moveCollectionItemToPosition(id, position),
+        allCollectionNames: getStaticCollectionNames(),
+        selectedCollectionNames: getCollectionsContainingApp(appId),
+        onToggleCollection: async (id, collectionName, checked) => {
+          const payload = checked
+            ? {
+              type: "add-item-to-collection",
+              appId: id,
+              collectionName,
+              item: {
+                title: state?.items?.[id]?.title || metaCache?.[id]?.titleText || title
+              }
+            }
+            : {
+              type: "remove-item-from-collection",
+              appId: id,
+              collectionName
+            };
+          const response = await browser.runtime.sendMessage(payload);
+          if (!response?.ok) {
+            throw new Error(String(response?.error || "Failed to update item collections."));
+          }
+          await refreshState();
+          quickPopulateFiltersFromCache();
+          refreshFilterOptionsInBackground();
+          await render();
+          setStatus(`Collection ${checked ? "added" : "removed"}: ${collectionName}`);
+        },
         maxPositionDigits,
         setStatus
       });

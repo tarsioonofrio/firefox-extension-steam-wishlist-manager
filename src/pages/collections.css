@@ -743,10 +743,11 @@ main {
 
 .line-left {
   display: inline-grid;
-  grid-template-columns: 28px 28px auto;
+  grid-template-columns: 28px 28px auto auto;
   gap: 4px;
   align-items: center;
   width: fit-content;
+  position: relative;
 }
 
 .line-btn {
@@ -769,8 +770,21 @@ main {
   margin: 0;
 }
 
+.line-collections-btn {
+  min-width: 76px;
+}
+
+.line-collections-dropdown {
+  position: absolute;
+  top: 26px;
+  left: 0;
+  z-index: 5;
+  width: 240px;
+}
+
 .line-center {
-  display: flex;
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -779,9 +793,10 @@ main {
 .line-thumb {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
+  width: 78px;
   height: 24px;
-  flex: 0 0 auto;
+  overflow: hidden;
 }
 
 .line-thumb-img {
