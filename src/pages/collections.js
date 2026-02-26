@@ -10,6 +10,7 @@ const WISHLIST_RANK_SOURCE_VERSION = rankUtils?.RANK_SOURCE_VERSION || 3;
 const sortUtils = window.SWMWishlistSort || null;
 const parserUtils = window.SWMMetaParsers || null;
 const filtersUtils = window.SWMCollectionsFilters || null;
+const uiControlsUtils = window.SWMCollectionsUiControls || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -1787,82 +1788,33 @@ function getFiltersContext() {
 }
 
 function renderCollectionSelect() {
-  const select = document.getElementById("collection-select");
-  const selectBtn = document.getElementById("collection-select-btn");
-  const selectMenu = document.getElementById("collection-select-options");
-  const deleteSelect = document.getElementById("delete-collection-select");
-  if (!select || !selectBtn || !selectMenu || !state) {
+  if (!uiControlsUtils?.renderCollectionSelect) {
     return;
   }
-
-  select.innerHTML = "";
-
-  const wishlistOption = document.createElement("option");
-  wishlistOption.value = WISHLIST_SELECT_VALUE;
-  wishlistOption.textContent = `Steam wishlist (${Object.keys(wishlistAddedMap || {}).length})`;
-  select.appendChild(wishlistOption);
-
-  const allOption = document.createElement("option");
-  allOption.value = "__all__";
-  allOption.textContent = "All collections";
-  select.appendChild(allOption);
-
-  for (const name of state.collectionOrder || []) {
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = `${name} (${(state.collections?.[name] || []).length})`;
-    select.appendChild(option);
-  }
-
-  const validValues = Array.from(select.options).map((o) => o.value);
-  if (!validValues.includes(activeCollection)) {
-    activeCollection = validValues.includes(state.activeCollection) ? state.activeCollection : "__all__";
-  }
-
-  select.value = sourceMode === "wishlist" ? WISHLIST_SELECT_VALUE : activeCollection;
-  const selectedOption = select.options[select.selectedIndex];
-  selectBtn.textContent = `Collection: ${selectedOption?.textContent || "Select"}`;
-
-  selectMenu.innerHTML = "";
-  for (const option of Array.from(select.options)) {
-    const itemBtn = document.createElement("button");
-    itemBtn.type = "button";
-    itemBtn.className = "dropdown-option";
-    if (option.value === select.value) {
-      itemBtn.classList.add("active");
-    }
-    itemBtn.textContent = option.textContent || option.value;
-    itemBtn.dataset.value = option.value;
-    selectMenu.appendChild(itemBtn);
-  }
-
-  if (deleteSelect) {
-    deleteSelect.innerHTML = "";
-    for (const name of state.collectionOrder || []) {
-      const option = document.createElement("option");
-      option.value = name;
-      option.textContent = `${name} (${(state.collections?.[name] || []).length})`;
-      deleteSelect.appendChild(option);
-    }
+  const result = uiControlsUtils.renderCollectionSelect({
+    state,
+    sourceMode,
+    activeCollection,
+    wishlistCount: Object.keys(wishlistAddedMap || {}).length,
+    wishlistSelectValue: WISHLIST_SELECT_VALUE
+  });
+  if (result?.activeCollection) {
+    activeCollection = result.activeCollection;
   }
 }
 
 function renderPager(totalItems) {
-  const pageInfo = document.getElementById("page-info");
-  const prevBtn = document.getElementById("prev-page-btn");
-  const nextBtn = document.getElementById("next-page-btn");
-  if (!pageInfo || !prevBtn || !nextBtn) {
+  if (!uiControlsUtils?.renderPager) {
     return;
   }
-
-  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
-  if (page > totalPages) {
-    page = totalPages;
+  const result = uiControlsUtils.renderPager({
+    totalItems,
+    page,
+    pageSize: PAGE_SIZE
+  });
+  if (Number.isFinite(Number(result?.page))) {
+    page = Number(result.page);
   }
-
-  pageInfo.textContent = `Page ${page} / ${totalPages}`;
-  prevBtn.disabled = page <= 1;
-  nextBtn.disabled = page >= totalPages;
 }
 
 async function renderCards() {
@@ -2188,28 +2140,7 @@ function renderRatingControls() {
 }
 
 function renderSortMenu() {
-  const select = document.getElementById("sort-select");
-  const btn = document.getElementById("sort-menu-btn");
-  const menu = document.getElementById("sort-menu-options");
-  if (!select || !btn || !menu) {
-    return;
-  }
-
-  const selectedOption = select.options[select.selectedIndex];
-  btn.textContent = `Sort by: ${selectedOption?.textContent || "Release Date"}`;
-
-  menu.innerHTML = "";
-  for (const option of Array.from(select.options)) {
-    const itemBtn = document.createElement("button");
-    itemBtn.type = "button";
-    itemBtn.className = "dropdown-option";
-    if (option.value === select.value) {
-      itemBtn.classList.add("active");
-    }
-    itemBtn.textContent = option.textContent || option.value;
-    itemBtn.dataset.value = option.value;
-    menu.appendChild(itemBtn);
-  }
+  uiControlsUtils?.renderSortMenu?.({ fallbackLabel: "Release Date" });
 }
 
 function toggleSortMenu(forceOpen = null) {
