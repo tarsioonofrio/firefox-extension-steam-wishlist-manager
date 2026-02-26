@@ -2559,6 +2559,13 @@ function bindSearchAndPagingControls() {
   });
 }
 
+function bindTextFilterInput(inputId, onChange) {
+  document.getElementById(inputId)?.addEventListener("input", (event) => {
+    onChange(String(event.target.value || "").trim());
+    renderExtraFilterOptions();
+  });
+}
+
 function bindFilterControls() {
   document.getElementById("tag-search-input")?.addEventListener("input", (event) => {
     tagSearchQuery = String(event.target.value || "").trim();
@@ -2571,34 +2578,23 @@ function bindFilterControls() {
     renderTagOptions();
   });
 
-  document.getElementById("languages-search-input")?.addEventListener("input", (event) => {
-    languageSearchQuery = String(event.target.value || "").trim();
-    renderExtraFilterOptions();
+  bindTextFilterInput("languages-search-input", (value) => {
+    languageSearchQuery = value;
   });
-
-  document.getElementById("full-audio-languages-search-input")?.addEventListener("input", (event) => {
-    fullAudioLanguageSearchQuery = String(event.target.value || "").trim();
-    renderExtraFilterOptions();
+  bindTextFilterInput("full-audio-languages-search-input", (value) => {
+    fullAudioLanguageSearchQuery = value;
   });
-
-  document.getElementById("subtitle-languages-search-input")?.addEventListener("input", (event) => {
-    subtitleLanguageSearchQuery = String(event.target.value || "").trim();
-    renderExtraFilterOptions();
+  bindTextFilterInput("subtitle-languages-search-input", (value) => {
+    subtitleLanguageSearchQuery = value;
   });
-
-  document.getElementById("technologies-search-input")?.addEventListener("input", (event) => {
-    technologySearchQuery = String(event.target.value || "").trim();
-    renderExtraFilterOptions();
+  bindTextFilterInput("technologies-search-input", (value) => {
+    technologySearchQuery = value;
   });
-
-  document.getElementById("developers-search-input")?.addEventListener("input", (event) => {
-    developerSearchQuery = String(event.target.value || "").trim();
-    renderExtraFilterOptions();
+  bindTextFilterInput("developers-search-input", (value) => {
+    developerSearchQuery = value;
   });
-
-  document.getElementById("publishers-search-input")?.addEventListener("input", (event) => {
-    publisherSearchQuery = String(event.target.value || "").trim();
-    renderExtraFilterOptions();
+  bindTextFilterInput("publishers-search-input", (value) => {
+    publisherSearchQuery = value;
   });
 
   document.getElementById("refresh-page-btn")?.addEventListener("click", () => {
