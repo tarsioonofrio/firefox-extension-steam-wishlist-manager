@@ -48,6 +48,7 @@ const FILTER_SEED = {
   releaseYears: ["2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016", "2015"]
 };
 const STEAMDB_TAGS_JSON_PATH = "src/data/steamdb-tags-hardcoded.json";
+const STEAM_FILTER_SEEDS_JSON_PATH = "src/data/steam-filter-seeds-hardcoded.json";
 
 let state = null;
 let activeCollection = "__all__";
@@ -78,6 +79,7 @@ let tagShowLimit = TAG_SHOW_STEP;
 let tagCounts = [];
 let tagCountsSource = "none";
 let steamDbTagSeedNames = null;
+let externalFilterSeed = null;
 let selectedTypes = new Set();
 let typeCounts = [];
 let selectedPlayers = new Set();
@@ -938,6 +940,7 @@ async function refreshSingleItem(appId) {
 }
 
 async function loadMetaCache() {
+  await loadGeneralFilterSeedFromJson();
   await loadSteamDbTagSeedFromJson();
   const stored = await browser.storage.local.get(META_CACHE_KEY);
   metaCache = stored[META_CACHE_KEY] || {};
@@ -967,8 +970,9 @@ async function fetchAppMeta(appId, options = {}) {
 
   async function fetchAppDetailsDataWithFallback() {
     const urls = [
-      `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=pt-BR`,
+      `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=en`,
       `https://store.steampowered.com/api/appdetails?appids=${appId}&l=en`,
+      `https://store.steampowered.com/api/appdetails?appids=${appId}&cc=br&l=pt-BR`,
       `https://store.steampowered.com/api/appdetails?appids=${appId}`
     ];
 
@@ -1653,6 +1657,15 @@ function getTagSeedNames() {
     : [];
 }
 
+function getSeedList(key) {
+  const external = externalFilterSeed?.[key];
+  if (Array.isArray(external) && external.length > 0) {
+    return external;
+  }
+  const fallback = FILTER_SEED?.[key];
+  return Array.isArray(fallback) ? fallback : [];
+}
+
 async function loadSteamDbTagSeedFromJson() {
   if (Array.isArray(steamDbTagSeedNames) && steamDbTagSeedNames.length > 0) {
     return;
@@ -1682,21 +1695,52 @@ async function loadSteamDbTagSeedFromJson() {
   }
 }
 
+async function loadGeneralFilterSeedFromJson() {
+  if (externalFilterSeed) {
+    return;
+  }
+  try {
+    const url = browser?.runtime?.getURL
+      ? browser.runtime.getURL(STEAM_FILTER_SEEDS_JSON_PATH)
+      : STEAM_FILTER_SEEDS_JSON_PATH;
+    const payload = await fetchSteamJson(url, { cache: "no-store" });
+    const seed = payload?.seed || {};
+    const normalize = (items) => Array.isArray(items)
+      ? Array.from(new Set(items.map((v) => String(v || "").trim()).filter(Boolean)))
+      : [];
+    externalFilterSeed = {
+      types: normalize(seed.types),
+      players: normalize(seed.players),
+      features: normalize(seed.features),
+      hardware: normalize(seed.hardware),
+      accessibility: normalize(seed.accessibility),
+      platforms: normalize(seed.platforms),
+      languages: normalize(seed.languages),
+      technologies: normalize(seed.technologies),
+      developers: normalize(seed.developers),
+      publishers: normalize(seed.publishers),
+      releaseYears: normalize(seed.releaseYears)
+    };
+  } catch {
+    // Fallback keeps built-in hardcoded seed.
+  }
+}
+
 function applyHardcodedFilterSeeds() {
   tagCounts = namesToCountObjects(getTagSeedNames());
-  typeCounts = namesToCountObjects(FILTER_SEED.types);
-  playerCounts = namesToCountObjects(FILTER_SEED.players);
-  featureCounts = namesToCountObjects(FILTER_SEED.features);
-  hardwareCounts = namesToCountObjects(FILTER_SEED.hardware);
-  accessibilityCounts = namesToCountObjects(FILTER_SEED.accessibility);
-  platformCounts = namesToCountObjects(FILTER_SEED.platforms);
-  languageCounts = namesToCountObjects(FILTER_SEED.languages);
-  fullAudioLanguageCounts = namesToCountObjects(FILTER_SEED.languages);
-  subtitleLanguageCounts = namesToCountObjects(FILTER_SEED.languages);
-  technologyCounts = namesToCountObjects(FILTER_SEED.technologies);
-  developerCounts = namesToCountObjects(FILTER_SEED.developers);
-  publisherCounts = namesToCountObjects(FILTER_SEED.publishers);
-  releaseYearCounts = namesToCountObjects(FILTER_SEED.releaseYears).sort((a, b) => Number(b.name) - Number(a.name));
+  typeCounts = namesToCountObjects(getSeedList("types"));
+  playerCounts = namesToCountObjects(getSeedList("players"));
+  featureCounts = namesToCountObjects(getSeedList("features"));
+  hardwareCounts = namesToCountObjects(getSeedList("hardware"));
+  accessibilityCounts = namesToCountObjects(getSeedList("accessibility"));
+  platformCounts = namesToCountObjects(getSeedList("platforms"));
+  languageCounts = namesToCountObjects(getSeedList("languages"));
+  fullAudioLanguageCounts = namesToCountObjects(getSeedList("languages"));
+  subtitleLanguageCounts = namesToCountObjects(getSeedList("languages"));
+  technologyCounts = namesToCountObjects(getSeedList("technologies"));
+  developerCounts = namesToCountObjects(getSeedList("developers"));
+  publisherCounts = namesToCountObjects(getSeedList("publishers"));
+  releaseYearCounts = namesToCountObjects(getSeedList("releaseYears")).sort((a, b) => Number(b.name) - Number(a.name));
   if (tagCountsSource === "none") {
     tagCountsSource = "hardcoded";
   }
@@ -1791,19 +1835,19 @@ function populateGlobalFiltersFromMetaCache() {
     tagCounts = mergeOrderedSeedWithNames(getTagSeedNames(), tags);
     tagCountsSource = "global-meta";
   }
-  typeCounts = mergeSeedWithNames(FILTER_SEED.types, types);
-  playerCounts = mergeSeedWithNames(FILTER_SEED.players, players);
-  featureCounts = mergeSeedWithNames(FILTER_SEED.features, features);
-  hardwareCounts = mergeSeedWithNames(FILTER_SEED.hardware, hardware);
-  accessibilityCounts = mergeSeedWithNames(FILTER_SEED.accessibility, accessibility);
-  platformCounts = mergeSeedWithNames(FILTER_SEED.platforms, platforms);
-  languageCounts = mergeSeedWithNames(FILTER_SEED.languages, languages);
-  fullAudioLanguageCounts = mergeSeedWithNames(FILTER_SEED.languages, fullAudioLanguages);
-  subtitleLanguageCounts = mergeSeedWithNames(FILTER_SEED.languages, subtitleLanguages);
-  technologyCounts = mergeSeedWithNames(FILTER_SEED.technologies, technologies);
-  developerCounts = mergeSeedWithNames(FILTER_SEED.developers, developers);
-  publisherCounts = mergeSeedWithNames(FILTER_SEED.publishers, publishers);
-  releaseYearCounts = mergeSeedWithNames(FILTER_SEED.releaseYears, years, (a, b) => Number(b) - Number(a))
+  typeCounts = mergeSeedWithNames(getSeedList("types"), types);
+  playerCounts = mergeSeedWithNames(getSeedList("players"), players);
+  featureCounts = mergeSeedWithNames(getSeedList("features"), features);
+  hardwareCounts = mergeSeedWithNames(getSeedList("hardware"), hardware);
+  accessibilityCounts = mergeSeedWithNames(getSeedList("accessibility"), accessibility);
+  platformCounts = mergeSeedWithNames(getSeedList("platforms"), platforms);
+  languageCounts = mergeSeedWithNames(getSeedList("languages"), languages);
+  fullAudioLanguageCounts = mergeSeedWithNames(getSeedList("languages"), fullAudioLanguages);
+  subtitleLanguageCounts = mergeSeedWithNames(getSeedList("languages"), subtitleLanguages);
+  technologyCounts = mergeSeedWithNames(getSeedList("technologies"), technologies);
+  developerCounts = mergeSeedWithNames(getSeedList("developers"), developers);
+  publisherCounts = mergeSeedWithNames(getSeedList("publishers"), publishers);
+  releaseYearCounts = mergeSeedWithNames(getSeedList("releaseYears"), years, (a, b) => Number(b) - Number(a))
     .sort((a, b) => Number(b.name) - Number(a.name));
 }
 
@@ -1859,19 +1903,19 @@ function quickPopulateFiltersFromCache() {
     tagCounts = mergeOrderedSeedWithNames(getTagSeedNames(), tags);
     tagCountsSource = "wishlist-cache";
   }
-  typeCounts = mergeSeedWithNames(FILTER_SEED.types, types);
-  playerCounts = mergeSeedWithNames(FILTER_SEED.players, players);
-  featureCounts = mergeSeedWithNames(FILTER_SEED.features, features);
-  hardwareCounts = mergeSeedWithNames(FILTER_SEED.hardware, hardware);
-  accessibilityCounts = mergeSeedWithNames(FILTER_SEED.accessibility, accessibility);
-  platformCounts = mergeSeedWithNames(FILTER_SEED.platforms, platforms);
-  languageCounts = mergeSeedWithNames(FILTER_SEED.languages, languages);
-  fullAudioLanguageCounts = mergeSeedWithNames(FILTER_SEED.languages, fullAudioLanguages);
-  subtitleLanguageCounts = mergeSeedWithNames(FILTER_SEED.languages, subtitleLanguages);
-  technologyCounts = mergeSeedWithNames(FILTER_SEED.technologies, technologies);
-  developerCounts = mergeSeedWithNames(FILTER_SEED.developers, developers);
-  publisherCounts = mergeSeedWithNames(FILTER_SEED.publishers, publishers);
-  releaseYearCounts = mergeSeedWithNames(FILTER_SEED.releaseYears, years, (a, b) => Number(b) - Number(a))
+  typeCounts = mergeSeedWithNames(getSeedList("types"), types);
+  playerCounts = mergeSeedWithNames(getSeedList("players"), players);
+  featureCounts = mergeSeedWithNames(getSeedList("features"), features);
+  hardwareCounts = mergeSeedWithNames(getSeedList("hardware"), hardware);
+  accessibilityCounts = mergeSeedWithNames(getSeedList("accessibility"), accessibility);
+  platformCounts = mergeSeedWithNames(getSeedList("platforms"), platforms);
+  languageCounts = mergeSeedWithNames(getSeedList("languages"), languages);
+  fullAudioLanguageCounts = mergeSeedWithNames(getSeedList("languages"), fullAudioLanguages);
+  subtitleLanguageCounts = mergeSeedWithNames(getSeedList("languages"), subtitleLanguages);
+  technologyCounts = mergeSeedWithNames(getSeedList("technologies"), technologies);
+  developerCounts = mergeSeedWithNames(getSeedList("developers"), developers);
+  publisherCounts = mergeSeedWithNames(getSeedList("publishers"), publishers);
+  releaseYearCounts = mergeSeedWithNames(getSeedList("releaseYears"), years, (a, b) => Number(b) - Number(a))
     .sort((a, b) => Number(b.name) - Number(a.name));
 
   renderTagOptions();

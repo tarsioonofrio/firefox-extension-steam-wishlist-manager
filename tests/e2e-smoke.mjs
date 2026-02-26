@@ -124,6 +124,21 @@ function createFetchMock() {
       { tagid: 4434, name: "JRPG" }
     ]
   };
+  const localFilterSeed = {
+    seed: {
+      types: ["Game", "DLC", "Unknown"],
+      players: ["Single-player", "Multi-player", "Co-op"],
+      features: ["Steam Achievements", "Steam Cloud"],
+      hardware: ["Full controller support"],
+      accessibility: ["Subtitles"],
+      platforms: ["Windows", "macOS", "Linux"],
+      languages: ["English", "Portuguese - Brazil"],
+      technologies: ["Steam Cloud"],
+      developers: ["Valve"],
+      publishers: ["Valve"],
+      releaseYears: ["2026", "2025", "2024"]
+    }
+  };
   return async (url) => {
     const href = String(url || "");
     if (href.includes("steamdb-tags-hardcoded.json")) {
@@ -135,6 +150,18 @@ function createFetchMock() {
         },
         async text() {
           return JSON.stringify(localTagSeed);
+        }
+      };
+    }
+    if (href.includes("steam-filter-seeds-hardcoded.json")) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return localFilterSeed;
+        },
+        async text() {
+          return JSON.stringify(localFilterSeed);
         }
       };
     }

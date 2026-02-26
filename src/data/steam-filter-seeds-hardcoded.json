@@ -1,0 +1,496 @@
+{
+  "version": 1,
+  "accessedAt": "2026-02-26T16:40:14.416Z",
+  "source": {
+    "type": "steam_store_endpoints_and_static_seed",
+    "categoriesUrl": "https://store.steampowered.com/actions/ajaxgetstorecategories",
+    "note": "Features/categories from Steam endpoint; other lists are stable English seed and extended in runtime by metadata."
+  },
+  "quantities": {
+    "categories": 0,
+    "seedTypes": 0,
+    "seedPlatforms": 0,
+    "seedLanguages": 0
+  },
+  "categories": [
+    {
+      "categoryid": 1,
+      "type": 1,
+      "name": "Multi-player"
+    },
+    {
+      "categoryid": 2,
+      "type": 1,
+      "name": "Single-player"
+    },
+    {
+      "categoryid": 6,
+      "type": 0,
+      "name": "Mods (requires HL2)"
+    },
+    {
+      "categoryid": 7,
+      "type": 0,
+      "name": "Mods (requires HL1)"
+    },
+    {
+      "categoryid": 8,
+      "type": 2,
+      "name": "VAC Enabled"
+    },
+    {
+      "categoryid": 9,
+      "type": 1,
+      "name": "Co-op"
+    },
+    {
+      "categoryid": 10,
+      "type": 0,
+      "name": "Game Demo"
+    },
+    {
+      "categoryid": 13,
+      "type": 2,
+      "name": "Captions"
+    },
+    {
+      "categoryid": 14,
+      "type": 2,
+      "name": "Commentary"
+    },
+    {
+      "categoryid": 15,
+      "type": 2,
+      "name": "Stats"
+    },
+    {
+      "categoryid": 16,
+      "type": 2,
+      "name": "Includes Source SDK"
+    },
+    {
+      "categoryid": 17,
+      "type": 2,
+      "name": "Includes level editor"
+    },
+    {
+      "categoryid": 18,
+      "type": 3,
+      "name": "Controller enabled"
+    },
+    {
+      "categoryid": 19,
+      "type": 0,
+      "name": "Mods"
+    },
+    {
+      "categoryid": 20,
+      "type": 1,
+      "name": "MMO"
+    },
+    {
+      "categoryid": 21,
+      "type": 0,
+      "name": "DLC"
+    },
+    {
+      "categoryid": 22,
+      "type": 2,
+      "name": "Steam Achievements"
+    },
+    {
+      "categoryid": 23,
+      "type": 2,
+      "name": "Steam Cloud"
+    },
+    {
+      "categoryid": 24,
+      "type": 1,
+      "name": "Shared/Split Screen"
+    },
+    {
+      "categoryid": 25,
+      "type": 2,
+      "name": "Steam Leaderboards"
+    },
+    {
+      "categoryid": 27,
+      "type": 1,
+      "name": "Cross-Platform Multiplayer"
+    },
+    {
+      "categoryid": 28,
+      "type": 3,
+      "name": "Full Controller Support"
+    },
+    {
+      "categoryid": 29,
+      "type": 2,
+      "name": "Steam Trading Cards"
+    },
+    {
+      "categoryid": 30,
+      "type": 2,
+      "name": "Steam Workshop"
+    },
+    {
+      "categoryid": 31,
+      "type": 2,
+      "name": "VR Support"
+    },
+    {
+      "categoryid": 32,
+      "type": 2,
+      "name": "Async Game Notifications"
+    },
+    {
+      "categoryid": 35,
+      "type": 2,
+      "name": "In-App Purchases"
+    },
+    {
+      "categoryid": 36,
+      "type": 1,
+      "name": "Online PvP"
+    },
+    {
+      "categoryid": 37,
+      "type": 1,
+      "name": "Shared/Split Screen PvP"
+    },
+    {
+      "categoryid": 38,
+      "type": 1,
+      "name": "Online Co-op"
+    },
+    {
+      "categoryid": 39,
+      "type": 1,
+      "name": "Shared/Split Screen Co-op"
+    },
+    {
+      "categoryid": 40,
+      "type": 2,
+      "name": "SteamVR Collectibles"
+    },
+    {
+      "categoryid": 41,
+      "type": 2,
+      "name": "Remote Play on Phone"
+    },
+    {
+      "categoryid": 42,
+      "type": 2,
+      "name": "Remote Play on Tablet"
+    },
+    {
+      "categoryid": 43,
+      "type": 2,
+      "name": "Remote Play on TV"
+    },
+    {
+      "categoryid": 44,
+      "type": 2,
+      "name": "Remote Play Together"
+    },
+    {
+      "categoryid": 47,
+      "type": 1,
+      "name": "LAN PvP"
+    },
+    {
+      "categoryid": 48,
+      "type": 1,
+      "name": "LAN Co-op"
+    },
+    {
+      "categoryid": 49,
+      "type": 1,
+      "name": "PvP"
+    },
+    {
+      "categoryid": 50,
+      "type": 2,
+      "name": "High-Quality Audio"
+    },
+    {
+      "categoryid": 51,
+      "type": 2,
+      "name": "Steam China Workshop"
+    },
+    {
+      "categoryid": 52,
+      "type": 2,
+      "name": "Tracked Motion Controller"
+    },
+    {
+      "categoryid": 53,
+      "type": 2,
+      "name": "VR Supported"
+    },
+    {
+      "categoryid": 54,
+      "type": 2,
+      "name": "VR Only"
+    },
+    {
+      "categoryid": 61,
+      "type": 2,
+      "name": "HDR"
+    },
+    {
+      "categoryid": 62,
+      "type": 2,
+      "name": "Family Sharing"
+    },
+    {
+      "categoryid": 63,
+      "type": 2,
+      "name": "Steam Timeline"
+    },
+    {
+      "categoryid": 64,
+      "type": 2,
+      "name": "Adjustable Text Size"
+    },
+    {
+      "categoryid": 65,
+      "type": 2,
+      "name": "Subtitle Options"
+    },
+    {
+      "categoryid": 66,
+      "type": 2,
+      "name": "Color Alternatives"
+    },
+    {
+      "categoryid": 67,
+      "type": 2,
+      "name": "Camera Comfort"
+    },
+    {
+      "categoryid": 68,
+      "type": 2,
+      "name": "Custom Volume Controls"
+    },
+    {
+      "categoryid": 69,
+      "type": 2,
+      "name": "Stereo Sound"
+    },
+    {
+      "categoryid": 70,
+      "type": 2,
+      "name": "Surround Sound"
+    },
+    {
+      "categoryid": 71,
+      "type": 2,
+      "name": "Narrated Menus"
+    },
+    {
+      "categoryid": 72,
+      "type": 2,
+      "name": "Chat Speech-to-Text"
+    },
+    {
+      "categoryid": 73,
+      "type": 2,
+      "name": "Chat Text-to-Speech"
+    },
+    {
+      "categoryid": 74,
+      "type": 2,
+      "name": "Playable without Timed Input"
+    },
+    {
+      "categoryid": 75,
+      "type": 2,
+      "name": "Keyboard-Only Option"
+    },
+    {
+      "categoryid": 76,
+      "type": 2,
+      "name": "Mouse-Only Option"
+    },
+    {
+      "categoryid": 77,
+      "type": 2,
+      "name": "Touch-Only Option"
+    },
+    {
+      "categoryid": 78,
+      "type": 2,
+      "name": "Difficulty Levels"
+    },
+    {
+      "categoryid": 79,
+      "type": 2,
+      "name": "Save Anytime"
+    },
+    {
+      "categoryid": 990,
+      "type": 1,
+      "name": "Soundtracks"
+    }
+  ],
+  "seed": {
+    "types": [
+      "Game",
+      "DLC",
+      "Demo",
+      "Application",
+      "Music",
+      "Video",
+      "Series",
+      "Tool",
+      "Beta",
+      "Unknown"
+    ],
+    "players": [
+      "Single-player",
+      "Multi-player",
+      "Co-op",
+      "PvP",
+      "Online PvP",
+      "MMO"
+    ],
+    "features": [
+      "Multi-player",
+      "Single-player",
+      "Mods (requires HL2)",
+      "Mods (requires HL1)",
+      "VAC Enabled",
+      "Co-op",
+      "Game Demo",
+      "Captions",
+      "Commentary",
+      "Stats",
+      "Includes Source SDK",
+      "Includes level editor",
+      "Controller enabled",
+      "Mods",
+      "MMO",
+      "DLC",
+      "Steam Achievements",
+      "Steam Cloud",
+      "Shared/Split Screen",
+      "Steam Leaderboards",
+      "Cross-Platform Multiplayer",
+      "Full Controller Support",
+      "Steam Trading Cards",
+      "Steam Workshop",
+      "VR Support",
+      "Async Game Notifications",
+      "In-App Purchases",
+      "Online PvP",
+      "Shared/Split Screen PvP",
+      "Online Co-op",
+      "Shared/Split Screen Co-op",
+      "SteamVR Collectibles",
+      "Remote Play on Phone",
+      "Remote Play on Tablet",
+      "Remote Play on TV",
+      "Remote Play Together",
+      "LAN PvP",
+      "LAN Co-op",
+      "PvP",
+      "High-Quality Audio",
+      "Steam China Workshop",
+      "Tracked Motion Controller",
+      "VR Supported",
+      "VR Only",
+      "HDR",
+      "Family Sharing",
+      "Steam Timeline",
+      "Adjustable Text Size",
+      "Subtitle Options",
+      "Color Alternatives",
+      "Camera Comfort",
+      "Custom Volume Controls",
+      "Stereo Sound",
+      "Surround Sound",
+      "Narrated Menus",
+      "Chat Speech-to-Text",
+      "Chat Text-to-Speech",
+      "Playable without Timed Input",
+      "Keyboard-Only Option",
+      "Mouse-Only Option",
+      "Touch-Only Option",
+      "Difficulty Levels",
+      "Save Anytime",
+      "Soundtracks"
+    ],
+    "hardware": [
+      "Full controller support",
+      "Tracked Controller Support",
+      "VR Supported"
+    ],
+    "accessibility": [
+      "Subtitles",
+      "Full audio",
+      "Captions available"
+    ],
+    "platforms": [
+      "Windows",
+      "macOS",
+      "Linux"
+    ],
+    "languages": [
+      "English",
+      "Portuguese - Brazil",
+      "Spanish - Spain",
+      "French",
+      "German",
+      "Japanese",
+      "Korean",
+      "Russian",
+      "Simplified Chinese",
+      "Traditional Chinese"
+    ],
+    "technologies": [
+      "Steam Cloud",
+      "Steam Workshop",
+      "Valve Anti-Cheat",
+      "Remote Play",
+      "HDR"
+    ],
+    "developers": [
+      "Valve",
+      "CAPCOM Co., Ltd.",
+      "SEGA",
+      "Ubisoft",
+      "Square Enix",
+      "Bandai Namco",
+      "Electronic Arts",
+      "Bethesda",
+      "Larian Studios",
+      "FromSoftware"
+    ],
+    "publishers": [
+      "Valve",
+      "CAPCOM Co., Ltd.",
+      "SEGA",
+      "Ubisoft",
+      "Square Enix",
+      "Bandai Namco",
+      "Electronic Arts",
+      "Bethesda",
+      "Sony Interactive Entertainment"
+    ],
+    "releaseYears": [
+      "2026",
+      "2025",
+      "2024",
+      "2023",
+      "2022",
+      "2021",
+      "2020",
+      "2019",
+      "2018",
+      "2017",
+      "2016",
+      "2015"
+    ]
+  }
+}
