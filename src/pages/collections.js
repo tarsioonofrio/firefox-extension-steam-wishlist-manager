@@ -13,6 +13,7 @@ const filtersUtils = window.SWMCollectionsFilters || null;
 const uiControlsUtils = window.SWMCollectionsUiControls || null;
 const panelsUtils = window.SWMCollectionsPanels || null;
 const rangeControlsUtils = window.SWMCollectionsRangeControls || null;
+const filterStateUtils = window.SWMCollectionsFilterState || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -2164,37 +2165,71 @@ function clearFilterSearchInputs() {
     "developers-search-input",
     "publishers-search-input"
   ];
+  if (filterStateUtils?.clearSearchInputs) {
+    filterStateUtils.clearSearchInputs(ids);
+    return;
+  }
   for (const id of ids) {
     const input = document.getElementById(id);
-    if (input) {
-      input.value = "";
-    }
+    if (input) input.value = "";
   }
 }
 
 function resetAllFiltersState() {
-  selectedTags.clear();
-  selectedTypes.clear();
-  selectedPlayers.clear();
-  selectedFeatures.clear();
-  selectedHardware.clear();
-  selectedAccessibility.clear();
-  selectedPlatforms.clear();
-  selectedLanguages.clear();
-  selectedFullAudioLanguages.clear();
-  selectedSubtitleLanguages.clear();
-  selectedTechnologies.clear();
-  selectedDevelopers.clear();
-  selectedPublishers.clear();
-  selectedReleaseYears.clear();
-  languageSearchQuery = "";
-  fullAudioLanguageSearchQuery = "";
-  subtitleLanguageSearchQuery = "";
-  technologySearchQuery = "";
-  developerSearchQuery = "";
-  publisherSearchQuery = "";
-  tagSearchQuery = "";
-  tagShowLimit = TAG_SHOW_STEP;
+  const reset = filterStateUtils?.resetFilterState
+    ? filterStateUtils.resetFilterState({
+      tagShowStep: TAG_SHOW_STEP,
+      sets: [
+        selectedTags,
+        selectedTypes,
+        selectedPlayers,
+        selectedFeatures,
+        selectedHardware,
+        selectedAccessibility,
+        selectedPlatforms,
+        selectedLanguages,
+        selectedFullAudioLanguages,
+        selectedSubtitleLanguages,
+        selectedTechnologies,
+        selectedDevelopers,
+        selectedPublishers,
+        selectedReleaseYears
+      ]
+    })
+    : null;
+  if (reset) {
+    languageSearchQuery = reset.languageSearchQuery;
+    fullAudioLanguageSearchQuery = reset.fullAudioLanguageSearchQuery;
+    subtitleLanguageSearchQuery = reset.subtitleLanguageSearchQuery;
+    technologySearchQuery = reset.technologySearchQuery;
+    developerSearchQuery = reset.developerSearchQuery;
+    publisherSearchQuery = reset.publisherSearchQuery;
+    tagSearchQuery = reset.tagSearchQuery;
+    tagShowLimit = reset.tagShowLimit;
+  } else {
+    selectedTags.clear();
+    selectedTypes.clear();
+    selectedPlayers.clear();
+    selectedFeatures.clear();
+    selectedHardware.clear();
+    selectedAccessibility.clear();
+    selectedPlatforms.clear();
+    selectedLanguages.clear();
+    selectedFullAudioLanguages.clear();
+    selectedSubtitleLanguages.clear();
+    selectedTechnologies.clear();
+    selectedDevelopers.clear();
+    selectedPublishers.clear();
+    selectedReleaseYears.clear();
+    languageSearchQuery = "";
+    fullAudioLanguageSearchQuery = "";
+    subtitleLanguageSearchQuery = "";
+    technologySearchQuery = "";
+    developerSearchQuery = "";
+    publisherSearchQuery = "";
+    tagSearchQuery = "";
+    tagShowLimit = TAG_SHOW_STEP;
+  }
   clearFilterSearchInputs();
 }
 
