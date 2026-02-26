@@ -490,7 +490,7 @@ async function syncWishlistOrderCache(force = false) {
     throw new Error(`Failed to fetch userdata (${userDataResponse.status})`);
   }
   const userData = await userDataResponse.json();
-  const steamId = String(
+  let steamId = String(
     userData?.steamid
     || userData?.strSteamId
     || userData?.str_steamid
@@ -507,6 +507,42 @@ async function syncWishlistOrderCache(force = false) {
     || userData?.webapi_access_token
     || ""
   ).trim();
+
+  if (!steamId) {
+    try {
+      const wishlistResponse = await fetch("https://store.steampowered.com/wishlist/", {
+        cache: "no-store",
+        credentials: "include",
+        redirect: "follow"
+      });
+      const redirectedUrl = String(wishlistResponse?.url || "");
+      const profileMatch = redirectedUrl.match(/\/wishlist\/profiles\/(\d{10,20})/);
+      if (profileMatch?.[1]) {
+        steamId = profileMatch[1];
+      }
+    } catch {
+      // fallback below
+    }
+  }
+
+  if (!steamId) {
+    try {
+      const storeHtml = await fetch("https://store.steampowered.com/", {
+        cache: "no-store",
+        credentials: "include"
+      }).then((r) => r.text());
+      const htmlMatch = storeHtml.match(/g_steamID\s*=\s*"(\d{10,20})"/);
+      if (htmlMatch?.[1]) {
+        steamId = htmlMatch[1];
+      }
+    } catch {
+      // fallback below
+    }
+  }
+
+  if (!steamId) {
+    steamId = String(cached?.steamId || "").trim();
+  }
   if (!steamId) {
     throw new Error("Could not resolve steamid for wishlist order sync.");
   }
@@ -572,7 +608,8 @@ async function syncWishlistOrderCache(force = false) {
       orderedAppIds,
       priorityMap,
       priorityCachedAt: now,
-      priorityLastError: ""
+      priorityLastError: "",
+      steamId
     }
   });
 

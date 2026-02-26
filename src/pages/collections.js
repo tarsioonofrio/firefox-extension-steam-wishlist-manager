@@ -31,6 +31,7 @@ let wishlistPriorityMap = {};
 let wishlistPriorityCachedAt = 0;
 let wishlistPriorityLastError = "";
 let wishlistOrderSyncResult = "";
+let wishlistSteamId = "";
 let wishlistSortSignature = "";
 let wishlistSortOrders = {};
 let wishlistSnapshotDay = "";
@@ -535,6 +536,7 @@ function renderOrderDebug() {
     `Order debug`,
     `source=${sourceMode}`,
     `sync=${wishlistOrderSyncResult || "-"}`,
+    `steamId=${wishlistSteamId || "-"}`,
     `lastError=${wishlistPriorityLastError || "-"}`,
     `priorityCachedAt=${cachedAtText}`,
     `orderedCount=${wishlistOrderedAppIds.length}`,
@@ -887,6 +889,7 @@ async function loadWishlistAddedMap() {
     : {};
   wishlistPriorityCachedAt = Number(effectiveCached.priorityCachedAt || 0);
   wishlistPriorityLastError = String(effectiveCached.priorityLastError || "");
+  wishlistSteamId = String(effectiveCached.steamId || "");
   const lastFullSyncAt = Number(effectiveCached.lastFullSyncAt || 0);
   wishlistPriorityMap = {};
   for (const [appId, priority] of Object.entries(cachedPriorityMap)) {
@@ -1046,6 +1049,8 @@ async function loadWishlistAddedMap() {
         orderedAppIds: wishlistOrderedAppIds,
         priorityMap: wishlistPriorityMap,
         priorityCachedAt: Number(effectiveCached.priorityCachedAt || 0),
+        priorityLastError: String(effectiveCached.priorityLastError || ""),
+        steamId: String(effectiveCached.steamId || ""),
         map: wishlistAddedMap
       }
     });
