@@ -16,6 +16,7 @@ const rangeControlsUtils = window.SWMCollectionsRangeControls || null;
 const filterStateUtils = window.SWMCollectionsFilterState || null;
 const actionsUtils = window.SWMCollectionsActions || null;
 const crudUtils = window.SWMCollectionsCrud || null;
+const initUtils = window.SWMCollectionsInit || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -2549,27 +2550,24 @@ function attachEvents() {
   bindGlobalPanelClose();
 }
 
-async function bootstrap() {
-  await loadMetaCache();
-  await loadWishlistAddedMap();
-  await refreshState();
-
-  activeCollection = state.activeCollection || "__all__";
-
-  attachEvents();
-  quickPopulateFiltersFromCache();
-  renderRatingControls();
-  await render();
-
-  // Load heavy filter counts in background; keep UI responsive with local-cache options first.
-  refreshFilterOptionsInBackground();
-
-  const refreshAll = new URLSearchParams(window.location.search).get("refreshAll") === "1";
-  if (refreshAll) {
-    await refreshWholeDatabase();
-    const cleanUrl = window.location.pathname;
-    window.history.replaceState({}, "", cleanUrl);
-  }
+if (initUtils?.run) {
+  initUtils.run({
+    loadMetaCache,
+    loadWishlistAddedMap,
+    refreshState: async () => {
+      await refreshState();
+      return state;
+    },
+    setActiveCollectionFromState: (nextState) => {
+      activeCollection = nextState?.activeCollection || "__all__";
+    },
+    attachEvents,
+    quickPopulateFiltersFromCache,
+    renderRatingControls,
+    render,
+    refreshFilterOptionsInBackground,
+    refreshWholeDatabase
+  }).catch(() => setStatus("Failed to load collections page.", true));
+} else {
+  setStatus("Failed to load collections page.", true);
 }
-
-bootstrap().catch(() => setStatus("Failed to load collections page.", true));
