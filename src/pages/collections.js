@@ -28,6 +28,7 @@ let metaCache = {};
 let wishlistAddedMap = {};
 let wishlistOrderedAppIds = [];
 let wishlistPriorityMap = {};
+let wishlistPriorityCachedAt = 0;
 let wishlistSortSignature = "";
 let wishlistSortOrders = {};
 let wishlistSnapshotDay = "";
@@ -508,6 +509,24 @@ function setStatus(text, isError = false) {
   el.style.color = isError ? "#ff9696" : "";
 }
 
+function renderOrderDebug() {
+  const el = document.getElementById("order-debug");
+  if (!el) {
+    return;
+  }
+  const first10 = wishlistOrderedAppIds.slice(0, 10).join(", ");
+  const cachedAtText = wishlistPriorityCachedAt > 0
+    ? new Date(wishlistPriorityCachedAt).toLocaleString("pt-BR")
+    : "-";
+  el.textContent = [
+    `Order debug`,
+    `source=${sourceMode}`,
+    `priorityCachedAt=${cachedAtText}`,
+    `orderedCount=${wishlistOrderedAppIds.length}`,
+    `first10=${first10 || "-"}`
+  ].join(" | ");
+}
+
 function invalidateWishlistPrecomputedSorts() {
   wishlistSortSignature = "";
   wishlistSortOrders = {};
@@ -847,6 +866,7 @@ async function loadWishlistAddedMap() {
   const cachedPriorityMap = (effectiveCached.priorityMap && typeof effectiveCached.priorityMap === "object")
     ? effectiveCached.priorityMap
     : {};
+  wishlistPriorityCachedAt = Number(effectiveCached.priorityCachedAt || 0);
   const lastFullSyncAt = Number(effectiveCached.lastFullSyncAt || 0);
   wishlistPriorityMap = {};
   for (const [appId, priority] of Object.entries(cachedPriorityMap)) {
@@ -1017,6 +1037,7 @@ async function loadWishlistAddedMap() {
     wishlistSortOrders = {};
     wishlistSnapshotDay = "";
   }
+  renderOrderDebug();
 }
 
 async function ensureWishlistOrderFromSnapshot(appIds) {
@@ -2614,6 +2635,7 @@ async function render() {
   if (deleteSelect) {
     deleteSelect.disabled = (state?.collectionOrder || []).length === 0;
   }
+  renderOrderDebug();
   await renderCards();
 }
 
