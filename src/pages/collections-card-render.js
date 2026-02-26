@@ -1,4 +1,49 @@
 (() => {
+  function buildImageCandidates(appId, primaryUrl) {
+    const base = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}`;
+    const list = [
+      String(primaryUrl || "").trim(),
+      `${base}/capsule_231x87.jpg`,
+      `${base}/header.jpg`,
+      `${base}/capsule_616x353.jpg`,
+      `${base}/library_600x900.jpg`,
+      `${base}/library_600x900_2x.jpg`
+    ];
+    const out = [];
+    const seen = new Set();
+    for (const url of list) {
+      if (!url || seen.has(url)) {
+        continue;
+      }
+      seen.add(url);
+      out.push(url);
+    }
+    return out;
+  }
+
+  function attachImageFallback(imgEl, candidates) {
+    if (!imgEl) {
+      return;
+    }
+    const queue = Array.isArray(candidates) ? [...candidates] : [];
+    if (queue.length === 0) {
+      return;
+    }
+
+    const next = () => {
+      const candidate = queue.shift();
+      if (!candidate) {
+        imgEl.removeAttribute("src");
+        imgEl.style.visibility = "hidden";
+        return;
+      }
+      imgEl.src = candidate;
+    };
+
+    imgEl.onerror = next;
+    next();
+  }
+
   function createCardNodes(options) {
     const template = options?.template;
     const appId = String(options?.appId || "");
@@ -44,7 +89,8 @@
       card.coverLink.href = card.link;
     }
     if (card.cover) {
-      card.cover.src = imageUrl;
+      const imageCandidates = buildImageCandidates(appId, imageUrl);
+      attachImageFallback(card.cover, imageCandidates);
       card.cover.alt = card.title;
       card.cover.loading = "lazy";
     }

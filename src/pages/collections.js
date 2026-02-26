@@ -1083,6 +1083,44 @@ function getCardImageUrl(appId) {
   return `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}/capsule_184x69.jpg`;
 }
 
+function getCardImageCandidates(appId) {
+  const id = String(appId || "");
+  const base = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}`;
+  return [
+    getCardImageUrl(id),
+    `${base}/capsule_231x87.jpg`,
+    `${base}/header.jpg`,
+    `${base}/capsule_616x353.jpg`,
+    `${base}/library_600x900.jpg`,
+    `${base}/library_600x900_2x.jpg`
+  ];
+}
+
+function attachImageFallback(imgEl, candidates) {
+  if (!imgEl) {
+    return;
+  }
+  const queue = Array.isArray(candidates)
+    ? Array.from(new Set(candidates.filter((url) => String(url || "").trim())))
+    : [];
+  if (queue.length === 0) {
+    return;
+  }
+
+  const next = () => {
+    const candidate = queue.shift();
+    if (!candidate) {
+      imgEl.removeAttribute("src");
+      imgEl.style.visibility = "hidden";
+      return;
+    }
+    imgEl.src = candidate;
+  };
+
+  imgEl.onerror = next;
+  next();
+}
+
 function getAppLink(appId) {
   return `https://store.steampowered.com/app/${appId}/`;
 }
@@ -2378,7 +2416,7 @@ function createLineRow(options) {
   thumbImg.className = "line-thumb-img";
   thumbImg.alt = title;
   thumbImg.loading = "lazy";
-  thumbImg.src = imageUrl;
+  attachImageFallback(thumbImg, getCardImageCandidates(appId).concat(imageUrl || []));
   thumbWrap.appendChild(thumbImg);
   const titleEl = document.createElement("a");
   titleEl.className = "line-title";
