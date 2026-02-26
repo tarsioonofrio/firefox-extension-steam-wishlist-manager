@@ -10,6 +10,7 @@
       fragment,
       title,
       link,
+      batchCheckbox: fragment.querySelector(".card-batch-checkbox"),
       coverLink: fragment.querySelector(".cover-link"),
       cover: fragment.querySelector(".cover"),
       titleEl: fragment.querySelector(".title"),
@@ -99,6 +100,11 @@
     const allCollectionNames = Array.isArray(options?.allCollectionNames) ? options.allCollectionNames : [];
     const selectedCollectionNames = new Set(Array.isArray(options?.selectedCollectionNames) ? options.selectedCollectionNames : []);
     const onSetCollections = options?.onSetCollections || (() => Promise.resolve());
+    const batchMode = Boolean(options?.batchMode);
+    const isBatchSelected = typeof options?.isBatchSelected === "function"
+      ? options.isBatchSelected
+      : () => false;
+    const onBatchSelectionChange = options?.onBatchSelectionChange || (() => {});
 
     if (card.collectionsDropdown) {
       card.collectionsDropdown.innerHTML = "";
@@ -151,6 +157,14 @@
       if (allCollectionNames.length === 0) {
         card.collectionsDropdown.classList.add("hidden");
       }
+    }
+
+    if (card.batchCheckbox) {
+      card.batchCheckbox.checked = Boolean(isBatchSelected(appId));
+      card.batchCheckbox.disabled = !batchMode;
+      card.batchCheckbox.addEventListener("change", () => {
+        onBatchSelectionChange(appId, card.batchCheckbox.checked);
+      });
     }
   }
 

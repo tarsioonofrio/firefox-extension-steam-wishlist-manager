@@ -121,6 +121,10 @@ let discountMax = 100;
 let priceMin = 0;
 let priceMax = 9999999;
 let filterSyncRunId = 0;
+let batchMode = false;
+let batchActionMode = "add";
+let batchTargetCollection = "";
+let batchSelectedIds = new Set();
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -2071,6 +2075,78 @@ function renderPager(totalItems) {
   }
 }
 
+function renderBatchMenuState() {
+  const btn = document.getElementById("batch-menu-btn");
+  const modeSelect = document.getElementById("batch-mode-select");
+  const collectionSelect = document.getElementById("batch-collection-select");
+  if (btn) {
+    const count = batchSelectedIds.size;
+    btn.textContent = count > 0 ? `Batch (${count})` : "Batch";
+    btn.classList.toggle("active", batchMode);
+  }
+  if (modeSelect) {
+    modeSelect.value = batchActionMode;
+  }
+  if (collectionSelect) {
+    const names = state?.collectionOrder || [];
+    collectionSelect.innerHTML = "";
+    for (const name of names) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      collectionSelect.appendChild(option);
+    }
+    if (!batchTargetCollection || !names.includes(batchTargetCollection)) {
+      batchTargetCollection = names[0] || "";
+    }
+    collectionSelect.value = batchTargetCollection;
+    collectionSelect.disabled = names.length === 0;
+  }
+}
+
+function toggleBatchMode(force = null) {
+  batchMode = force === null ? !batchMode : Boolean(force);
+  if (!batchMode) {
+    batchSelectedIds.clear();
+  }
+  renderBatchMenuState();
+}
+
+async function applyBatchAction() {
+  if (!batchMode) {
+    toggleBatchMode(true);
+  }
+  if (batchSelectedIds.size === 0) {
+    setStatus("Select one or more cards for batch action.", true);
+    return;
+  }
+  if (!batchTargetCollection || !(state?.collectionOrder || []).includes(batchTargetCollection)) {
+    setStatus("Choose a valid target collection.", true);
+    return;
+  }
+  const modeLabel = batchActionMode === "remove" ? "remove from" : "add to";
+  const confirmed = window.confirm(
+    `Apply batch action: ${modeLabel} "${batchTargetCollection}" for ${batchSelectedIds.size} game(s)?`
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  await browser.runtime.sendMessage({
+    type: "batch-update-collection",
+    mode: batchActionMode,
+    collectionName: batchTargetCollection,
+    appIds: Array.from(batchSelectedIds)
+  });
+
+  batchSelectedIds.clear();
+  await refreshState();
+  quickPopulateFiltersFromCache();
+  refreshFilterOptionsInBackground();
+  await render();
+  setStatus("Batch action applied.");
+}
+
 function getCollectionsContainingApp(appId) {
   const out = [];
   for (const collectionName of state?.collectionOrder || []) {
@@ -2123,6 +2199,7 @@ async function renderCards() {
   }
 
   cardsEl.innerHTML = "";
+  cardsEl.classList.toggle("batch-mode", batchMode);
   emptyEl.classList.toggle("hidden", pageIds.length > 0);
 
   for (const appId of pageIds) {
@@ -2163,6 +2240,16 @@ async function renderCards() {
         quickPopulateFiltersFromCache();
         refreshFilterOptionsInBackground();
         await render();
+      },
+      batchMode,
+      isBatchSelected: (id) => batchSelectedIds.has(id),
+      onBatchSelectionChange: (id, checked) => {
+        if (checked) {
+          batchSelectedIds.add(id);
+        } else {
+          batchSelectedIds.delete(id);
+        }
+        renderBatchMenuState();
       },
       onRemoveItem: async (id, collectionName) => {
         await browser.runtime.sendMessage({
@@ -2265,6 +2352,7 @@ async function render() {
 
   renderSortMenu();
   renderCollectionSelect();
+  renderBatchMenuState();
   const canRenameCurrent = sourceMode !== "wishlist" && activeCollection !== "__all__";
   if (renameActionBtn) {
     renameActionBtn.disabled = !canRenameCurrent;
@@ -2361,6 +2449,7 @@ async function handleCollectionChange(value) {
   sourceMode = resolved.sourceMode;
   activeCollection = resolved.activeCollection;
   page = resolved.page;
+  batchSelectedIds.clear();
 
   if (sourceMode !== "wishlist") {
     await browser.runtime.sendMessage({
@@ -2420,6 +2509,45 @@ function bindCollectionMenuControls() {
     createHandler: createCollectionByName,
     deleteHandler: deleteCollectionByName,
     onError: (message) => setStatus(message, true)
+  });
+}
+
+function bindBatchControls() {
+  const batchBtn = document.getElementById("batch-menu-btn");
+  const modeSelect = document.getElementById("batch-mode-select");
+  const collectionSelect = document.getElementById("batch-collection-select");
+  const applyBtn = document.getElementById("batch-apply-btn");
+
+  batchBtn?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const panel = document.getElementById("batch-menu-panel");
+    const panelOpen = panel ? !panel.classList.contains("hidden") : false;
+    if (batchMode && panelOpen) {
+      toggleBatchMode(false);
+      panelsUtils.togglePanel("batch-menu-panel", false);
+      render().catch(() => setStatus("Failed to exit batch mode.", true));
+      return;
+    }
+    toggleCollectionMenu(false);
+    toggleCollectionSelectMenu(false);
+    toggleSortMenu(false);
+    toggleBatchMode(true);
+    panelsUtils.togglePanel("batch-menu-panel");
+    render().catch(() => setStatus("Failed to enter batch mode.", true));
+  });
+
+  modeSelect?.addEventListener("change", () => {
+    batchActionMode = String(modeSelect.value || "add") === "remove" ? "remove" : "add";
+    renderBatchMenuState();
+  });
+
+  collectionSelect?.addEventListener("change", () => {
+    batchTargetCollection = String(collectionSelect.value || "");
+    renderBatchMenuState();
+  });
+
+  applyBtn?.addEventListener("click", () => {
+    applyBatchAction().catch(() => setStatus("Failed to apply batch action.", true));
   });
 }
 
@@ -2529,6 +2657,11 @@ function bindGlobalPanelClose() {
       panelId: "collection-select-panel",
       buttonId: "collection-select-btn",
       onClose: () => toggleCollectionSelectMenu(false)
+    },
+    {
+      panelId: "batch-menu-panel",
+      buttonId: "batch-menu-btn",
+      onClose: () => panelsUtils.togglePanel("batch-menu-panel", false)
     }
   ]);
 }
@@ -2537,6 +2670,7 @@ function attachEvents() {
   bindCollectionControls();
   bindSortControls();
   bindCollectionMenuControls();
+  bindBatchControls();
   bindFilterControls();
   bindGlobalPanelClose();
 }

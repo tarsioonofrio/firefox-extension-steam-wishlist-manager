@@ -357,6 +357,25 @@ main {
   overflow: hidden;
 }
 
+.cards.batch-mode .card {
+  grid-template-columns: 30px 184px 1fr;
+}
+
+.batch-col {
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.cards.batch-mode .batch-col {
+  display: flex;
+}
+
+.card-batch-checkbox {
+  width: 16px;
+  height: 16px;
+}
+
 .cover-link,
 .cover {
   width: 184px;
@@ -541,6 +560,10 @@ main {
     grid-template-columns: 1fr;
   }
 
+  .cards.batch-mode .card {
+    grid-template-columns: 1fr;
+  }
+
   .content-header {
     display: block;
   }
@@ -570,9 +593,14 @@ main {
 
   .title-row,
   .left-col,
-  .right-col {
+  .right-col,
+  .batch-col {
     grid-column: 1;
     grid-row: auto;
+  }
+
+  .batch-col {
+    display: none !important;
   }
 
   .right-col {

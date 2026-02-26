@@ -937,6 +937,39 @@ browser.runtime.onMessage.addListener((message, sender) => {
         return { ok: true, state };
       }
 
+      case "batch-update-collection": {
+        const mode = String(message.mode || "add") === "remove" ? "remove" : "add";
+        const collectionName = normalizeCollectionName(message.collectionName || "");
+        if (!collectionName || !state.collections[collectionName]) {
+          throw new Error("Target collection not found.");
+        }
+
+        const appIds = sanitizeAppIdList(message.appIds);
+        if (appIds.length === 0) {
+          return { ok: true, updated: 0, state };
+        }
+
+        const set = new Set(state.collections[collectionName] || []);
+        if (mode === "add") {
+          for (const appId of appIds) {
+            set.add(appId);
+            state.items[appId] = {
+              appId,
+              title: String(state.items[appId]?.title || "").slice(0, 200)
+            };
+          }
+        } else {
+          for (const appId of appIds) {
+            set.delete(appId);
+          }
+        }
+
+        state.collections[collectionName] = Array.from(set).slice(0, MAX_ITEMS_PER_COLLECTION);
+        cleanupOrphanItems(state);
+        await setState(state);
+        return { ok: true, updated: appIds.length, state };
+      }
+
       case "create-collection": {
         ensureCollection(state, message.collectionName);
         await setState(state);

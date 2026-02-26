@@ -15,6 +15,7 @@
       <div class="top-controls">
         <div class="collection-tools">
           <button id="collection-menu-btn" type="button">Menu</button>
+          <button id="batch-menu-btn" type="button">Batch</button>
           <button id="collection-select-btn" type="button">Collection</button>
           <select id="collection-select" class="native-select-hidden"></select>
         </div>
@@ -55,6 +56,16 @@
         <div id="delete-collection-form" class="menu-form hidden">
           <select id="delete-collection-select"></select>
           <button id="delete-collection-ok" type="button" class="danger">Delete</button>
+        </div>
+      </div>
+      <div id="batch-menu-panel" class="collection-menu-panel hidden">
+        <div class="menu-form">
+          <select id="batch-mode-select">
+            <option value="add">Add to collection</option>
+            <option value="remove">Remove from collection</option>
+          </select>
+          <select id="batch-collection-select"></select>
+          <button id="batch-apply-btn" type="button">Apply</button>
         </div>
       </div>
       <section id="cards" class="cards"></section>
@@ -207,6 +218,9 @@
 
   <template id="card-template">
     <article class="card">
+      <div class="batch-col">
+        <input class="card-batch-checkbox" type="checkbox" aria-label="Select card for batch action">
+      </div>
       <a class="cover-link" target="_blank" rel="noopener noreferrer">
         <img class="cover" alt="">
       </a>
