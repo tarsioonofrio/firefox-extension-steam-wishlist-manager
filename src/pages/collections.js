@@ -14,6 +14,7 @@ const uiControlsUtils = window.SWMCollectionsUiControls || null;
 const panelsUtils = window.SWMCollectionsPanels || null;
 const rangeControlsUtils = window.SWMCollectionsRangeControls || null;
 const filterStateUtils = window.SWMCollectionsFilterState || null;
+const actionsUtils = window.SWMCollectionsActions || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -2234,9 +2235,16 @@ function resetAllFiltersState() {
 }
 
 async function handleCollectionChange(value) {
-  sourceMode = value === WISHLIST_SELECT_VALUE ? "wishlist" : "collections";
-  activeCollection = sourceMode === "wishlist" ? "__all__" : value;
-  page = 1;
+  const resolved = actionsUtils?.resolveCollectionSelection
+    ? actionsUtils.resolveCollectionSelection(value, WISHLIST_SELECT_VALUE)
+    : {
+      sourceMode: value === WISHLIST_SELECT_VALUE ? "wishlist" : "collections",
+      activeCollection: value === WISHLIST_SELECT_VALUE ? "__all__" : value,
+      page: 1
+    };
+  sourceMode = resolved.sourceMode;
+  activeCollection = resolved.activeCollection;
+  page = resolved.page;
 
   if (sourceMode !== "wishlist") {
     await browser.runtime.sendMessage({
@@ -2252,24 +2260,18 @@ async function handleCollectionChange(value) {
 }
 
 async function handleSortChange(value) {
-  const allowed = new Set([
-    "position",
-    "title",
-    "price",
-    "discount",
-    "date-added",
-    "top-selling",
-    "release-date",
-    "review-score"
-  ]);
-  const nextSort = allowed.has(value) ? value : "title";
-  if (sourceMode === "wishlist" && nextSort === "position" && !isWishlistRankReady()) {
-    sortMode = "position";
-    setStatus("Your rank is still syncing; temporarily showing Title order.");
-  } else {
-    sortMode = nextSort;
+  const resolved = actionsUtils?.resolveSortSelection
+    ? actionsUtils.resolveSortSelection(value, sourceMode, isWishlistRankReady)
+    : {
+      sortMode: String(value || "title"),
+      page: 1,
+      statusMessage: ""
+    };
+  sortMode = resolved.sortMode;
+  page = resolved.page;
+  if (resolved.statusMessage) {
+    setStatus(resolved.statusMessage);
   }
-  page = 1;
   renderSortMenu();
   await render();
 }
