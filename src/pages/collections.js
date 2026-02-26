@@ -1746,9 +1746,6 @@ function renderExtraFilterOptions() {
 }
 
 function getFilteredAndSorted(ids) {
-  if (!filtersUtils?.getFilteredAndSorted) {
-    return Array.isArray(ids) ? [...ids] : [];
-  }
   return filtersUtils.getFilteredAndSorted(ids, getFiltersContext());
 }
 
@@ -1794,9 +1791,6 @@ function getFiltersContext() {
 }
 
 function renderCollectionSelect() {
-  if (!uiControlsUtils?.renderCollectionSelect) {
-    return;
-  }
   const result = uiControlsUtils.renderCollectionSelect({
     state,
     sourceMode,
@@ -1810,9 +1804,6 @@ function renderCollectionSelect() {
 }
 
 function renderPager(totalItems) {
-  if (!uiControlsUtils?.renderPager) {
-    return;
-  }
   const result = uiControlsUtils.renderPager({
     totalItems,
     page,
@@ -1993,9 +1984,6 @@ async function refreshState() {
 }
 
 async function createCollectionByName(rawName) {
-  if (!crudUtils?.createCollectionByName) {
-    return;
-  }
   const result = await crudUtils.createCollectionByName({
     rawName,
     normalizeCollectionName,
@@ -2016,9 +2004,6 @@ async function createCollectionByName(rawName) {
 }
 
 async function renameActiveCollectionByName(rawName) {
-  if (!crudUtils?.renameActiveCollectionByName) {
-    return;
-  }
   const result = await crudUtils.renameActiveCollectionByName({
     rawName,
     normalizeCollectionName,
@@ -2040,9 +2025,6 @@ async function renameActiveCollectionByName(rawName) {
 }
 
 async function deleteCollectionByName(rawName) {
-  if (!crudUtils?.deleteCollectionByName) {
-    return;
-  }
   const result = await crudUtils.deleteCollectionByName({
     rawName,
     normalizeCollectionName,
@@ -2090,7 +2072,7 @@ async function render() {
 }
 
 function renderRatingControls() {
-  rangeControlsUtils?.renderRangeControls?.({
+  rangeControlsUtils.renderRangeControls({
     ratingMin,
     ratingMax,
     reviewsMin,
@@ -2103,33 +2085,15 @@ function renderRatingControls() {
 }
 
 function renderSortMenu() {
-  uiControlsUtils?.renderSortMenu?.({ fallbackLabel: "Release Date" });
+  uiControlsUtils.renderSortMenu({ fallbackLabel: "Release Date" });
 }
 
 function toggleSortMenu(forceOpen = null) {
-  if (panelsUtils?.togglePanel) {
-    panelsUtils.togglePanel("sort-menu-panel", forceOpen);
-    return;
-  }
-  const panel = document.getElementById("sort-menu-panel");
-  if (!panel) {
-    return;
-  }
-  const open = forceOpen === null ? panel.classList.contains("hidden") : Boolean(forceOpen);
-  panel.classList.toggle("hidden", !open);
+  panelsUtils.togglePanel("sort-menu-panel", forceOpen);
 }
 
 function toggleCollectionSelectMenu(forceOpen = null) {
-  if (panelsUtils?.togglePanel) {
-    panelsUtils.togglePanel("collection-select-panel", forceOpen);
-    return;
-  }
-  const panel = document.getElementById("collection-select-panel");
-  if (!panel) {
-    return;
-  }
-  const open = forceOpen === null ? panel.classList.contains("hidden") : Boolean(forceOpen);
-  panel.classList.toggle("hidden", !open);
+  panelsUtils.togglePanel("collection-select-panel", forceOpen);
 }
 
 function hideCollectionMenuForms() {
@@ -2139,19 +2103,7 @@ function hideCollectionMenuForms() {
 }
 
 function toggleCollectionMenu(forceOpen = null) {
-  if (panelsUtils?.toggleCollectionMenu) {
-    panelsUtils.toggleCollectionMenu(forceOpen, { onClose: hideCollectionMenuForms });
-    return;
-  }
-  const panel = document.getElementById("collection-menu-panel");
-  if (!panel) {
-    return;
-  }
-  const open = forceOpen === null ? panel.classList.contains("hidden") : Boolean(forceOpen);
-  panel.classList.toggle("hidden", !open);
-  if (!open) {
-    hideCollectionMenuForms();
-  }
+  panelsUtils.toggleCollectionMenu(forceOpen, { onClose: hideCollectionMenuForms });
 }
 
 function clearFilterSearchInputs() {
@@ -2163,82 +2115,42 @@ function clearFilterSearchInputs() {
     "developers-search-input",
     "publishers-search-input"
   ];
-  if (filterStateUtils?.clearSearchInputs) {
-    filterStateUtils.clearSearchInputs(ids);
-    return;
-  }
-  for (const id of ids) {
-    const input = document.getElementById(id);
-    if (input) input.value = "";
-  }
+  filterStateUtils.clearSearchInputs(ids);
 }
 
 function resetAllFiltersState() {
-  const reset = filterStateUtils?.resetFilterState
-    ? filterStateUtils.resetFilterState({
-      tagShowStep: TAG_SHOW_STEP,
-      sets: [
-        selectedTags,
-        selectedTypes,
-        selectedPlayers,
-        selectedFeatures,
-        selectedHardware,
-        selectedAccessibility,
-        selectedPlatforms,
-        selectedLanguages,
-        selectedFullAudioLanguages,
-        selectedSubtitleLanguages,
-        selectedTechnologies,
-        selectedDevelopers,
-        selectedPublishers,
-        selectedReleaseYears
-      ]
-    })
-    : null;
-  if (reset) {
-    languageSearchQuery = reset.languageSearchQuery;
-    fullAudioLanguageSearchQuery = reset.fullAudioLanguageSearchQuery;
-    subtitleLanguageSearchQuery = reset.subtitleLanguageSearchQuery;
-    technologySearchQuery = reset.technologySearchQuery;
-    developerSearchQuery = reset.developerSearchQuery;
-    publisherSearchQuery = reset.publisherSearchQuery;
-    tagSearchQuery = reset.tagSearchQuery;
-    tagShowLimit = reset.tagShowLimit;
-  } else {
-    selectedTags.clear();
-    selectedTypes.clear();
-    selectedPlayers.clear();
-    selectedFeatures.clear();
-    selectedHardware.clear();
-    selectedAccessibility.clear();
-    selectedPlatforms.clear();
-    selectedLanguages.clear();
-    selectedFullAudioLanguages.clear();
-    selectedSubtitleLanguages.clear();
-    selectedTechnologies.clear();
-    selectedDevelopers.clear();
-    selectedPublishers.clear();
-    selectedReleaseYears.clear();
-    languageSearchQuery = "";
-    fullAudioLanguageSearchQuery = "";
-    subtitleLanguageSearchQuery = "";
-    technologySearchQuery = "";
-    developerSearchQuery = "";
-    publisherSearchQuery = "";
-    tagSearchQuery = "";
-    tagShowLimit = TAG_SHOW_STEP;
-  }
+  const reset = filterStateUtils.resetFilterState({
+    tagShowStep: TAG_SHOW_STEP,
+    sets: [
+      selectedTags,
+      selectedTypes,
+      selectedPlayers,
+      selectedFeatures,
+      selectedHardware,
+      selectedAccessibility,
+      selectedPlatforms,
+      selectedLanguages,
+      selectedFullAudioLanguages,
+      selectedSubtitleLanguages,
+      selectedTechnologies,
+      selectedDevelopers,
+      selectedPublishers,
+      selectedReleaseYears
+    ]
+  });
+  languageSearchQuery = reset.languageSearchQuery;
+  fullAudioLanguageSearchQuery = reset.fullAudioLanguageSearchQuery;
+  subtitleLanguageSearchQuery = reset.subtitleLanguageSearchQuery;
+  technologySearchQuery = reset.technologySearchQuery;
+  developerSearchQuery = reset.developerSearchQuery;
+  publisherSearchQuery = reset.publisherSearchQuery;
+  tagSearchQuery = reset.tagSearchQuery;
+  tagShowLimit = reset.tagShowLimit;
   clearFilterSearchInputs();
 }
 
 async function handleCollectionChange(value) {
-  const resolved = actionsUtils?.resolveCollectionSelection
-    ? actionsUtils.resolveCollectionSelection(value, WISHLIST_SELECT_VALUE)
-    : {
-      sourceMode: value === WISHLIST_SELECT_VALUE ? "wishlist" : "collections",
-      activeCollection: value === WISHLIST_SELECT_VALUE ? "__all__" : value,
-      page: 1
-    };
+  const resolved = actionsUtils.resolveCollectionSelection(value, WISHLIST_SELECT_VALUE);
   sourceMode = resolved.sourceMode;
   activeCollection = resolved.activeCollection;
   page = resolved.page;
@@ -2257,13 +2169,7 @@ async function handleCollectionChange(value) {
 }
 
 async function handleSortChange(value) {
-  const resolved = actionsUtils?.resolveSortSelection
-    ? actionsUtils.resolveSortSelection(value, sourceMode, isWishlistRankReady)
-    : {
-      sortMode: String(value || "title"),
-      page: 1,
-      statusMessage: ""
-    };
+  const resolved = actionsUtils.resolveSortSelection(value, sourceMode, isWishlistRankReady);
   sortMode = resolved.sortMode;
   page = resolved.page;
   if (resolved.statusMessage) {
@@ -2439,7 +2345,7 @@ function bindFilterControls() {
     refreshCurrentPageItems().catch(() => setStatus("Failed to refresh visible items.", true));
   });
 
-  rangeControlsUtils?.bindRangeControls?.({
+  rangeControlsUtils.bindRangeControls({
     onRatingMinInput: async (rawValue) => {
       const next = parseNonNegativeInt(rawValue, ratingMin);
       ratingMin = Math.max(0, Math.min(next, ratingMax));
@@ -2492,53 +2398,23 @@ function bindFilterControls() {
 }
 
 function bindGlobalPanelClose() {
-  if (panelsUtils?.bindOutsidePanelClose) {
-    panelsUtils.bindOutsidePanelClose([
-      {
-        panelId: "collection-menu-panel",
-        buttonId: "collection-menu-btn",
-        onClose: () => toggleCollectionMenu(false)
-      },
-      {
-        panelId: "sort-menu-panel",
-        buttonId: "sort-menu-btn",
-        onClose: () => toggleSortMenu(false)
-      },
-      {
-        panelId: "collection-select-panel",
-        buttonId: "collection-select-btn",
-        onClose: () => toggleCollectionSelectMenu(false)
-      }
-    ]);
-    return;
-  }
-
-  document.addEventListener("click", (event) => {
-    const panel = document.getElementById("collection-menu-panel");
-    const btn = document.getElementById("collection-menu-btn");
-    const target = event.target;
-    if (panel && btn && !panel.classList.contains("hidden")) {
-      if (!(panel.contains(target) || btn.contains(target))) {
-        toggleCollectionMenu(false);
-      }
+  panelsUtils.bindOutsidePanelClose([
+    {
+      panelId: "collection-menu-panel",
+      buttonId: "collection-menu-btn",
+      onClose: () => toggleCollectionMenu(false)
+    },
+    {
+      panelId: "sort-menu-panel",
+      buttonId: "sort-menu-btn",
+      onClose: () => toggleSortMenu(false)
+    },
+    {
+      panelId: "collection-select-panel",
+      buttonId: "collection-select-btn",
+      onClose: () => toggleCollectionSelectMenu(false)
     }
-
-    const sortPanel = document.getElementById("sort-menu-panel");
-    const sortBtn = document.getElementById("sort-menu-btn");
-    if (sortPanel && sortBtn && !sortPanel.classList.contains("hidden")) {
-      if (!(sortPanel.contains(target) || sortBtn.contains(target))) {
-        toggleSortMenu(false);
-      }
-    }
-
-    const collectionSelectPanel = document.getElementById("collection-select-panel");
-    const collectionSelectBtn = document.getElementById("collection-select-btn");
-    if (collectionSelectPanel && collectionSelectBtn && !collectionSelectPanel.classList.contains("hidden")) {
-      if (!(collectionSelectPanel.contains(target) || collectionSelectBtn.contains(target))) {
-        toggleCollectionSelectMenu(false);
-      }
-    }
-  });
+  ]);
 }
 
 function attachEvents() {
@@ -2550,24 +2426,20 @@ function attachEvents() {
   bindGlobalPanelClose();
 }
 
-if (initUtils?.run) {
-  initUtils.run({
-    loadMetaCache,
-    loadWishlistAddedMap,
-    refreshState: async () => {
-      await refreshState();
-      return state;
-    },
-    setActiveCollectionFromState: (nextState) => {
-      activeCollection = nextState?.activeCollection || "__all__";
-    },
-    attachEvents,
-    quickPopulateFiltersFromCache,
-    renderRatingControls,
-    render,
-    refreshFilterOptionsInBackground,
-    refreshWholeDatabase
-  }).catch(() => setStatus("Failed to load collections page.", true));
-} else {
-  setStatus("Failed to load collections page.", true);
-}
+initUtils.run({
+  loadMetaCache,
+  loadWishlistAddedMap,
+  refreshState: async () => {
+    await refreshState();
+    return state;
+  },
+  setActiveCollectionFromState: (nextState) => {
+    activeCollection = nextState?.activeCollection || "__all__";
+  },
+  attachEvents,
+  quickPopulateFiltersFromCache,
+  renderRatingControls,
+  render,
+  refreshFilterOptionsInBackground,
+  refreshWholeDatabase
+}).catch(() => setStatus("Failed to load collections page.", true));
