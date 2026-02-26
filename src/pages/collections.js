@@ -507,6 +507,83 @@ function isMetaIncomplete(meta) {
   return false;
 }
 
+async function resolveSteamIdFromStoreHtml() {
+  try {
+    const html = await fetchSteamText("https://store.steampowered.com/", {
+      credentials: "include",
+      cache: "no-store"
+    });
+    const match = html.match(/g_steamID\s*=\s*"(\d{10,20})"/);
+    return match ? match[1] : "";
+  } catch {
+    return "";
+  }
+}
+
+async function fetchAddedTimestampsById(steamId, targetIds) {
+  const out = {};
+  const remaining = new Set(targetIds);
+  if (!steamId || remaining.size === 0) {
+    return out;
+  }
+
+  for (let pageIndex = 0; pageIndex < 200 && remaining.size > 0; pageIndex += 1) {
+    const wishlistPayload = await fetchSteamJson(
+      `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
+      {
+        credentials: "include",
+        cache: "no-store"
+      }
+    );
+    const entries = Object.entries(wishlistPayload || {});
+    if (entries.length === 0) {
+      break;
+    }
+
+    for (const [appId, value] of entries) {
+      if (!remaining.has(appId)) {
+        continue;
+      }
+      const added = Number(value?.added || 0);
+      out[appId] = added > 0 ? added : 0;
+      remaining.delete(appId);
+    }
+  }
+
+  return out;
+}
+
+async function fetchWishlistIdsInPublicOrder(steamId) {
+  const ordered = [];
+  const seen = new Set();
+  if (!steamId) {
+    return ordered;
+  }
+
+  for (let pageIndex = 0; pageIndex < 200; pageIndex += 1) {
+    const raw = await fetchSteamText(
+      `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
+      {
+        credentials: "include",
+        cache: "no-store"
+      }
+    );
+    const idsInOrder = extractWishlistAppIdsInTextOrder(raw);
+    if (idsInOrder.length === 0) {
+      break;
+    }
+    for (const appId of idsInOrder) {
+      if (seen.has(appId)) {
+        continue;
+      }
+      seen.add(appId);
+      ordered.push(appId);
+    }
+  }
+
+  return ordered;
+}
+
 async function loadWishlistAddedMap() {
   wishlistOrderSyncResult = "cache-only (sync on wishlist page)";
   const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
@@ -540,83 +617,6 @@ async function loadWishlistAddedMap() {
     for (let i = 0; i < cachedOrderedIds.length; i += 1) {
       wishlistPriorityMap[cachedOrderedIds[i]] = i;
     }
-  }
-
-  async function resolveSteamIdFromStoreHtml() {
-    try {
-      const html = await fetchSteamText("https://store.steampowered.com/", {
-        credentials: "include",
-        cache: "no-store"
-      });
-      const match = html.match(/g_steamID\s*=\s*"(\d{10,20})"/);
-      return match ? match[1] : "";
-    } catch {
-      return "";
-    }
-  }
-
-  async function fetchAddedTimestampsById(steamId, targetIds) {
-    const out = {};
-    const remaining = new Set(targetIds);
-    if (!steamId || remaining.size === 0) {
-      return out;
-    }
-
-    for (let pageIndex = 0; pageIndex < 200 && remaining.size > 0; pageIndex += 1) {
-      const wishlistPayload = await fetchSteamJson(
-        `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
-        {
-          credentials: "include",
-          cache: "no-store"
-        }
-      );
-      const entries = Object.entries(wishlistPayload || {});
-      if (entries.length === 0) {
-        break;
-      }
-
-      for (const [appId, value] of entries) {
-        if (!remaining.has(appId)) {
-          continue;
-        }
-        const added = Number(value?.added || 0);
-        out[appId] = added > 0 ? added : 0;
-        remaining.delete(appId);
-      }
-    }
-
-    return out;
-  }
-
-  async function fetchWishlistIdsInPublicOrder(steamId) {
-    const ordered = [];
-    const seen = new Set();
-    if (!steamId) {
-      return ordered;
-    }
-
-    for (let pageIndex = 0; pageIndex < 200; pageIndex += 1) {
-      const raw = await fetchSteamText(
-        `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
-        {
-          credentials: "include",
-          cache: "no-store"
-        }
-      );
-      const idsInOrder = extractWishlistAppIdsInTextOrder(raw);
-      if (idsInOrder.length === 0) {
-        break;
-      }
-      for (const appId of idsInOrder) {
-        if (seen.has(appId)) {
-          continue;
-        }
-        seen.add(appId);
-        ordered.push(appId);
-      }
-    }
-
-    return ordered;
   }
 
   try {
