@@ -7,6 +7,7 @@ const WISHLIST_RANK_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const rankUtils = window.SWMWishlistRank || null;
 const WISHLIST_RANK_SOURCE = rankUtils?.RANK_SOURCE || "wishlist-api-v1";
 const WISHLIST_RANK_SOURCE_VERSION = rankUtils?.RANK_SOURCE_VERSION || 3;
+const sortUtils = window.SWMWishlistSort || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -271,25 +272,21 @@ function buildWishlistSignature(appIds) {
   return `${ids.length}:${acc >>> 0}`;
 }
 
+function getSortContext() {
+  return {
+    getTitle: (appId) => String(state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || appId),
+    getMetaNumber: (appId, key, fallback = 0) => getMetaNumber(appId, key, fallback),
+    getMeta: (appId) => metaCache?.[appId] || {},
+    wishlistAddedMap,
+    wishlistPriorityMap
+  };
+}
+
 function sortByWishlistPriority(appIds) {
-  const indexed = appIds.map((id, index) => ({ id, index }));
-  indexed.sort((a, b) => {
-    const pa = Number(wishlistPriorityMap?.[a.id]);
-    const pb = Number(wishlistPriorityMap?.[b.id]);
-    const hasPa = Number.isFinite(pa);
-    const hasPb = Number.isFinite(pb);
-    if (hasPa && hasPb) {
-      return pa - pb;
-    }
-    if (hasPa) {
-      return -1;
-    }
-    if (hasPb) {
-      return 1;
-    }
-    return a.index - b.index;
-  });
-  return indexed.map((entry) => entry.id);
+  if (sortUtils?.sortByWishlistPriority) {
+    return sortUtils.sortByWishlistPriority(appIds, wishlistPriorityMap);
+  }
+  return Array.isArray(appIds) ? [...appIds] : [];
 }
 
 function extractWishlistAppIdsInTextOrder(rawText) {
@@ -310,40 +307,19 @@ function extractWishlistAppIdsInTextOrder(rawText) {
 }
 
 function buildWishlistSortOrders(appIds) {
-  const ids = Array.isArray(appIds) ? [...appIds] : [];
-  const basePosition = sortByWishlistPriority(ids);
-
-  function stableSorted(compareFn) {
-    const indexed = ids.map((id, index) => ({ id, index }));
-    indexed.sort((a, b) => {
-      const byRule = compareFn(a.id, b.id);
-      if (byRule !== 0) {
-        return byRule;
-      }
-      return a.index - b.index;
-    });
-    return indexed.map((entry) => entry.id);
+  if (sortUtils?.buildWishlistSortOrders) {
+    return sortUtils.buildWishlistSortOrders(appIds, getSortContext());
   }
-
+  const ids = Array.isArray(appIds) ? [...appIds] : [];
   return {
-    position: basePosition,
-    title: stableSorted((a, b) => {
-      const ta = String(state?.items?.[a]?.title || metaCache?.[a]?.titleText || a);
-      const tb = String(state?.items?.[b]?.title || metaCache?.[b]?.titleText || b);
-      return ta.localeCompare(tb, "pt-BR", { sensitivity: "base" });
-    }),
-    price: stableSorted((a, b) => getEffectiveSortPrice(a) - getEffectiveSortPrice(b)),
-    discount: stableSorted((a, b) => getMetaNumber(b, "discountPercent", 0) - getMetaNumber(a, "discountPercent", 0)),
-    "date-added": stableSorted((a, b) => Number(wishlistAddedMap[b] || 0) - Number(wishlistAddedMap[a] || 0)),
-    "top-selling": stableSorted((a, b) => getMetaNumber(b, "recommendationsTotal", 0) - getMetaNumber(a, "recommendationsTotal", 0)),
-    "release-date": stableSorted((a, b) => getMetaNumber(b, "releaseUnix", 0) - getMetaNumber(a, "releaseUnix", 0)),
-    "review-score": stableSorted((a, b) => {
-      const pctDiff = getMetaNumber(b, "reviewPositivePct", -1) - getMetaNumber(a, "reviewPositivePct", -1);
-      if (pctDiff !== 0) {
-        return pctDiff;
-      }
-      return getMetaNumber(b, "reviewTotalVotes", 0) - getMetaNumber(a, "reviewTotalVotes", 0);
-    })
+    position: ids,
+    title: ids,
+    price: ids,
+    discount: ids,
+    "date-added": ids,
+    "top-selling": ids,
+    "release-date": ids,
+    "review-score": ids
   };
 }
 
@@ -467,23 +443,6 @@ function extractPriceTextFromDiscountBlock(blockHtml) {
   }
 
   return "";
-}
-
-function getEffectiveSortPrice(appId) {
-  const meta = metaCache?.[appId] || {};
-  const isFree = String(meta.priceText || "").trim().toLowerCase() === "free";
-  if (isFree) {
-    return 0;
-  }
-
-  const finalPrice = Number(meta.priceFinal);
-  if (Number.isFinite(finalPrice) && finalPrice > 0) {
-    // Steam `final` already includes active discount.
-    return finalPrice;
-  }
-
-  // Unknown/unavailable price goes to end.
-  return Number.POSITIVE_INFINITY;
 }
 
 function isMetaIncomplete(meta) {
@@ -1966,49 +1925,13 @@ function getFilteredAndSorted(ids) {
     return list;
   }
 
-  if (effectiveSortMode === "title") {
-    list.sort((a, b) => {
-      const ta = String(state?.items?.[a]?.title || metaCache?.[a]?.titleText || a);
-      const tb = String(state?.items?.[b]?.title || metaCache?.[b]?.titleText || b);
-      return ta.localeCompare(tb, "pt-BR", { sensitivity: "base" });
-    });
-    return list;
-  }
-
-  if (effectiveSortMode === "price") {
-    list.sort((a, b) => getEffectiveSortPrice(a) - getEffectiveSortPrice(b));
-    return list;
-  }
-
-  if (effectiveSortMode === "discount") {
-    list.sort((a, b) => getMetaNumber(b, "discountPercent", 0) - getMetaNumber(a, "discountPercent", 0));
-    return list;
-  }
-
-  if (effectiveSortMode === "date-added") {
-    list.sort((a, b) => Number(wishlistAddedMap[b] || 0) - Number(wishlistAddedMap[a] || 0));
-    return list;
-  }
-
-  if (effectiveSortMode === "top-selling") {
-    list.sort((a, b) => getMetaNumber(b, "recommendationsTotal", 0) - getMetaNumber(a, "recommendationsTotal", 0));
-    return list;
-  }
-
-  if (effectiveSortMode === "release-date") {
-    list.sort((a, b) => getMetaNumber(b, "releaseUnix", 0) - getMetaNumber(a, "releaseUnix", 0));
-    return list;
-  }
-
-  if (effectiveSortMode === "review-score") {
-    list.sort((a, b) => {
-      const pctDiff = getMetaNumber(b, "reviewPositivePct", -1) - getMetaNumber(a, "reviewPositivePct", -1);
-      if (pctDiff !== 0) {
-        return pctDiff;
-      }
-      return getMetaNumber(b, "reviewTotalVotes", 0) - getMetaNumber(a, "reviewTotalVotes", 0);
-    });
-    return list;
+  if (sortUtils?.sortIdsByMode) {
+    if (effectiveSortMode === "position" && sourceMode === "wishlist") {
+      return sortUtils.sortIdsByMode(list, "position", getSortContext());
+    }
+    if (effectiveSortMode !== "position") {
+      return sortUtils.sortIdsByMode(list, effectiveSortMode, getSortContext());
+    }
   }
 
   if (effectiveSortMode === "position" && sourceMode === "wishlist") {
