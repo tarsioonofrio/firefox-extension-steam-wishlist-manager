@@ -18,6 +18,7 @@ const actionsUtils = window.SWMCollectionsActions || null;
 const crudUtils = window.SWMCollectionsCrud || null;
 const initUtils = window.SWMCollectionsInit || null;
 const selectionBindingsUtils = window.SWMCollectionsSelectionBindings || null;
+const generalBindingsUtils = window.SWMCollectionsGeneralBindings || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -2245,64 +2246,42 @@ function bindCollectionMenuControls() {
   bindMenuFormSubmit("delete-collection-ok", "delete-collection-select", deleteCollectionByName, "Failed to delete collection.", false);
 }
 
-function bindSearchAndPagingControls() {
-  document.getElementById("search-input")?.addEventListener("input", async (event) => {
-    searchQuery = String(event.target.value || "");
-    page = 1;
-    await render();
-  });
-
-  document.getElementById("prev-page-btn")?.addEventListener("click", async () => {
-    page = Math.max(1, page - 1);
-    await renderCards();
-  });
-
-  document.getElementById("next-page-btn")?.addEventListener("click", async () => {
-    page += 1;
-    await renderCards();
-  });
-}
-
-function bindTextFilterInput(inputId, onChange) {
-  document.getElementById(inputId)?.addEventListener("input", (event) => {
-    onChange(String(event.target.value || "").trim());
-    renderExtraFilterOptions();
-  });
-}
-
 function bindFilterControls() {
-  document.getElementById("tag-search-input")?.addEventListener("input", (event) => {
-    tagSearchQuery = String(event.target.value || "").trim();
-    tagShowLimit = TAG_SHOW_STEP;
-    renderTagOptions();
-  });
-
-  document.getElementById("tag-show-more-btn")?.addEventListener("click", () => {
-    tagShowLimit += TAG_SHOW_STEP;
-    renderTagOptions();
-  });
-
-  bindTextFilterInput("languages-search-input", (value) => {
-    languageSearchQuery = value;
-  });
-  bindTextFilterInput("full-audio-languages-search-input", (value) => {
-    fullAudioLanguageSearchQuery = value;
-  });
-  bindTextFilterInput("subtitle-languages-search-input", (value) => {
-    subtitleLanguageSearchQuery = value;
-  });
-  bindTextFilterInput("technologies-search-input", (value) => {
-    technologySearchQuery = value;
-  });
-  bindTextFilterInput("developers-search-input", (value) => {
-    developerSearchQuery = value;
-  });
-  bindTextFilterInput("publishers-search-input", (value) => {
-    publisherSearchQuery = value;
-  });
-
-  document.getElementById("refresh-page-btn")?.addEventListener("click", () => {
-    refreshCurrentPageItems().catch(() => setStatus("Failed to refresh visible items.", true));
+  generalBindingsUtils.bindGeneralControls({
+    onSearchInput: async (value) => {
+      searchQuery = value;
+      page = 1;
+      await render();
+    },
+    onPrevPage: async () => {
+      page = Math.max(1, page - 1);
+      await renderCards();
+    },
+    onNextPage: async () => {
+      page += 1;
+      await renderCards();
+    },
+    onTagSearchInput: (value) => {
+      tagSearchQuery = value;
+      tagShowLimit = TAG_SHOW_STEP;
+      renderTagOptions();
+    },
+    onTagShowMore: () => {
+      tagShowLimit += TAG_SHOW_STEP;
+      renderTagOptions();
+    },
+    onTextFilterInput: (inputId, value) => {
+      if (inputId === "languages-search-input") languageSearchQuery = value;
+      if (inputId === "full-audio-languages-search-input") fullAudioLanguageSearchQuery = value;
+      if (inputId === "subtitle-languages-search-input") subtitleLanguageSearchQuery = value;
+      if (inputId === "technologies-search-input") technologySearchQuery = value;
+      if (inputId === "developers-search-input") developerSearchQuery = value;
+      if (inputId === "publishers-search-input") publisherSearchQuery = value;
+      renderExtraFilterOptions();
+    },
+    onRefreshPage: () => {
+      refreshCurrentPageItems().catch(() => setStatus("Failed to refresh visible items.", true));
+    }
   });
 
   rangeControlsUtils.bindRangeControls({
@@ -2381,7 +2360,6 @@ function attachEvents() {
   bindCollectionControls();
   bindSortControls();
   bindCollectionMenuControls();
-  bindSearchAndPagingControls();
   bindFilterControls();
   bindGlobalPanelClose();
 }
