@@ -1742,7 +1742,11 @@ function getFilteredAndSorted(ids) {
   if (!filtersUtils?.getFilteredAndSorted) {
     return Array.isArray(ids) ? [...ids] : [];
   }
-  return filtersUtils.getFilteredAndSorted(ids, {
+  return filtersUtils.getFilteredAndSorted(ids, getFiltersContext());
+}
+
+function getFiltersContext() {
+  return {
     searchQuery,
     sourceMode,
     sortMode,
@@ -1779,7 +1783,7 @@ function getFilteredAndSorted(ids) {
     discountMax,
     priceMin,
     priceMax
-  });
+  };
 }
 
 function renderCollectionSelect() {
