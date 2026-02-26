@@ -15,6 +15,7 @@ const panelsUtils = window.SWMCollectionsPanels || null;
 const rangeControlsUtils = window.SWMCollectionsRangeControls || null;
 const filterStateUtils = window.SWMCollectionsFilterState || null;
 const actionsUtils = window.SWMCollectionsActions || null;
+const crudUtils = window.SWMCollectionsCrud || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -1991,80 +1992,75 @@ async function refreshState() {
 }
 
 async function createCollectionByName(rawName) {
-  const name = normalizeCollectionName(rawName || "");
-  if (!name) {
-    setStatus("Type a collection name.", true);
+  if (!crudUtils?.createCollectionByName) {
     return;
   }
-
-  await browser.runtime.sendMessage({
-    type: "create-collection",
-    collectionName: name
+  const result = await crudUtils.createCollectionByName({
+    rawName,
+    normalizeCollectionName,
+    setStatus,
+    sendMessage: (payload) => browser.runtime.sendMessage(payload),
+    refreshState,
+    onAfterChange: async () => {
+      quickPopulateFiltersFromCache();
+      refreshFilterOptionsInBackground();
+    }
   });
-
-  await refreshState();
-  activeCollection = name;
-  sourceMode = "collections";
-  page = 1;
-  quickPopulateFiltersFromCache();
-  refreshFilterOptionsInBackground();
-  setStatus(`Collection \"${name}\" created.`);
+  if (result?.ok) {
+    activeCollection = result.activeCollection ?? activeCollection;
+    sourceMode = result.sourceMode ?? sourceMode;
+    page = Number.isFinite(Number(result.page)) ? Number(result.page) : page;
+  }
   await render();
 }
 
 async function renameActiveCollectionByName(rawName) {
-  if (sourceMode === "wishlist" || !activeCollection || activeCollection === "__all__") {
-    setStatus("Select a specific collection to rename.", true);
+  if (!crudUtils?.renameActiveCollectionByName) {
     return;
   }
-
-  const newName = normalizeCollectionName(rawName || "");
-  if (!newName) {
-    setStatus("Type a new collection name.", true);
-    return;
-  }
-
-  await browser.runtime.sendMessage({
-    type: "rename-collection",
-    fromName: activeCollection,
-    toName: newName
+  const result = await crudUtils.renameActiveCollectionByName({
+    rawName,
+    normalizeCollectionName,
+    sourceMode,
+    activeCollection,
+    setStatus,
+    sendMessage: (payload) => browser.runtime.sendMessage(payload),
+    refreshState,
+    onAfterChange: async () => {
+      quickPopulateFiltersFromCache();
+      refreshFilterOptionsInBackground();
+    }
   });
-
-  await refreshState();
-  activeCollection = newName;
-  page = 1;
-  quickPopulateFiltersFromCache();
-  refreshFilterOptionsInBackground();
-  setStatus(`Collection renamed to \"${newName}\".`);
+  if (result?.ok) {
+    activeCollection = result.activeCollection ?? activeCollection;
+    page = Number.isFinite(Number(result.page)) ? Number(result.page) : page;
+  }
   await render();
 }
 
 async function deleteCollectionByName(rawName) {
-  const collectionName = normalizeCollectionName(rawName || "");
-  if (!collectionName) {
-    setStatus("Select a collection to delete.", true);
+  if (!crudUtils?.deleteCollectionByName) {
     return;
   }
-
-  const confirmed = window.confirm(`Delete collection "${collectionName}"?`);
-  if (!confirmed) {
-    return;
-  }
-
-  await browser.runtime.sendMessage({
-    type: "delete-collection",
-    collectionName
+  const result = await crudUtils.deleteCollectionByName({
+    rawName,
+    normalizeCollectionName,
+    activeCollection,
+    sourceMode,
+    setStatus,
+    sendMessage: (payload) => browser.runtime.sendMessage(payload),
+    refreshState,
+    confirmFn: (message) => window.confirm(message),
+    onAfterChange: async () => {
+      quickPopulateFiltersFromCache();
+      refreshFilterOptionsInBackground();
+    }
   });
-
-  await refreshState();
-  if (activeCollection === collectionName) {
-    activeCollection = "__all__";
-    sourceMode = "collections";
+  if (result?.ok) {
+    activeCollection = result.activeCollection ?? activeCollection;
+    sourceMode = result.sourceMode ?? sourceMode;
+    page = Number.isFinite(Number(result.page)) ? Number(result.page) : page;
   }
-  page = 1;
-  quickPopulateFiltersFromCache();
-  refreshFilterOptionsInBackground();
-  setStatus(`Collection \"${collectionName}\" deleted.`);
   await render();
 }
 
