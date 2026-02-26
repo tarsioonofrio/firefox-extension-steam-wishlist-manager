@@ -40,8 +40,19 @@
     const langs = [];
     for (const line of text.split("\n")) {
       const normalized = String(line || "").replace(/\*/g, "").replace(/\s+/g, " ").trim();
-      if (normalized) {
-        langs.push(normalized);
+      if (!normalized) {
+        continue;
+      }
+      const lower = normalized.toLowerCase();
+      if (lower.includes("languages with full audio support")) {
+        continue;
+      }
+      const parts = normalized.split(",");
+      for (const part of parts) {
+        const lang = String(part || "").replace(/\s+/g, " ").trim();
+        if (lang) {
+          langs.push(lang);
+        }
       }
     }
     return Array.from(new Set(langs));
@@ -61,8 +72,19 @@
         .replace(/\*/g, "")
         .replace(/\s+/g, " ")
         .trim();
-      if (normalized) {
-        out.push(normalized);
+      if (!normalized) {
+        continue;
+      }
+      const lower = normalized.toLowerCase();
+      if (lower.includes("languages with full audio support")) {
+        continue;
+      }
+      const parts = normalized.split(",");
+      for (const part of parts) {
+        const lang = String(part || "").replace(/\s+/g, " ").trim();
+        if (lang) {
+          out.push(lang);
+        }
       }
     }
     return Array.from(new Set(out));

@@ -1,10 +1,29 @@
 (() => {
+  function isSetLike(value) {
+    return Boolean(value)
+      && typeof value.has === "function"
+      && Number.isFinite(Number(value.size));
+  }
+
   function passesArrayFilter(getMetaArray, appId, key, selectedSet) {
-    if (!(selectedSet instanceof Set) || selectedSet.size === 0) {
+    if (!isSetLike(selectedSet) || selectedSet.size === 0) {
       return true;
     }
     const values = getMetaArray(appId, key);
     return values.some((value) => selectedSet.has(value));
+  }
+
+  function passesArrayFilterAll(getMetaArray, appId, key, selectedSet) {
+    if (!isSetLike(selectedSet) || selectedSet.size === 0) {
+      return true;
+    }
+    const values = new Set(getMetaArray(appId, key));
+    for (const selectedValue of selectedSet) {
+      if (!values.has(selectedValue)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   function getPriceForFilter(meta) {
@@ -206,8 +225,8 @@
         && passesArrayFilter(getMetaArray, appId, "accessibility", selectedAccessibility)
         && passesArrayFilter(getMetaArray, appId, "platforms", selectedPlatforms)
         && passesArrayFilter(getMetaArray, appId, "languages", selectedLanguages)
-        && passesArrayFilter(getMetaArray, appId, "fullAudioLanguages", selectedFullAudioLanguages)
-        && passesArrayFilter(getMetaArray, appId, "subtitleLanguages", selectedSubtitleLanguages)
+        && passesArrayFilterAll(getMetaArray, appId, "fullAudioLanguages", selectedFullAudioLanguages)
+        && passesArrayFilterAll(getMetaArray, appId, "subtitleLanguages", selectedSubtitleLanguages)
         && passesArrayFilter(getMetaArray, appId, "technologies", selectedTechnologies)
         && passesArrayFilter(getMetaArray, appId, "developers", selectedDevelopers)
         && passesArrayFilter(getMetaArray, appId, "publishers", selectedPublishers);

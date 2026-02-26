@@ -345,7 +345,33 @@ function getMetaNumber(appId, key, fallback = 0) {
 
 function getMetaArray(appId, key) {
   const value = metaCache?.[appId]?.[key];
-  return Array.isArray(value) ? value : [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  if (key !== "languages" && key !== "fullAudioLanguages" && key !== "subtitleLanguages") {
+    return value;
+  }
+  const out = [];
+  const seen = new Set();
+  for (const raw of value) {
+    const parts = String(raw || "").split(",");
+    for (const part of parts) {
+      const name = String(part || "").replace(/\s+/g, " ").trim();
+      if (!name) {
+        continue;
+      }
+      const lower = name.toLowerCase();
+      if (lower.includes("languages with full audio support")) {
+        continue;
+      }
+      if (seen.has(name)) {
+        continue;
+      }
+      seen.add(name);
+      out.push(name);
+    }
+  }
+  return out;
 }
 
 function getReleaseYearMaxBound() {
@@ -1423,6 +1449,33 @@ function buildArrayFieldCountsFromAppIds(appIds, fieldName) {
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
 }
 
+function normalizeLanguageCountObjects(counts) {
+  const source = Array.isArray(counts) ? counts : [];
+  const merged = new Map();
+  for (const entry of source) {
+    const rawName = String(entry?.name || "").trim();
+    if (!rawName) {
+      continue;
+    }
+    const count = Number.isFinite(Number(entry?.count)) ? Number(entry.count) : 0;
+    const parts = rawName.split(",");
+    for (const part of parts) {
+      const name = String(part || "").replace(/\s+/g, " ").trim();
+      if (!name) {
+        continue;
+      }
+      const lower = name.toLowerCase();
+      if (lower.includes("languages with full audio support")) {
+        continue;
+      }
+      merged.set(name, (merged.get(name) || 0) + count);
+    }
+  }
+  return Array.from(merged.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+}
+
 function buildReleaseYearCountsFromAppIds(appIds) {
   const counts = new Map();
   for (const appId of appIds) {
@@ -1659,9 +1712,9 @@ async function ensureExtraFilterCounts() {
       hardwareCounts = Array.isArray(cachedBucket.hardwareCounts) ? cachedBucket.hardwareCounts : [];
       accessibilityCounts = Array.isArray(cachedBucket.accessibilityCounts) ? cachedBucket.accessibilityCounts : [];
       platformCounts = Array.isArray(cachedBucket.platformCounts) ? cachedBucket.platformCounts : [];
-      languageCounts = Array.isArray(cachedBucket.languageCounts) ? cachedBucket.languageCounts : [];
-      fullAudioLanguageCounts = Array.isArray(cachedBucket.fullAudioLanguageCounts) ? cachedBucket.fullAudioLanguageCounts : [];
-      subtitleLanguageCounts = Array.isArray(cachedBucket.subtitleLanguageCounts) ? cachedBucket.subtitleLanguageCounts : [];
+      languageCounts = normalizeLanguageCountObjects(cachedBucket.languageCounts);
+      fullAudioLanguageCounts = normalizeLanguageCountObjects(cachedBucket.fullAudioLanguageCounts);
+      subtitleLanguageCounts = normalizeLanguageCountObjects(cachedBucket.subtitleLanguageCounts);
       technologyCounts = Array.isArray(cachedBucket.technologyCounts) ? cachedBucket.technologyCounts : [];
       developerCounts = Array.isArray(cachedBucket.developerCounts) ? cachedBucket.developerCounts : [];
       publisherCounts = Array.isArray(cachedBucket.publisherCounts) ? cachedBucket.publisherCounts : [];
@@ -1678,9 +1731,9 @@ async function ensureExtraFilterCounts() {
     hardwareCounts = Array.isArray(cachedBucket.hardwareCounts) ? cachedBucket.hardwareCounts : [];
     accessibilityCounts = Array.isArray(cachedBucket.accessibilityCounts) ? cachedBucket.accessibilityCounts : [];
     platformCounts = Array.isArray(cachedBucket.platformCounts) ? cachedBucket.platformCounts : [];
-    languageCounts = Array.isArray(cachedBucket.languageCounts) ? cachedBucket.languageCounts : [];
-    fullAudioLanguageCounts = Array.isArray(cachedBucket.fullAudioLanguageCounts) ? cachedBucket.fullAudioLanguageCounts : [];
-    subtitleLanguageCounts = Array.isArray(cachedBucket.subtitleLanguageCounts) ? cachedBucket.subtitleLanguageCounts : [];
+    languageCounts = normalizeLanguageCountObjects(cachedBucket.languageCounts);
+    fullAudioLanguageCounts = normalizeLanguageCountObjects(cachedBucket.fullAudioLanguageCounts);
+    subtitleLanguageCounts = normalizeLanguageCountObjects(cachedBucket.subtitleLanguageCounts);
     technologyCounts = Array.isArray(cachedBucket.technologyCounts) ? cachedBucket.technologyCounts : [];
     developerCounts = Array.isArray(cachedBucket.developerCounts) ? cachedBucket.developerCounts : [];
     publisherCounts = Array.isArray(cachedBucket.publisherCounts) ? cachedBucket.publisherCounts : [];
@@ -1698,9 +1751,9 @@ async function ensureExtraFilterCounts() {
   const nextHardwareCounts = buildArrayFieldCountsFromAppIds(appIds, "hardware");
   const nextAccessibilityCounts = buildArrayFieldCountsFromAppIds(appIds, "accessibility");
   const nextPlatformCounts = buildArrayFieldCountsFromAppIds(appIds, "platforms");
-  const nextLanguageCounts = buildArrayFieldCountsFromAppIds(appIds, "languages");
-  const nextFullAudioLanguageCounts = buildArrayFieldCountsFromAppIds(appIds, "fullAudioLanguages");
-  const nextSubtitleLanguageCounts = buildArrayFieldCountsFromAppIds(appIds, "subtitleLanguages");
+  const nextLanguageCounts = normalizeLanguageCountObjects(buildArrayFieldCountsFromAppIds(appIds, "languages"));
+  const nextFullAudioLanguageCounts = normalizeLanguageCountObjects(buildArrayFieldCountsFromAppIds(appIds, "fullAudioLanguages"));
+  const nextSubtitleLanguageCounts = normalizeLanguageCountObjects(buildArrayFieldCountsFromAppIds(appIds, "subtitleLanguages"));
   const nextTechnologyCounts = buildArrayFieldCountsFromAppIds(appIds, "technologies");
   const nextDeveloperCounts = buildArrayFieldCountsFromAppIds(appIds, "developers");
   const nextPublisherCounts = buildArrayFieldCountsFromAppIds(appIds, "publishers");
@@ -1719,9 +1772,9 @@ async function ensureExtraFilterCounts() {
     hardwareCounts = Array.isArray(cachedBucket.hardwareCounts) ? cachedBucket.hardwareCounts : [];
     accessibilityCounts = Array.isArray(cachedBucket.accessibilityCounts) ? cachedBucket.accessibilityCounts : [];
     platformCounts = Array.isArray(cachedBucket.platformCounts) ? cachedBucket.platformCounts : [];
-    languageCounts = Array.isArray(cachedBucket.languageCounts) ? cachedBucket.languageCounts : [];
-    fullAudioLanguageCounts = Array.isArray(cachedBucket.fullAudioLanguageCounts) ? cachedBucket.fullAudioLanguageCounts : [];
-    subtitleLanguageCounts = Array.isArray(cachedBucket.subtitleLanguageCounts) ? cachedBucket.subtitleLanguageCounts : [];
+    languageCounts = normalizeLanguageCountObjects(cachedBucket.languageCounts);
+    fullAudioLanguageCounts = normalizeLanguageCountObjects(cachedBucket.fullAudioLanguageCounts);
+    subtitleLanguageCounts = normalizeLanguageCountObjects(cachedBucket.subtitleLanguageCounts);
     technologyCounts = Array.isArray(cachedBucket.technologyCounts) ? cachedBucket.technologyCounts : [];
     developerCounts = Array.isArray(cachedBucket.developerCounts) ? cachedBucket.developerCounts : [];
     publisherCounts = Array.isArray(cachedBucket.publisherCounts) ? cachedBucket.publisherCounts : [];

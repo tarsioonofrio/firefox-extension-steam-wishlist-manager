@@ -142,6 +142,70 @@ function testCollectionsFilters(context) {
   assert.deepEqual(Array.from(result), ["101"]);
 }
 
+function testLanguageAllMatchFilters(context) {
+  const filters = context.window.SWMCollectionsFilters;
+  const sort = context.window.SWMWishlistSort;
+  assert.ok(filters, "SWMCollectionsFilters should be available");
+
+  const ids = ["1", "2", "3"];
+  const meta = {
+    "1": { titleText: "A", tags: [], appType: "Game", fullAudioLanguages: ["English", "Japanese"], subtitleLanguages: ["English", "Japanese"] },
+    "2": { titleText: "B", tags: [], appType: "Game", fullAudioLanguages: ["English"], subtitleLanguages: ["English", "Japanese"] },
+    "3": { titleText: "C", tags: [], appType: "Game", fullAudioLanguages: ["Japanese"], subtitleLanguages: ["Japanese"] }
+  };
+
+  const result = filters.getFilteredAndSorted(ids, {
+    searchQuery: "",
+    sourceMode: "collections",
+    sortMode: "title",
+    wishlistSortOrders: {},
+    isWishlistRankReady: () => false,
+    getSortContext: () => ({
+      getTitle: (id) => meta[id].titleText,
+      getMeta: (id) => meta[id],
+      getMetaNumber: () => 0,
+      wishlistAddedMap: {},
+      wishlistPriorityMap: {}
+    }),
+    sortUtils: sort,
+    sortByWishlistPriority: (list) => list,
+    getTitle: (id) => meta[id].titleText,
+    getMeta: (id) => meta[id],
+    getMetaTags: () => [],
+    getMetaType: () => "Game",
+    getMetaNumber: () => 0,
+    getMetaArray: (id, key) => Array.isArray(meta[id][key]) ? meta[id][key] : [],
+    selectedTags: new Set(),
+    selectedTypes: new Set(),
+    selectedPlayers: new Set(),
+    selectedFeatures: new Set(),
+    selectedHardware: new Set(),
+    selectedAccessibility: new Set(),
+    selectedPlatforms: new Set(),
+    selectedLanguages: new Set(),
+    selectedFullAudioLanguages: new Set(["English", "Japanese"]),
+    selectedSubtitleLanguages: new Set(["English", "Japanese"]),
+    selectedTechnologies: new Set(),
+    selectedDevelopers: new Set(),
+    selectedPublishers: new Set(),
+    getReleaseFilterData: () => ({ year: 2024, textLabel: "" }),
+    releaseTextEnabled: false,
+    releaseYearRangeEnabled: true,
+    releaseYearMin: 2010,
+    releaseYearMax: 2030,
+    ratingMin: 0,
+    ratingMax: 100,
+    reviewsMin: 0,
+    reviewsMax: 999999999,
+    discountMin: 0,
+    discountMax: 100,
+    priceMin: 0,
+    priceMax: 9999999
+  });
+
+  assert.deepEqual(Array.from(result), ["1"]);
+}
+
 function main() {
   const context = makeContext();
   loadModule("src/pages/wishlist-rank.js", context);
@@ -151,6 +215,7 @@ function main() {
   testWishlistRank(context);
   testWishlistSort(context);
   testCollectionsFilters(context);
+  testLanguageAllMatchFilters(context);
   console.log("module smoke ok");
 }
 
