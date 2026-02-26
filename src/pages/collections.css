@@ -400,16 +400,16 @@ main {
 }
 
 .order-position-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
+  display: flex;
   align-items: center;
   gap: 2px;
 }
 
 .order-position-input {
   height: 22px;
-  width: 100%;
-  min-width: 0;
+  width: calc((var(--pos-digits, 2) * 9px) + 16px);
+  min-width: calc((var(--pos-digits, 2) * 9px) + 16px);
+  max-width: 100%;
   padding: 2px 4px;
   font-size: 11px;
   text-align: center;
@@ -422,14 +422,6 @@ main {
   margin: 0;
 }
 
-.order-position-apply-btn {
-  height: 22px;
-  width: 32px !important;
-  min-width: 32px;
-  font-size: 10px;
-  padding: 0;
-}
-
 .order-card-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -439,7 +431,7 @@ main {
 
 .order-manual-row {
   display: grid;
-  grid-template-columns: 32px 32px minmax(0, 1fr);
+  grid-template-columns: 32px 32px auto;
   gap: 4px;
   align-items: center;
 }
@@ -687,7 +679,7 @@ main {
 
 .line-left {
   display: grid;
-  grid-template-columns: 32px 32px minmax(60px, 1fr) 36px;
+  grid-template-columns: 32px 32px auto;
   gap: 4px;
   align-items: center;
 }
@@ -700,8 +692,8 @@ main {
 
 .line-pos-input {
   height: 24px;
-  width: 100%;
-  min-width: 0;
+  width: calc((var(--pos-digits, 2) * 9px) + 16px);
+  min-width: calc((var(--pos-digits, 2) * 9px) + 16px);
   text-align: center;
   -moz-appearance: textfield;
 }
@@ -818,13 +810,13 @@ main {
   }
 
   .order-manual-row {
-    grid-template-columns: 32px 32px minmax(56px, 1fr);
+    grid-template-columns: 32px 32px auto;
     width: 100%;
   }
 
   .order-position-input {
-    width: 56px;
-    min-width: 56px;
+    width: calc((var(--pos-digits, 2) * 9px) + 16px);
+    min-width: calc((var(--pos-digits, 2) * 9px) + 16px);
   }
 
   .order-card-actions {

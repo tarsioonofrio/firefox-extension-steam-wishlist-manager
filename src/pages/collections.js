@@ -2089,6 +2089,7 @@ function createLineRow(options) {
   const onMoveDown = options?.onMoveDown || (() => Promise.resolve());
   const onMoveToPosition = options?.onMoveToPosition || (() => Promise.resolve());
   const setStatus = options?.setStatus || (() => {});
+  const maxPositionDigits = Math.max(1, Number(options?.maxPositionDigits || 1));
 
   const row = document.createElement("article");
   row.className = "line-row";
@@ -2132,13 +2133,12 @@ function createLineRow(options) {
   posInput.className = "line-pos-input";
   posInput.value = itemPosition > 0 ? String(itemPosition) : "";
   posInput.disabled = !reorderEnabled;
-
-  const goBtn = document.createElement("button");
-  goBtn.type = "button";
-  goBtn.className = "line-btn";
-  goBtn.textContent = "Go";
-  goBtn.disabled = !reorderEnabled;
-  goBtn.addEventListener("click", () => {
+  posInput.style.setProperty("--pos-digits", String(maxPositionDigits));
+  posInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
     const target = Number(posInput.value || 0);
     onMoveToPosition(appId, target).catch(() => setStatus("Failed to move item to position.", true));
   });
@@ -2146,7 +2146,6 @@ function createLineRow(options) {
   left.appendChild(upBtn);
   left.appendChild(downBtn);
   left.appendChild(posInput);
-  left.appendChild(goBtn);
 
   const center = document.createElement("div");
   center.className = "line-center";
@@ -2387,6 +2386,8 @@ async function renderCards() {
 
   const start = (page - 1) * PAGE_SIZE;
   const pageIds = appIds.slice(start, start + PAGE_SIZE);
+  const maxPositionInPage = start + pageIds.length;
+  const maxPositionDigits = String(Math.max(1, maxPositionInPage)).length;
   currentRenderedPageIds = [...pageIds];
   if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
     setStatus("");
@@ -2424,6 +2425,7 @@ async function renderCards() {
         onMoveUp: (id) => moveCollectionItemByDelta(id, -1),
         onMoveDown: (id) => moveCollectionItemByDelta(id, 1),
         onMoveToPosition: (id, position) => moveCollectionItemToPosition(id, position),
+        maxPositionDigits,
         setStatus
       });
       cardsEl.appendChild(line.row);
@@ -2493,6 +2495,7 @@ async function renderCards() {
       reorderEnabled: manualReorderEnabled,
       itemPosition: Number(orderIndex.get(appId) || 0),
       totalItems: activeOrder.length,
+      maxPositionDigits,
       onMoveUp: (id) => moveCollectionItemByDelta(id, -1),
       onMoveDown: (id) => moveCollectionItemByDelta(id, 1),
       onMoveToPosition: (id, position) => moveCollectionItemToPosition(id, position),

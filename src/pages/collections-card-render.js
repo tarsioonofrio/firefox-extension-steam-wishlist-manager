@@ -15,7 +15,6 @@
       orderUpBtn: fragment.querySelector(".order-up-btn"),
       orderDownBtn: fragment.querySelector(".order-down-btn"),
       orderPositionInput: fragment.querySelector(".order-position-input"),
-      orderPositionApplyBtn: fragment.querySelector(".order-position-apply-btn"),
       coverLink: fragment.querySelector(".cover-link"),
       cover: fragment.querySelector(".cover"),
       titleEl: fragment.querySelector(".title"),
@@ -113,6 +112,7 @@
     const reorderEnabled = Boolean(options?.reorderEnabled);
     const itemPosition = Number(options?.itemPosition || 0);
     const totalItems = Number(options?.totalItems || 0);
+    const maxPositionDigits = Math.max(1, Number(options?.maxPositionDigits || 1));
     const onMoveUp = options?.onMoveUp || (() => Promise.resolve());
     const onMoveDown = options?.onMoveDown || (() => Promise.resolve());
     const onMoveToPosition = options?.onMoveToPosition || (() => Promise.resolve());
@@ -196,11 +196,12 @@
     if (card.orderPositionInput) {
       card.orderPositionInput.value = itemPosition > 0 ? String(itemPosition) : "";
       card.orderPositionInput.disabled = !reorderEnabled;
-    }
-
-    if (card.orderPositionApplyBtn) {
-      card.orderPositionApplyBtn.disabled = !reorderEnabled;
-      card.orderPositionApplyBtn.addEventListener("click", () => {
+      card.orderPositionInput.style.setProperty("--pos-digits", String(maxPositionDigits));
+      card.orderPositionInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") {
+          return;
+        }
+        event.preventDefault();
         const target = Number(card.orderPositionInput?.value || 0);
         onMoveToPosition(appId, target).catch(() => setStatus("Failed to move item to position.", true));
       });
