@@ -21,11 +21,11 @@
   }
 
   function resolveSortSelection(value, sourceMode, isWishlistRankReady) {
-    const candidate = String(value || "title");
+    const candidate = String(value || "position");
     const nextSort = ALLOWED_SORTS.has(candidate) ? candidate : "title";
     const isReady = typeof isWishlistRankReady === "function" ? isWishlistRankReady() : false;
 
-    if (sourceMode === "wishlist" && nextSort === "position" && !isReady) {
+    if (nextSort === "position" && !isReady) {
       return {
         sortMode: "position",
         page: 1,

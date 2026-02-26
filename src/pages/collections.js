@@ -54,7 +54,7 @@ let activeCollection = "__all__";
 let sourceMode = "collections";
 let page = 1;
 let searchQuery = "";
-let sortMode = "title";
+let sortMode = "position";
 
 let metaCache = {};
 let wishlistAddedMap = {};

@@ -140,7 +140,7 @@
       return selectedReleaseYears.has(year);
     }
 
-    const effectiveSortMode = (sourceMode === "wishlist" && sortMode === "position" && !isWishlistRankReady(source))
+    const effectiveSortMode = (sortMode === "position" && !isWishlistRankReady(source))
       ? "title"
       : sortMode;
     const baseIds = (sourceMode === "wishlist" && Array.isArray(wishlistSortOrders?.[effectiveSortMode]) && wishlistSortOrders[effectiveSortMode].length)
