@@ -426,11 +426,51 @@ main {
 }
 
 .right-col .refresh-item-btn,
+.right-col .collections-toggle-btn,
 .right-col .remove-btn {
   display: block;
   margin-left: auto;
   margin-bottom: 4px;
   width: auto;
+}
+
+.collections-dropdown {
+  border: 1px solid #3d556e;
+  border-radius: 4px;
+  background: #1e3247;
+  padding: 6px;
+  width: 210px;
+  max-height: 180px;
+  overflow: auto;
+  margin-left: auto;
+  margin-bottom: 4px;
+}
+
+.collections-dropdown-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.collection-checkbox-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  color: #d7e5f3;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.collection-checkbox-row + .collection-checkbox-row {
+  margin-top: 4px;
+}
+
+.collection-checkbox-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tags-row {
@@ -539,5 +579,9 @@ main {
     text-align: left;
     min-width: 0;
     padding: 0;
+  }
+
+  .collections-dropdown {
+    margin-left: 0;
   }
 }

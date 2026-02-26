@@ -897,6 +897,46 @@ browser.runtime.onMessage.addListener((message, sender) => {
         return { ok: true, state };
       }
 
+      case "set-item-collections": {
+        const appId = String(message.appId || "").trim();
+        if (!appId) {
+          throw new Error("appId is required.");
+        }
+        validateAppId(appId);
+
+        const selectedCollectionNames = Array.isArray(message.collectionNames)
+          ? message.collectionNames.map((name) => normalizeCollectionName(name)).filter(Boolean)
+          : [];
+        const selectedSet = new Set(selectedCollectionNames);
+
+        for (const collectionName of state.collectionOrder) {
+          const list = state.collections[collectionName] || [];
+          const hasItem = list.includes(appId);
+          const shouldHave = selectedSet.has(collectionName);
+          if (shouldHave && !hasItem) {
+            list.push(appId);
+          }
+          if (!shouldHave && hasItem) {
+            state.collections[collectionName] = list.filter((id) => id !== appId);
+          } else {
+            state.collections[collectionName] = list;
+          }
+        }
+
+        if (selectedCollectionNames.length > 0) {
+          const item = message.item || {};
+          state.items[appId] = {
+            appId,
+            title: String(item.title || state.items[appId]?.title || "").slice(0, 200)
+          };
+        } else {
+          cleanupOrphanItems(state);
+        }
+
+        await setState(state);
+        return { ok: true, state };
+      }
+
       case "create-collection": {
         ensureCollection(state, message.collectionName);
         await setState(state);

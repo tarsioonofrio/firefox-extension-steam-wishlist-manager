@@ -21,6 +21,8 @@
       releaseEl: fragment.querySelector(".release"),
       wishlistAddedEl: fragment.querySelector(".wishlist-added"),
       refreshItemBtn: fragment.querySelector(".refresh-item-btn"),
+      collectionsToggleBtn: fragment.querySelector(".collections-toggle-btn"),
+      collectionsDropdown: fragment.querySelector(".collections-dropdown"),
       removeBtn: fragment.querySelector(".remove-btn")
     };
   }
@@ -73,26 +75,83 @@
     }
 
     if (!card.removeBtn) {
-      return;
+      // keep going, remove button is optional
+    } else {
+      card.removeBtn.style.display = sourceMode === "wishlist" ? "none" : "";
+      card.removeBtn.addEventListener("click", async () => {
+        if (sourceMode === "wishlist") {
+          return;
+        }
+        if (!activeCollection || activeCollection === "__all__") {
+          setStatus("Select a specific collection to remove items.", true);
+          return;
+        }
+
+        const confirmed = confirmFn(`Remove AppID ${appId} from collection "${activeCollection}"?`);
+        if (!confirmed) {
+          return;
+        }
+
+        await onRemoveItem(appId, activeCollection);
+      });
     }
 
-    card.removeBtn.style.display = sourceMode === "wishlist" ? "none" : "";
-    card.removeBtn.addEventListener("click", async () => {
-      if (sourceMode === "wishlist") {
-        return;
-      }
-      if (!activeCollection || activeCollection === "__all__") {
-        setStatus("Select a specific collection to remove items.", true);
-        return;
-      }
+    const allCollectionNames = Array.isArray(options?.allCollectionNames) ? options.allCollectionNames : [];
+    const selectedCollectionNames = new Set(Array.isArray(options?.selectedCollectionNames) ? options.selectedCollectionNames : []);
+    const onSetCollections = options?.onSetCollections || (() => Promise.resolve());
 
-      const confirmed = confirmFn(`Remove AppID ${appId} from collection "${activeCollection}"?`);
-      if (!confirmed) {
-        return;
-      }
+    if (card.collectionsDropdown) {
+      card.collectionsDropdown.innerHTML = "";
+      if (allCollectionNames.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "collections-dropdown-empty";
+        empty.textContent = "No static collections yet.";
+        card.collectionsDropdown.appendChild(empty);
+      } else {
+        for (const collectionName of allCollectionNames) {
+          const row = document.createElement("label");
+          row.className = "collection-checkbox-row";
 
-      await onRemoveItem(appId, activeCollection);
-    });
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = selectedCollectionNames.has(collectionName);
+          checkbox.addEventListener("change", async () => {
+            if (checkbox.checked) {
+              selectedCollectionNames.add(collectionName);
+            } else {
+              selectedCollectionNames.delete(collectionName);
+            }
+            await onSetCollections(appId, Array.from(selectedCollectionNames));
+          });
+
+          const name = document.createElement("span");
+          name.className = "collection-checkbox-name";
+          name.textContent = collectionName;
+
+          row.appendChild(checkbox);
+          row.appendChild(name);
+          card.collectionsDropdown.appendChild(row);
+        }
+      }
+    }
+
+    if (card.collectionsToggleBtn && card.collectionsDropdown) {
+      card.collectionsToggleBtn.disabled = allCollectionNames.length === 0;
+      card.collectionsToggleBtn.addEventListener("click", () => {
+        card.collectionsDropdown.classList.toggle("hidden");
+      });
+      card.collectionsDropdown.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+      card.collectionsToggleBtn.addEventListener("blur", () => {
+        setTimeout(() => {
+          card.collectionsDropdown.classList.add("hidden");
+        }, 120);
+      });
+      if (allCollectionNames.length === 0) {
+        card.collectionsDropdown.classList.add("hidden");
+      }
+    }
   }
 
   function hydrateCardMeta(options) {

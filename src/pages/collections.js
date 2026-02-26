@@ -2071,6 +2071,17 @@ function renderPager(totalItems) {
   }
 }
 
+function getCollectionsContainingApp(appId) {
+  const out = [];
+  for (const collectionName of state?.collectionOrder || []) {
+    const list = state?.collections?.[collectionName] || [];
+    if (list.includes(appId)) {
+      out.push(collectionName);
+    }
+  }
+  return out;
+}
+
 async function renderCards() {
   const cardsEl = document.getElementById("cards");
   const emptyEl = document.getElementById("empty");
@@ -2134,9 +2145,25 @@ async function renderCards() {
       appId,
       sourceMode,
       activeCollection,
+      allCollectionNames: state?.collectionOrder || [],
+      selectedCollectionNames: getCollectionsContainingApp(appId),
       setStatus,
       confirmFn: (message) => window.confirm(message),
       onRefreshItem: (id) => refreshSingleItem(id),
+      onSetCollections: async (id, collectionNames) => {
+        await browser.runtime.sendMessage({
+          type: "set-item-collections",
+          appId: id,
+          collectionNames,
+          item: {
+            title: state?.items?.[id]?.title || metaCache?.[id]?.titleText || title
+          }
+        });
+        await refreshState();
+        quickPopulateFiltersFromCache();
+        refreshFilterOptionsInBackground();
+        await render();
+      },
       onRemoveItem: async (id, collectionName) => {
         await browser.runtime.sendMessage({
           type: "remove-item-from-collection",
