@@ -8,6 +8,7 @@ const MAX_COLLECTION_NAME_LENGTH = 64;
 const MAX_COLLECTIONS = 100;
 const MAX_ITEMS_PER_COLLECTION = 5000;
 const VALID_APP_ID_PATTERN = /^\d{1,10}$/;
+let backgroundWishlistDomSyncInFlight = false;
 
 const DEFAULT_STATE = {
   collectionOrder: [],
@@ -616,6 +617,196 @@ async function syncWishlistOrderCache(force = false) {
   return { ok: true, updated: orderedAppIds.length, cachedAt: now };
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function resolveSteamIdForWishlistSync(cached) {
+  let steamId = String(cached?.steamId || "").trim();
+  if (/^\d{10,20}$/.test(steamId)) {
+    return steamId;
+  }
+
+  try {
+    const userDataResponse = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
+      cache: "no-store",
+      credentials: "include"
+    });
+    if (userDataResponse.ok) {
+      const userData = await userDataResponse.json();
+      steamId = String(
+        userData?.steamid
+        || userData?.strSteamId
+        || userData?.str_steamid
+        || userData?.webapi_token_steamid
+        || ""
+      ).trim();
+      if (/^\d{10,20}$/.test(steamId)) {
+        return steamId;
+      }
+    }
+  } catch {
+    // fallback below
+  }
+
+  throw new Error("Could not resolve steamid for background wishlist sync.");
+}
+
+async function sendMessageToTabWithRetry(tabId, message, retries = 30, delayMs = 500) {
+  let lastError = null;
+  for (let i = 0; i < retries; i += 1) {
+    try {
+      return await browser.tabs.sendMessage(tabId, message);
+    } catch (error) {
+      lastError = error;
+      await wait(delayMs);
+    }
+  }
+  throw lastError || new Error("Could not send message to wishlist tab.");
+}
+
+async function waitForWishlistTabReady(tabId, timeoutMs = 90000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const tab = await browser.tabs.get(tabId);
+      const url = String(tab?.url || "");
+      const isWishlistUrl = /^https:\/\/store\.steampowered\.com\/wishlist\/profiles\/\d+\/?/.test(url);
+      const isComplete = String(tab?.status || "") === "complete";
+      if (isWishlistUrl && isComplete) {
+        return tab;
+      }
+    } catch {
+      // Keep polling until timeout.
+    }
+    await wait(500);
+  }
+  throw new Error("Wishlist tab did not finish loading in time.");
+}
+
+function extractWishlistAppIdsInTextOrder(rawText) {
+  const text = String(rawText || "");
+  const ids = [];
+  const seen = new Set();
+  const re = /"(\d+)"\s*:/g;
+  let match = null;
+  while ((match = re.exec(text)) !== null) {
+    const appId = String(match[1] || "").trim();
+    if (!appId || seen.has(appId)) {
+      continue;
+    }
+    seen.add(appId);
+    ids.push(appId);
+  }
+  return ids;
+}
+
+async function syncWishlistOrderViaPublicWishlistdata(steamId) {
+  const orderedAppIds = [];
+  const seen = new Set();
+  for (let pageIndex = 0; pageIndex < 200; pageIndex += 1) {
+    const response = await fetch(
+      `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
+      {
+        cache: "no-store",
+        credentials: "include"
+      }
+    );
+    if (!response.ok) {
+      break;
+    }
+    const raw = await response.text();
+    const idsInOrder = extractWishlistAppIdsInTextOrder(raw);
+    if (idsInOrder.length === 0) {
+      break;
+    }
+    for (const appId of idsInOrder) {
+      if (seen.has(appId)) {
+        continue;
+      }
+      seen.add(appId);
+      orderedAppIds.push(appId);
+    }
+  }
+
+  if (orderedAppIds.length === 0) {
+    throw new Error("Could not load wishlist order from public wishlistdata.");
+  }
+
+  const priorityMap = {};
+  for (let i = 0; i < orderedAppIds.length; i += 1) {
+    priorityMap[orderedAppIds[i]] = i;
+  }
+
+  const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+  const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+  const now = Date.now();
+  await browser.storage.local.set({
+    [WISHLIST_ADDED_CACHE_KEY]: {
+      ...cached,
+      orderedAppIds,
+      priorityMap,
+      priorityCachedAt: now,
+      priorityLastError: "",
+      steamId: String(steamId || cached.steamId || "")
+    }
+  });
+
+  return { ok: true, steamId, updated: orderedAppIds.length, cachedAt: now, mode: "wishlistdata-fallback" };
+}
+
+async function syncWishlistOrderViaBackgroundTab(force = false) {
+  if (backgroundWishlistDomSyncInFlight) {
+    throw new Error("Background wishlist sync already running.");
+  }
+  backgroundWishlistDomSyncInFlight = true;
+
+  let tabId = null;
+  try {
+    const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+    const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+    const steamId = await resolveSteamIdForWishlistSync(cached);
+    const wishlistUrl = `https://store.steampowered.com/wishlist/profiles/${steamId}/`;
+    const tab = await browser.tabs.create({
+      url: wishlistUrl,
+      active: false
+    });
+    tabId = Number(tab?.id || 0);
+    if (!Number.isFinite(tabId) || tabId <= 0) {
+      throw new Error("Failed to create background wishlist tab.");
+    }
+    await waitForWishlistTabReady(tabId, 90000);
+    await wait(1500);
+
+    try {
+      const result = await sendMessageToTabWithRetry(tabId, {
+        type: "sync-wishlist-order-from-dom",
+        steamId,
+        force: Boolean(force)
+      }, 180, 500);
+
+      if (!result?.ok) {
+        throw new Error(String(result?.error || "Background DOM sync failed."));
+      }
+
+      return {
+        ok: true,
+        steamId,
+        updated: Number(result.updated || 0),
+        cachedAt: Number(result.cachedAt || Date.now()),
+        mode: "dom"
+      };
+    } catch {
+      return syncWishlistOrderViaPublicWishlistdata(steamId);
+    }
+  } finally {
+    backgroundWishlistDomSyncInFlight = false;
+    if (tabId) {
+      browser.tabs.remove(tabId).catch(() => {});
+    }
+  }
+}
+
 browser.runtime.onMessage.addListener((message, sender) => {
   return (async () => {
     if (!message || typeof message !== "object") {
@@ -779,6 +970,22 @@ browser.runtime.onMessage.addListener((message, sender) => {
             }
           });
           return { ok: false, error: String(error?.message || error || "unknown sync error") };
+        }
+      }
+
+      case "sync-wishlist-order-via-background-tab": {
+        try {
+          return await syncWishlistOrderViaBackgroundTab(Boolean(message.force));
+        } catch (error) {
+          const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+          const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+          await browser.storage.local.set({
+            [WISHLIST_ADDED_CACHE_KEY]: {
+              ...cached,
+              priorityLastError: String(error?.message || error || "background wishlist sync failed")
+            }
+          });
+          return { ok: false, error: String(error?.message || error || "background wishlist sync failed") };
         }
       }
 

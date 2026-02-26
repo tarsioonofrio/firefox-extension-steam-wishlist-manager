@@ -1,10 +1,21 @@
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
-const PAGE_FETCH_REQ = "SWCM_PAGE_FETCH_ARRAYBUFFER";
-const PAGE_FETCH_RES = "SWCM_PAGE_FETCH_RESULT";
-let pageFetchSeq = 0;
-const pageFetchPending = new Map();
-let pageBridgeInstalled = false;
+let domOrderSyncInFlight = false;
+
+function withTimeout(promise, timeoutMs, label = "timeout") {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(label)), timeoutMs);
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
 
 function encodeVarint(value) {
   let n = 0n;
@@ -65,6 +76,28 @@ function fieldVarint(field, value) {
   ]);
 }
 
+function fieldFixed64(field, value) {
+  let n = 0n;
+  if (typeof value === "bigint") {
+    n = value;
+  } else if (typeof value === "string") {
+    n = BigInt(value || "0");
+  } else {
+    n = BigInt(Number(value || 0));
+  }
+  if (n < 0n) {
+    n = 0n;
+  }
+  const out = [];
+  for (let i = 0; i < 8; i += 1) {
+    out.push(Number((n >> BigInt(i * 8)) & 0xffn));
+  }
+  return Uint8Array.from([
+    ...encodeVarint((BigInt(field) << 3n) | 1n),
+    ...out
+  ]);
+}
+
 function fieldBytes(field, bytes) {
   return concatBytes([
     Uint8Array.from(encodeVarint((BigInt(field) << 3n) | 2n)),
@@ -83,126 +116,19 @@ function toBase64(bytes) {
   return btoa(binary);
 }
 
-function base64ToBytes(base64) {
-  const binary = atob(String(base64 || ""));
-  const out = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    out[i] = binary.charCodeAt(i);
-  }
-  return out;
-}
-
-function ensurePageFetchBridge() {
-  if (pageBridgeInstalled) {
-    return;
-  }
-  pageBridgeInstalled = true;
-
-  const script = document.createElement("script");
-  script.textContent = `
-    (() => {
-      if (window.__swcmPageFetchBridgeInstalled) return;
-      window.__swcmPageFetchBridgeInstalled = true;
-      window.addEventListener("message", async (event) => {
-        const data = event && event.data;
-        if (event.source !== window || !data || data.type !== "${PAGE_FETCH_REQ}") return;
-        const requestId = String(data.requestId || "");
-        const url = String(data.url || "");
-        try {
-          const response = await fetch(url, { cache: "no-store" });
-          const bytes = new Uint8Array(await response.arrayBuffer());
-          let binary = "";
-          const chunkSize = 0x8000;
-          for (let i = 0; i < bytes.length; i += chunkSize) {
-            const slice = bytes.subarray(i, i + chunkSize);
-            binary += String.fromCharCode(...slice);
-          }
-          window.postMessage({
-            type: "${PAGE_FETCH_RES}",
-            requestId,
-            ok: true,
-            status: response.status,
-            bodyBase64: btoa(binary)
-          }, "*");
-        } catch (error) {
-          window.postMessage({
-            type: "${PAGE_FETCH_RES}",
-            requestId,
-            ok: false,
-            error: String(error && error.message ? error.message : error)
-          }, "*");
-        }
-      });
-    })();
-  `;
-  document.documentElement.appendChild(script);
-  script.remove();
-
-  window.addEventListener("message", (event) => {
-    const data = event && event.data;
-    if (event.source !== window || !data || data.type !== PAGE_FETCH_RES) {
-      return;
-    }
-    const requestId = String(data.requestId || "");
-    const pending = pageFetchPending.get(requestId);
-    if (!pending) {
-      return;
-    }
-    pageFetchPending.delete(requestId);
-    if (!data.ok) {
-      pending.reject(new Error(String(data.error || "page fetch failed")));
-      return;
-    }
-    pending.resolve({
-      status: Number(data.status || 0),
-      bytes: base64ToBytes(String(data.bodyBase64 || ""))
-    });
-  });
-}
-
-function pageFetchBytes(url, timeoutMs = 20000) {
-  ensurePageFetchBridge();
-  const requestId = `req-${Date.now()}-${pageFetchSeq += 1}`;
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pageFetchPending.delete(requestId);
-      reject(new Error("page fetch timeout"));
-    }, timeoutMs);
-    pageFetchPending.set(requestId, {
-      resolve: (result) => {
-        clearTimeout(timer);
-        resolve(result);
-      },
-      reject: (error) => {
-        clearTimeout(timer);
-        reject(error);
-      }
-    });
-    window.postMessage({
-      type: PAGE_FETCH_REQ,
-      requestId,
-      url: String(url || "")
-    }, "*");
-  });
-}
-
 async function pageWorldFetchBytes(url) {
-  const pageWindow = window.wrappedJSObject;
-  if (!pageWindow || typeof pageWindow.fetch !== "function") {
-    return pageFetchBytes(url);
-  }
-
-  try {
-    const response = await pageWindow.fetch(String(url || ""), { cache: "no-store" });
-    const status = Number(response?.status || 0);
-    const buffer = await response.arrayBuffer();
-    return {
-      status,
-      bytes: new Uint8Array(buffer)
-    };
-  } catch {
-    return pageFetchBytes(url);
-  }
+  const targetUrl = String(url || "");
+  const response = await withTimeout(fetch(targetUrl, {
+    cache: "no-store",
+    mode: "cors",
+    credentials: "omit"
+  }), 20000, "content fetch timeout");
+  const status = Number(response?.status || 0);
+  const buffer = await withTimeout(response.arrayBuffer(), 20000, "content arrayBuffer timeout");
+  return {
+    status,
+    bytes: new Uint8Array(buffer)
+  };
 }
 
 function decodeWishlistSortedFilteredItem(bytes) {
@@ -337,7 +263,7 @@ function buildWishlistSortedFilteredRequest({ steamId, startIndex = 0, pageSize 
   ]);
 
   return concatBytes([
-    fieldVarint(1, steamId),
+    fieldFixed64(1, steamId),
     fieldBytes(2, context),
     fieldBytes(3, dataRequest),
     fieldBytes(5, filters),
@@ -347,9 +273,9 @@ function buildWishlistSortedFilteredRequest({ steamId, startIndex = 0, pageSize 
 }
 
 async function getCurrentWishlistContext() {
-  const response = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
+  const response = await withTimeout(fetch("https://store.steampowered.com/dynamicstore/userdata/", {
     cache: "no-store"
-  });
+  }), 12000, "userdata fetch timeout");
   if (!response.ok) {
     return { steamId: "", wishlistIds: [] };
   }
@@ -430,32 +356,42 @@ async function syncWishlistOrderCache() {
     const now = Date.now();
     const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
     const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+    const last = Number(cached.priorityCachedAt || 0);
+    if (now - last < ORDER_SYNC_INTERVAL_MS) {
+      return;
+    }
     await browser.storage.local.set({
       [WISHLIST_ADDED_CACHE_KEY]: {
         ...cached,
         priorityLastError: "content-sync-started"
       }
     });
-    const last = Number(cached.priorityCachedAt || 0);
-    if (now - last < ORDER_SYNC_INTERVAL_MS) {
-      return;
-    }
 
     const context = await getCurrentWishlistContext();
-    const steamId = String(context.steamId || "").trim();
+    const pathSteamIdMatch = window.location.pathname.match(/\/wishlist\/profiles\/(\d{10,20})/);
+    const steamId = String(context.steamId || pathSteamIdMatch?.[1] || "").trim();
     const wishlistNowSet = new Set(context.wishlistIds || []);
     if (!steamId) {
-      return;
-    }
-
-    const { orderedAppIds, priorityMap } = await fetchWishlistOrderFromService(steamId, wishlistNowSet);
-    if (!Array.isArray(orderedAppIds) || orderedAppIds.length === 0) {
-      return;
+      throw new Error("Could not resolve steamid in wishlist content sync.");
     }
 
     await browser.storage.local.set({
       [WISHLIST_ADDED_CACHE_KEY]: {
         ...cached,
+        priorityLastError: "content-sync-fetching-order"
+      }
+    });
+
+    const { orderedAppIds, priorityMap } = await fetchWishlistOrderFromService(steamId, wishlistNowSet);
+    if (!Array.isArray(orderedAppIds) || orderedAppIds.length === 0) {
+      throw new Error("Wishlist order service returned empty ordering.");
+    }
+
+    const storedLatest = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+    const cachedLatest = storedLatest[WISHLIST_ADDED_CACHE_KEY] || {};
+    await browser.storage.local.set({
+      [WISHLIST_ADDED_CACHE_KEY]: {
+        ...cachedLatest,
         orderedAppIds,
         priorityMap,
         priorityCachedAt: now,
@@ -474,6 +410,204 @@ async function syncWishlistOrderCache() {
     });
   }
 }
+
+function extractWishlistRowsOrderFromDom() {
+  const ids = [];
+  const seen = new Set();
+  const rows = document.querySelectorAll(".wishlist_row, [id^='game_'], [data-app-id]");
+  for (const row of rows) {
+    const idText = String(row?.id || "");
+    const dataAppId = String(row?.getAttribute?.("data-app-id") || "").trim();
+    const match = idText.match(/game_(\d+)/);
+    const appId = String(match?.[1] || dataAppId || "").trim();
+    if (!appId || seen.has(appId)) {
+      continue;
+    }
+    seen.add(appId);
+    ids.push(appId);
+  }
+  return ids;
+}
+
+async function fetchWishlistIdsInPublicOrder(steamId) {
+  const ordered = [];
+  const seen = new Set();
+  if (!/^\d{10,20}$/.test(String(steamId || ""))) {
+    return ordered;
+  }
+
+  for (let pageIndex = 0; pageIndex < 200; pageIndex += 1) {
+    const response = await withTimeout(fetch(
+      `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${pageIndex}`,
+      {
+        cache: "no-store",
+        credentials: "include"
+      }
+    ), 12000, "wishlistdata fetch timeout");
+    if (!response.ok) {
+      break;
+    }
+    const raw = await withTimeout(response.text(), 12000, "wishlistdata text timeout");
+    const idsInOrder = [];
+    const localSeen = new Set();
+    const re = /"(\d+)"\s*:/g;
+    let match = null;
+    while ((match = re.exec(raw)) !== null) {
+      const appId = String(match[1] || "").trim();
+      if (!appId || localSeen.has(appId)) {
+        continue;
+      }
+      localSeen.add(appId);
+      idsInOrder.push(appId);
+    }
+    if (idsInOrder.length === 0) {
+      break;
+    }
+    for (const appId of idsInOrder) {
+      if (seen.has(appId)) {
+        continue;
+      }
+      seen.add(appId);
+      ordered.push(appId);
+    }
+  }
+
+  return ordered;
+}
+
+function clickWishlistLoadMoreIfVisible() {
+  const btn = document.querySelector("#wishlist_ctn .btnv6_blue_hoverfade, #wishlist_bottom .btnv6_blue_hoverfade, .wishlist_load_more_button");
+  if (!btn) {
+    return false;
+  }
+  const hidden = btn.classList.contains("btn_disabled") || btn.getAttribute("style")?.includes("display: none");
+  if (hidden) {
+    return false;
+  }
+  btn.click();
+  return true;
+}
+
+async function syncWishlistOrderFromDom(steamIdHint = "") {
+  if (!window.location.pathname.startsWith("/wishlist")) {
+    return { ok: false, error: "Not on wishlist page." };
+  }
+  if (domOrderSyncInFlight) {
+    return { ok: false, error: "DOM wishlist sync already running." };
+  }
+
+  domOrderSyncInFlight = true;
+  try {
+    const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+    const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+    await browser.storage.local.set({
+      [WISHLIST_ADDED_CACHE_KEY]: {
+        ...cached,
+        priorityLastError: "content-dom-sync-started"
+      }
+    });
+
+    for (let i = 0; i < 80; i += 1) {
+      if (document.querySelector(".wishlist_row, [id^='game_'], [data-app-id]")) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    window.scrollTo({ top: 0, behavior: "auto" });
+    let lastCount = 0;
+    let stableRounds = 0;
+    let rounds = 0;
+    let sameHeightRounds = 0;
+    let lastHeight = 0;
+    while (rounds < 600) {
+      rounds += 1;
+      clickWishlistLoadMoreIfVisible();
+      const scroller = document.scrollingElement || document.documentElement || document.body;
+      const step = Math.max(500, Math.floor(window.innerHeight * 0.8));
+      const nextTop = Math.min(scroller.scrollTop + step, scroller.scrollHeight);
+      window.scrollTo({ top: nextTop, behavior: "auto" });
+      await withTimeout(new Promise((resolve) => setTimeout(resolve, 450)), 2000, "dom sync wait timeout");
+
+      const currentIds = extractWishlistRowsOrderFromDom();
+      if (currentIds.length === lastCount) {
+        stableRounds += 1;
+      } else {
+        stableRounds = 0;
+        lastCount = currentIds.length;
+      }
+
+      const currentHeight = Math.max(
+        Number(document.body?.scrollHeight || 0),
+        Number(document.documentElement?.scrollHeight || 0)
+      );
+      if (currentHeight === lastHeight) {
+        sameHeightRounds += 1;
+      } else {
+        sameHeightRounds = 0;
+        lastHeight = currentHeight;
+      }
+
+      const nearBottom = (scroller.scrollTop + window.innerHeight) >= (scroller.scrollHeight - 200);
+      if (stableRounds >= 24 && sameHeightRounds >= 16 && nearBottom) {
+        break;
+      }
+    }
+
+    const pathSteamIdMatch = window.location.pathname.match(/\/wishlist\/profiles\/(\d{10,20})/);
+    const steamId = String(steamIdHint || pathSteamIdMatch?.[1] || cached.steamId || "").trim();
+    let orderedAppIds = extractWishlistRowsOrderFromDom();
+    if (!Array.isArray(orderedAppIds) || orderedAppIds.length === 0) {
+      orderedAppIds = await fetchWishlistIdsInPublicOrder(steamId);
+    }
+    if (!Array.isArray(orderedAppIds) || orderedAppIds.length === 0) {
+      throw new Error("Could not read wishlist rows from DOM.");
+    }
+
+    const priorityMap = {};
+    for (let i = 0; i < orderedAppIds.length; i += 1) {
+      priorityMap[orderedAppIds[i]] = i;
+    }
+
+    const now = Date.now();
+    const storedLatest = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+    const cachedLatest = storedLatest[WISHLIST_ADDED_CACHE_KEY] || {};
+    await browser.storage.local.set({
+      [WISHLIST_ADDED_CACHE_KEY]: {
+        ...cachedLatest,
+        orderedAppIds,
+        priorityMap,
+        priorityCachedAt: now,
+        priorityLastError: "",
+        steamId
+      }
+    });
+
+    return { ok: true, updated: orderedAppIds.length, cachedAt: now };
+  } catch (error) {
+    const storedOnError = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+    const cachedOnError = storedOnError[WISHLIST_ADDED_CACHE_KEY] || {};
+    await browser.storage.local.set({
+      [WISHLIST_ADDED_CACHE_KEY]: {
+        ...cachedOnError,
+        priorityLastError: String(error?.message || error || "wishlist dom sync failed")
+      }
+    });
+    return { ok: false, error: String(error?.message || error || "wishlist dom sync failed") };
+  } finally {
+    domOrderSyncInFlight = false;
+  }
+}
+
+browser.runtime.onMessage.addListener((message) => {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+  if (message.type === "sync-wishlist-order-from-dom") {
+    return syncWishlistOrderFromDom(String(message.steamId || ""));
+  }
+  return undefined;
+});
 
 if (window.location.pathname.startsWith("/wishlist")) {
   const profileMatch = window.location.pathname.match(/\/wishlist\/profiles\/(\d{10,20})/);
