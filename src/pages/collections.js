@@ -2328,69 +2328,94 @@ function toggleCollectionMenu(forceOpen = null) {
   }
 }
 
-function attachEvents() {
+function clearFilterSearchInputs() {
+  const ids = [
+    "languages-search-input",
+    "full-audio-languages-search-input",
+    "subtitle-languages-search-input",
+    "technologies-search-input",
+    "developers-search-input",
+    "publishers-search-input"
+  ];
+  for (const id of ids) {
+    const input = document.getElementById(id);
+    if (input) {
+      input.value = "";
+    }
+  }
+}
+
+function resetAllFiltersState() {
+  selectedTags.clear();
+  selectedTypes.clear();
+  selectedPlayers.clear();
+  selectedFeatures.clear();
+  selectedHardware.clear();
+  selectedAccessibility.clear();
+  selectedPlatforms.clear();
+  selectedLanguages.clear();
+  selectedFullAudioLanguages.clear();
+  selectedSubtitleLanguages.clear();
+  selectedTechnologies.clear();
+  selectedDevelopers.clear();
+  selectedPublishers.clear();
+  selectedReleaseYears.clear();
+  languageSearchQuery = "";
+  fullAudioLanguageSearchQuery = "";
+  subtitleLanguageSearchQuery = "";
+  technologySearchQuery = "";
+  developerSearchQuery = "";
+  publisherSearchQuery = "";
+  tagSearchQuery = "";
+  tagShowLimit = TAG_SHOW_STEP;
+  clearFilterSearchInputs();
+}
+
+async function handleCollectionChange(value) {
+  sourceMode = value === WISHLIST_SELECT_VALUE ? "wishlist" : "collections";
+  activeCollection = sourceMode === "wishlist" ? "__all__" : value;
+  page = 1;
+
+  if (sourceMode !== "wishlist") {
+    await browser.runtime.sendMessage({
+      type: "set-active-collection",
+      activeCollection
+    });
+  }
+
+  resetAllFiltersState();
+  quickPopulateFiltersFromCache();
+  refreshFilterOptionsInBackground();
+  await render();
+}
+
+async function handleSortChange(value) {
+  const allowed = new Set([
+    "position",
+    "title",
+    "price",
+    "discount",
+    "date-added",
+    "top-selling",
+    "release-date",
+    "review-score"
+  ]);
+  const nextSort = allowed.has(value) ? value : "title";
+  if (sourceMode === "wishlist" && nextSort === "position" && !isWishlistRankReady()) {
+    sortMode = "position";
+    setStatus("Your rank is still syncing; temporarily showing Title order.");
+  } else {
+    sortMode = nextSort;
+  }
+  page = 1;
+  renderSortMenu();
+  await render();
+}
+
+function bindCollectionControls() {
   document.getElementById("collection-select")?.addEventListener("change", async (event) => {
     const value = event.target.value || "__all__";
-    sourceMode = value === WISHLIST_SELECT_VALUE ? "wishlist" : "collections";
-    activeCollection = sourceMode === "wishlist" ? "__all__" : value;
-    page = 1;
-
-    if (sourceMode !== "wishlist") {
-      await browser.runtime.sendMessage({
-        type: "set-active-collection",
-        activeCollection
-      });
-    }
-
-    selectedTags.clear();
-    selectedTypes.clear();
-    selectedPlayers.clear();
-    selectedFeatures.clear();
-    selectedHardware.clear();
-    selectedAccessibility.clear();
-    selectedPlatforms.clear();
-    selectedLanguages.clear();
-    selectedFullAudioLanguages.clear();
-    selectedSubtitleLanguages.clear();
-    selectedTechnologies.clear();
-    selectedDevelopers.clear();
-    selectedPublishers.clear();
-    selectedReleaseYears.clear();
-    languageSearchQuery = "";
-    fullAudioLanguageSearchQuery = "";
-    subtitleLanguageSearchQuery = "";
-    technologySearchQuery = "";
-    developerSearchQuery = "";
-    publisherSearchQuery = "";
-    tagSearchQuery = "";
-    tagShowLimit = TAG_SHOW_STEP;
-    const languagesSearchInput = document.getElementById("languages-search-input");
-    const fullAudioSearchInput = document.getElementById("full-audio-languages-search-input");
-    const subtitleSearchInput = document.getElementById("subtitle-languages-search-input");
-    const technologiesSearchInput = document.getElementById("technologies-search-input");
-    const developersSearchInput = document.getElementById("developers-search-input");
-    const publishersSearchInput = document.getElementById("publishers-search-input");
-    if (languagesSearchInput) {
-      languagesSearchInput.value = "";
-    }
-    if (fullAudioSearchInput) {
-      fullAudioSearchInput.value = "";
-    }
-    if (subtitleSearchInput) {
-      subtitleSearchInput.value = "";
-    }
-    if (technologiesSearchInput) {
-      technologiesSearchInput.value = "";
-    }
-    if (developersSearchInput) {
-      developersSearchInput.value = "";
-    }
-    if (publishersSearchInput) {
-      publishersSearchInput.value = "";
-    }
-    quickPopulateFiltersFromCache();
-    refreshFilterOptionsInBackground();
-    await render();
+    await handleCollectionChange(value);
   });
 
   document.getElementById("collection-select-btn")?.addEventListener("click", (event) => {
@@ -2418,34 +2443,11 @@ function attachEvents() {
     select.dispatchEvent(new Event("change", { bubbles: true }));
     toggleCollectionSelectMenu(false);
   });
+}
 
-  document.getElementById("search-input")?.addEventListener("input", async (event) => {
-    searchQuery = String(event.target.value || "");
-    page = 1;
-    await render();
-  });
-
+function bindSortControls() {
   document.getElementById("sort-select")?.addEventListener("change", async (event) => {
-    const allowed = new Set([
-      "position",
-      "title",
-      "price",
-      "discount",
-      "date-added",
-      "top-selling",
-      "release-date",
-      "review-score"
-    ]);
-    const nextSort = allowed.has(event.target.value) ? event.target.value : "title";
-    if (sourceMode === "wishlist" && nextSort === "position" && !isWishlistRankReady()) {
-      sortMode = "position";
-      setStatus("Your rank is still syncing; temporarily showing Title order.");
-    } else {
-      sortMode = nextSort;
-    }
-    page = 1;
-    renderSortMenu();
-    await render();
+    await handleSortChange(event.target.value);
   });
 
   document.getElementById("sort-menu-btn")?.addEventListener("click", (event) => {
@@ -2466,17 +2468,16 @@ function attachEvents() {
     }
     const value = String(btn.dataset.value || "");
     const select = document.getElementById("sort-select");
-    if (!select || !value) {
-      return;
-    }
-    if (btn.disabled) {
+    if (!select || !value || btn.disabled) {
       return;
     }
     select.value = value;
     select.dispatchEvent(new Event("change", { bubbles: true }));
     toggleSortMenu(false);
   });
+}
 
+function bindCollectionMenuControls() {
   document.getElementById("collection-menu-btn")?.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleCollectionSelectMenu(false);
@@ -2522,6 +2523,14 @@ function attachEvents() {
     const value = String(select?.value || "");
     deleteCollectionByName(value).catch(() => setStatus("Failed to delete collection.", true));
   });
+}
+
+function bindSearchAndPagingControls() {
+  document.getElementById("search-input")?.addEventListener("input", async (event) => {
+    searchQuery = String(event.target.value || "");
+    page = 1;
+    await render();
+  });
 
   document.getElementById("prev-page-btn")?.addEventListener("click", async () => {
     page = Math.max(1, page - 1);
@@ -2532,7 +2541,9 @@ function attachEvents() {
     page += 1;
     await renderCards();
   });
+}
 
+function bindFilterControls() {
   document.getElementById("tag-search-input")?.addEventListener("input", (event) => {
     tagSearchQuery = String(event.target.value || "").trim();
     tagShowLimit = TAG_SHOW_STEP;
@@ -2631,7 +2642,9 @@ function attachEvents() {
     page = 1;
     await renderCards();
   });
+}
 
+function bindGlobalPanelClose() {
   document.addEventListener("click", (event) => {
     const panel = document.getElementById("collection-menu-panel");
     const btn = document.getElementById("collection-menu-btn");
@@ -2658,6 +2671,15 @@ function attachEvents() {
       }
     }
   });
+}
+
+function attachEvents() {
+  bindCollectionControls();
+  bindSortControls();
+  bindCollectionMenuControls();
+  bindSearchAndPagingControls();
+  bindFilterControls();
+  bindGlobalPanelClose();
 }
 
 async function bootstrap() {
