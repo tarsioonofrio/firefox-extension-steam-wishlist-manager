@@ -7,9 +7,13 @@
     "dev": "web-ext run --source-dir . --target=firefox-desktop",
     "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts",
     "check:manifest": "node -e \"JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')\"",
-    "test:logic": "node tests/module-smoke.mjs"
+    "test:logic": "node tests/module-smoke.mjs",
+    "test:ui": "node tests/ui-smoke.mjs",
+    "test:e2e": "node tests/e2e-smoke.mjs",
+    "test": "npm run test:logic && npm run test:ui && npm run test:e2e"
   },
   "devDependencies": {
+    "jsdom": "^28.1.0",
     "web-ext": "^8.9.0"
   }
 }
