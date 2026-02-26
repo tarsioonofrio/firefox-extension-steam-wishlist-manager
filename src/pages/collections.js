@@ -11,6 +11,7 @@ const sortUtils = window.SWMWishlistSort || null;
 const parserUtils = window.SWMMetaParsers || null;
 const filtersUtils = window.SWMCollectionsFilters || null;
 const uiControlsUtils = window.SWMCollectionsUiControls || null;
+const panelsUtils = window.SWMCollectionsPanels || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -2144,6 +2145,10 @@ function renderSortMenu() {
 }
 
 function toggleSortMenu(forceOpen = null) {
+  if (panelsUtils?.togglePanel) {
+    panelsUtils.togglePanel("sort-menu-panel", forceOpen);
+    return;
+  }
   const panel = document.getElementById("sort-menu-panel");
   if (!panel) {
     return;
@@ -2153,6 +2158,10 @@ function toggleSortMenu(forceOpen = null) {
 }
 
 function toggleCollectionSelectMenu(forceOpen = null) {
+  if (panelsUtils?.togglePanel) {
+    panelsUtils.togglePanel("collection-select-panel", forceOpen);
+    return;
+  }
   const panel = document.getElementById("collection-select-panel");
   if (!panel) {
     return;
@@ -2168,6 +2177,10 @@ function hideCollectionMenuForms() {
 }
 
 function toggleCollectionMenu(forceOpen = null) {
+  if (panelsUtils?.toggleCollectionMenu) {
+    panelsUtils.toggleCollectionMenu(forceOpen, { onClose: hideCollectionMenuForms });
+    return;
+  }
   const panel = document.getElementById("collection-menu-panel");
   if (!panel) {
     return;
@@ -2492,6 +2505,27 @@ function bindFilterControls() {
 }
 
 function bindGlobalPanelClose() {
+  if (panelsUtils?.bindOutsidePanelClose) {
+    panelsUtils.bindOutsidePanelClose([
+      {
+        panelId: "collection-menu-panel",
+        buttonId: "collection-menu-btn",
+        onClose: () => toggleCollectionMenu(false)
+      },
+      {
+        panelId: "sort-menu-panel",
+        buttonId: "sort-menu-btn",
+        onClose: () => toggleSortMenu(false)
+      },
+      {
+        panelId: "collection-select-panel",
+        buttonId: "collection-select-btn",
+        onClose: () => toggleCollectionSelectMenu(false)
+      }
+    ]);
+    return;
+  }
+
   document.addEventListener("click", (event) => {
     const panel = document.getElementById("collection-menu-panel");
     const btn = document.getElementById("collection-menu-btn");
