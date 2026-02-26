@@ -31,13 +31,21 @@
           <option value="release-date">Release Date</option>
           <option value="review-score">Review Score</option>
         </select>
-        <button id="refresh-page-btn" type="button" class="header-btn">Refresh Page Data</button>
+        <button id="view-menu-btn" type="button">View</button>
+        <select id="view-select" class="native-select-hidden">
+          <option value="card">Card</option>
+          <option value="line">Line</option>
+        </select>
+        <button id="refresh-page-btn" type="button" class="header-btn">Refresh</button>
       </div>
       <div id="collection-select-panel" class="collection-menu-panel hidden">
         <div id="collection-select-options" class="menu-actions"></div>
       </div>
       <div id="sort-menu-panel" class="collection-menu-panel hidden">
         <div id="sort-menu-options" class="menu-actions"></div>
+      </div>
+      <div id="view-menu-panel" class="collection-menu-panel hidden">
+        <div id="view-menu-options" class="menu-actions"></div>
       </div>
       <div id="collection-menu-panel" class="collection-menu-panel hidden">
         <div class="menu-actions">

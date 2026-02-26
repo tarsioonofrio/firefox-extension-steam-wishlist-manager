@@ -56,6 +56,7 @@ let sourceMode = "collections";
 let page = 1;
 let searchQuery = "";
 let sortMode = "position";
+let viewMode = "card";
 
 let metaCache = {};
 let wishlistAddedMap = {};
@@ -2074,6 +2075,118 @@ function renderPager(totalItems) {
   }
 }
 
+function createLineRow(options) {
+  const appId = String(options?.appId || "");
+  const title = String(options?.title || `App ${appId}`);
+  const link = String(options?.link || "#");
+  const reorderEnabled = Boolean(options?.reorderEnabled);
+  const itemPosition = Number(options?.itemPosition || 0);
+  const totalItems = Number(options?.totalItems || 0);
+  const batchModeEnabled = Boolean(options?.batchMode);
+  const selectedInBatch = Boolean(options?.selectedInBatch);
+  const onBatchSelectionChange = options?.onBatchSelectionChange || (() => {});
+  const onMoveUp = options?.onMoveUp || (() => Promise.resolve());
+  const onMoveDown = options?.onMoveDown || (() => Promise.resolve());
+  const onMoveToPosition = options?.onMoveToPosition || (() => Promise.resolve());
+  const setStatus = options?.setStatus || (() => {});
+
+  const row = document.createElement("article");
+  row.className = "line-row";
+  if (batchModeEnabled) {
+    row.classList.add("line-row-batch");
+  }
+
+  const batchWrap = document.createElement("div");
+  batchWrap.className = "line-batch";
+  const batchCheckbox = document.createElement("input");
+  batchCheckbox.type = "checkbox";
+  batchCheckbox.className = "line-batch-checkbox";
+  batchCheckbox.checked = selectedInBatch;
+  batchCheckbox.style.display = batchModeEnabled ? "" : "none";
+  batchCheckbox.addEventListener("change", () => {
+    onBatchSelectionChange(appId, batchCheckbox.checked);
+  });
+  batchWrap.appendChild(batchCheckbox);
+
+  const left = document.createElement("div");
+  left.className = "line-left";
+
+  const upBtn = document.createElement("button");
+  upBtn.type = "button";
+  upBtn.className = "line-btn";
+  upBtn.textContent = "▲";
+  upBtn.disabled = !reorderEnabled || itemPosition <= 1;
+  upBtn.addEventListener("click", () => onMoveUp(appId).catch(() => setStatus("Failed to move item up.", true)));
+
+  const downBtn = document.createElement("button");
+  downBtn.type = "button";
+  downBtn.className = "line-btn";
+  downBtn.textContent = "▼";
+  downBtn.disabled = !reorderEnabled || itemPosition <= 0 || itemPosition >= totalItems;
+  downBtn.addEventListener("click", () => onMoveDown(appId).catch(() => setStatus("Failed to move item down.", true)));
+
+  const posInput = document.createElement("input");
+  posInput.type = "number";
+  posInput.min = "1";
+  posInput.step = "1";
+  posInput.className = "line-pos-input";
+  posInput.value = itemPosition > 0 ? String(itemPosition) : "";
+  posInput.disabled = !reorderEnabled;
+
+  const goBtn = document.createElement("button");
+  goBtn.type = "button";
+  goBtn.className = "line-btn";
+  goBtn.textContent = "Go";
+  goBtn.disabled = !reorderEnabled;
+  goBtn.addEventListener("click", () => {
+    const target = Number(posInput.value || 0);
+    onMoveToPosition(appId, target).catch(() => setStatus("Failed to move item to position.", true));
+  });
+
+  left.appendChild(upBtn);
+  left.appendChild(downBtn);
+  left.appendChild(posInput);
+  left.appendChild(goBtn);
+
+  const center = document.createElement("div");
+  center.className = "line-center";
+  const titleEl = document.createElement("a");
+  titleEl.className = "line-title";
+  titleEl.href = link;
+  titleEl.target = "_blank";
+  titleEl.rel = "noopener noreferrer";
+  titleEl.textContent = title;
+  const reviewEl = document.createElement("span");
+  reviewEl.className = "line-review";
+  reviewEl.textContent = "-";
+  center.appendChild(titleEl);
+  center.appendChild(reviewEl);
+
+  const right = document.createElement("div");
+  right.className = "line-right";
+  const priceEl = document.createElement("span");
+  priceEl.className = "line-price";
+  priceEl.textContent = "-";
+  const discountEl = document.createElement("span");
+  discountEl.className = "line-discount";
+  discountEl.textContent = "-";
+  right.appendChild(priceEl);
+  right.appendChild(discountEl);
+
+  row.appendChild(batchWrap);
+  row.appendChild(left);
+  row.appendChild(center);
+  row.appendChild(right);
+
+  return {
+    row,
+    titleEl,
+    reviewEl,
+    priceEl,
+    discountEl
+  };
+}
+
 function renderBatchMenuState() {
   const btn = document.getElementById("batch-menu-btn");
   const collectionSelect = document.getElementById("batch-collection-select");
@@ -2285,7 +2398,48 @@ async function renderCards() {
 
   cardsEl.innerHTML = "";
   cardsEl.classList.toggle("batch-mode", batchMode);
+  cardsEl.classList.toggle("line-mode", viewMode === "line");
   emptyEl.classList.toggle("hidden", pageIds.length > 0);
+
+  if (viewMode === "line") {
+    for (const appId of pageIds) {
+      const title = state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || `App ${appId}`;
+      const line = createLineRow({
+        appId,
+        title,
+        link: getAppLink(appId),
+        reorderEnabled: manualReorderEnabled,
+        itemPosition: Number(orderIndex.get(appId) || 0),
+        totalItems: activeOrder.length,
+        batchMode,
+        selectedInBatch: batchSelectedIds.has(appId),
+        onBatchSelectionChange: (id, checked) => {
+          if (checked) {
+            batchSelectedIds.add(id);
+          } else {
+            batchSelectedIds.delete(id);
+          }
+          renderBatchMenuState();
+        },
+        onMoveUp: (id) => moveCollectionItemByDelta(id, -1),
+        onMoveDown: (id) => moveCollectionItemByDelta(id, 1),
+        onMoveToPosition: (id, position) => moveCollectionItemToPosition(id, position),
+        setStatus
+      });
+      cardsEl.appendChild(line.row);
+
+      fetchAppMeta(appId).then((meta) => {
+        if (line.titleEl && !state?.items?.[appId]?.title && meta.titleText) {
+          line.titleEl.textContent = meta.titleText;
+        }
+        const pct = Number(meta?.reviewPositivePct);
+        line.reviewEl.textContent = Number.isFinite(pct) && pct >= 0 ? `${pct}%` : "-";
+        line.priceEl.textContent = meta?.priceText || "-";
+        line.discountEl.textContent = meta?.discountText || "-";
+      }).catch(() => {});
+    }
+    return;
+  }
 
   for (const appId of pageIds) {
     const hasStateTitle = Boolean(state?.items?.[appId]?.title);
@@ -2434,14 +2588,19 @@ async function deleteCollectionByName(rawName) {
 
 async function render() {
   const sortSelect = document.getElementById("sort-select");
+  const viewSelect = document.getElementById("view-select");
   const renameActionBtn = document.getElementById("menu-action-rename");
   const deleteActionBtn = document.getElementById("menu-action-delete");
   const deleteSelect = document.getElementById("delete-collection-select");
   if (sortSelect) {
     sortSelect.value = sortMode;
   }
+  if (viewSelect) {
+    viewSelect.value = viewMode;
+  }
 
   renderSortMenu();
+  renderViewMenu();
   renderCollectionSelect();
   renderBatchMenuState();
   const canRenameCurrent = sourceMode !== "wishlist" && activeCollection !== "__all__";
@@ -2474,12 +2633,20 @@ function renderSortMenu() {
   uiControlsUtils.renderSortMenu({ fallbackLabel: "Release Date" });
 }
 
+function renderViewMenu() {
+  uiControlsUtils.renderViewMenu();
+}
+
 function toggleSortMenu(forceOpen = null) {
   panelsUtils.togglePanel("sort-menu-panel", forceOpen);
 }
 
 function toggleCollectionSelectMenu(forceOpen = null) {
   panelsUtils.togglePanel("collection-select-panel", forceOpen);
+}
+
+function toggleViewMenu(forceOpen = null) {
+  panelsUtils.togglePanel("view-menu-panel", forceOpen);
 }
 
 function hideCollectionMenuForms() {
@@ -2590,6 +2757,25 @@ function bindSortControls() {
   });
 }
 
+function bindViewControls() {
+  selectionBindingsUtils.bindViewControls({
+    onViewChange: async (value) => {
+      const candidate = String(value || "card");
+      viewMode = candidate === "line" ? "line" : "card";
+      page = 1;
+      renderViewMenu();
+      await render();
+    },
+    closeMenusBeforeOpenView: () => {
+      toggleCollectionMenu(false);
+      toggleCollectionSelectMenu(false);
+      toggleSortMenu(false);
+    },
+    toggleViewMenu: () => toggleViewMenu(),
+    closeViewMenu: () => toggleViewMenu(false)
+  });
+}
+
 function bindCollectionMenuControls() {
   menuBindingsUtils.bindCollectionMenuControls({
     hideForms: hideCollectionMenuForms,
@@ -2624,6 +2810,7 @@ function bindBatchControls() {
     toggleCollectionMenu(false);
     toggleCollectionSelectMenu(false);
     toggleSortMenu(false);
+    toggleViewMenu(false);
     toggleBatchMode(true);
     panelsUtils.togglePanel("batch-menu-panel");
     addForm?.classList.add("hidden");
@@ -2751,6 +2938,11 @@ function bindGlobalPanelClose() {
       onClose: () => toggleSortMenu(false)
     },
     {
+      panelId: "view-menu-panel",
+      buttonId: "view-menu-btn",
+      onClose: () => toggleViewMenu(false)
+    },
+    {
       panelId: "collection-select-panel",
       buttonId: "collection-select-btn",
       onClose: () => toggleCollectionSelectMenu(false)
@@ -2766,6 +2958,7 @@ function bindGlobalPanelClose() {
 function attachEvents() {
   bindCollectionControls();
   bindSortControls();
+  bindViewControls();
   bindCollectionMenuControls();
   bindBatchControls();
   bindFilterControls();

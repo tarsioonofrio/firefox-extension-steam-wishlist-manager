@@ -95,6 +95,31 @@
     }
   }
 
+  function renderViewMenu() {
+    const select = document.getElementById("view-select");
+    const btn = document.getElementById("view-menu-btn");
+    const menu = document.getElementById("view-menu-options");
+    if (!select || !btn || !menu) {
+      return;
+    }
+
+    const selectedOption = select.options[select.selectedIndex];
+    btn.textContent = `View: ${selectedOption?.textContent || "Card"}`;
+
+    menu.innerHTML = "";
+    for (const option of Array.from(select.options)) {
+      const itemBtn = document.createElement("button");
+      itemBtn.type = "button";
+      itemBtn.className = "dropdown-option";
+      if (option.value === select.value) {
+        itemBtn.classList.add("active");
+      }
+      itemBtn.textContent = option.textContent || option.value;
+      itemBtn.dataset.value = option.value;
+      menu.appendChild(itemBtn);
+    }
+  }
+
   function renderPager(options) {
     const totalItems = Number(options?.totalItems || 0);
     const pageSize = Math.max(1, Number(options?.pageSize || 30));
@@ -121,6 +146,7 @@
   window.SWMCollectionsUiControls = {
     renderCollectionSelect,
     renderSortMenu,
+    renderViewMenu,
     renderPager
   };
 })();

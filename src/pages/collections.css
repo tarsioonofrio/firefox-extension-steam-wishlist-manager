@@ -49,7 +49,7 @@ body {
 
 .top-controls {
   display: grid;
-  grid-template-columns: minmax(300px, auto) minmax(220px, 1fr) minmax(150px, auto) auto auto;
+  grid-template-columns: minmax(300px, auto) minmax(220px, 1fr) minmax(150px, auto) auto auto auto;
   gap: 8px;
   align-items: center;
   width: 100%;
@@ -142,6 +142,11 @@ body {
 #sort-menu-panel .menu-actions {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+}
+
+#view-menu-panel .menu-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
 }
 
 #collection-select-panel .menu-actions {
@@ -650,6 +655,91 @@ main {
   align-items: center;
 }
 
+.line-row {
+  display: grid;
+  grid-template-columns: minmax(180px, auto) minmax(0, 1fr) minmax(180px, auto);
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #2f445a;
+  background: var(--panel-2);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.line-row.line-row-batch {
+  grid-template-columns: 24px minmax(180px, auto) minmax(0, 1fr) minmax(180px, auto);
+}
+
+.line-batch {
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.line-row.line-row-batch .line-batch {
+  display: flex;
+}
+
+.line-batch-checkbox {
+  width: 16px;
+  height: 16px;
+}
+
+.line-left {
+  display: grid;
+  grid-template-columns: 32px 32px minmax(60px, 1fr) 36px;
+  gap: 4px;
+  align-items: center;
+}
+
+.line-btn {
+  height: 24px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.line-pos-input {
+  height: 24px;
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+
+.line-pos-input::-webkit-outer-spin-button,
+.line-pos-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.line-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.line-title {
+  color: #fff;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.line-review {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.line-right {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   body {
     height: auto;
@@ -749,5 +839,20 @@ main {
 
   .collections-dropdown {
     margin-left: 0;
+  }
+
+  .line-row,
+  .line-row.line-row-batch {
+    grid-template-columns: 1fr;
+  }
+
+  .line-left,
+  .line-center,
+  .line-right {
+    width: 100%;
+  }
+
+  .line-right {
+    justify-content: flex-start;
   }
 }
