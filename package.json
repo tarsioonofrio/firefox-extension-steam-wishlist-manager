@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "web-ext run --source-dir . --target=firefox-desktop",
     "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts",
-    "check:manifest": "node -e \"JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')\""
+    "check:manifest": "node -e \"JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')\"",
+    "test:logic": "node tests/module-smoke.mjs"
   },
   "devDependencies": {
     "web-ext": "^8.9.0"

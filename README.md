@@ -31,6 +31,7 @@ Notes:
 - Dev (auto-reload): `npm run dev`
 - Build package: `npm run build`
 - Validate manifest: `npm run check:manifest`
+- Logic smoke test: `npm run test:logic`
 
 Manual load alternative:
 - `about:debugging` -> **This Firefox** -> **Load Temporary Add-on...** -> `manifest.json`
