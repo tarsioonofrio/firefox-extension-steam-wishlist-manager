@@ -12,13 +12,16 @@
 - `logs/`: local runtime logs; ignored in git.
 
 ## Build, Test, and Development Commands
-This repository currently has no Node build pipeline. Use direct Firefox loading for development.
+This repository uses `web-ext` via npm scripts.
 
+- `npm install`
+- `npm run dev`
+  - Runs extension in Firefox desktop with auto-reload.
+- `npm run build`
+  - Builds extension artifact in `web-ext-artifacts/`.
+- `npm run check:manifest`
+  - Validates `manifest.json` JSON syntax.
 - `about:debugging` -> **This Firefox** -> **Load Temporary Add-on...** -> select `manifest.json`.
-- `node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')"`
-  - Quick manifest syntax validation.
-- `zip -r extension.zip manifest.json src`
-  - Optional: package files for manual distribution/testing.
 
 ## Coding Style & Naming Conventions
 - JavaScript/CSS only; use 2-space indentation and semicolons.
@@ -56,6 +59,15 @@ This repository currently has no Node build pipeline. Use direct Firefox loading
   - Keep request volume low (cache aggressively; avoid polling bursts and mass parallel requests).
   - Do not implement abusive automation (bulk account actions, bot-like behavior, bypassing auth flows).
   - Treat risk primarily as access throttling/integration breakage; still avoid patterns that could violate Steam terms.
+
+## Wishlist Rank Strategy
+- Source of truth for wishlist rank is `IWishlistService/GetWishlist/v1`.
+- Use `priority` for ranking and `date_added` for wishlist-added date display.
+- Persist rank snapshot in `steamWishlistAddedMapV3`.
+- Refresh rank snapshot:
+  - once per day, or
+  - when wishlist membership changes.
+- Metadata enrichment (`wishlistdata`, `appdetails`, `appreviews`) must not block or override rank ordering.
 
 ## External Reference Baseline (SteamDB)
 - Primary implementation reference for upcoming work is the local clone at `../BrowserExtension`
