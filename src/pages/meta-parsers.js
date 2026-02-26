@@ -96,11 +96,42 @@
     return "";
   }
 
+  function decodeHtmlEntities(text) {
+    return String(text || "")
+      .replace(/&amp;/g, "&")
+      .replace(/&quot;/g, "\"")
+      .replace(/&#39;/g, "'")
+      .replace(/&nbsp;/g, " ");
+  }
+
+  function parseStoreTags(rawHtml) {
+    const html = String(rawHtml || "");
+    if (!html) {
+      return [];
+    }
+
+    const out = [];
+    const seen = new Set();
+    const tagRe = /class="app_tag"[^>]*>([^<]+)</gi;
+    let match = null;
+    while ((match = tagRe.exec(html)) !== null) {
+      const raw = decodeHtmlEntities(match[1] || "");
+      const tag = raw.replace(/\s+/g, " ").trim();
+      if (!tag || seen.has(tag)) {
+        continue;
+      }
+      seen.add(tag);
+      out.push(tag);
+    }
+    return out;
+  }
+
   window.SWMMetaParsers = {
     normalizeAppTypeLabel,
     parseSupportedLanguages,
     parseFullAudioLanguages,
     parseLooseInteger,
-    extractPriceTextFromDiscountBlock
+    extractPriceTextFromDiscountBlock,
+    parseStoreTags
   };
 })();

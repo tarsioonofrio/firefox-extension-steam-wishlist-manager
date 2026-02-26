@@ -191,6 +191,23 @@ function createFetchMock() {
       };
     }
 
+    if (/store\.steampowered\.com\/app\/\d+\//.test(href)) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {};
+        },
+        async text() {
+          return `
+            <a class="app_tag">Action</a>
+            <a class="app_tag">JRPG</a>
+            <a class="app_tag">Singleplayer</a>
+          `;
+        }
+      };
+    }
+
     throw new Error(`Unexpected fetch URL in e2e smoke: ${href}`);
   };
 }

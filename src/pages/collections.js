@@ -967,14 +967,37 @@ async function fetchAppMeta(appId, options = {}) {
     return null;
   }
 
+  async function fetchStoreTagsWithFallback() {
+    const urls = [
+      `https://store.steampowered.com/app/${appId}/?l=en&cc=br`,
+      `https://store.steampowered.com/app/${appId}/?l=en`,
+      `https://store.steampowered.com/app/${appId}/`
+    ];
+
+    for (const url of urls) {
+      try {
+        const html = await fetchSteamText(url, { credentials: "include", cache: "no-store" });
+        const parsed = parserUtils.parseStoreTags(html);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch {
+        // Try next fallback URL.
+      }
+    }
+
+    return [];
+  }
+
   try {
-    const requests = [fetchAppDetailsDataWithFallback()];
+    const requests = [fetchAppDetailsDataWithFallback(), fetchStoreTagsWithFallback()];
     if (includeReviews) {
       requests.push(fetchSteamJson(`https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`));
     }
     const settled = await Promise.allSettled(requests);
     const detailsDataResult = settled[0];
-    const reviewsResult = includeReviews ? settled[1] : null;
+    const storeTagsResult = settled[1];
+    const reviewsResult = includeReviews ? settled[2] : null;
 
     let appData = null;
     if (detailsDataResult.status === "fulfilled") {
@@ -983,6 +1006,11 @@ async function fetchAppMeta(appId, options = {}) {
 
     if (!appData) {
       throw new Error("No appdetails payload");
+    }
+
+    let storeTags = [];
+    if (storeTagsResult && storeTagsResult.status === "fulfilled" && Array.isArray(storeTagsResult.value)) {
+      storeTags = storeTagsResult.value;
     }
 
     let reviewsPayload = null;
@@ -998,7 +1026,7 @@ async function fetchAppMeta(appId, options = {}) {
     const categories = Array.isArray(appData?.categories)
       ? appData.categories.map((c) => String(c.description || "").trim()).filter(Boolean)
       : [];
-    const tags = Array.from(new Set([...genres, ...categories])).slice(0, 12);
+    const tags = Array.from(new Set([...storeTags, ...genres, ...categories])).slice(0, 16);
     const categorySet = new Set(categories.map((c) => c.toLowerCase()));
 
     const players = categories.filter((label) => {
