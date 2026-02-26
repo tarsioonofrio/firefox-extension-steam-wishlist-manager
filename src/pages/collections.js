@@ -440,6 +440,21 @@ async function fetchWishlistOrderFromService(steamId, targetCount = 0) {
   const orderedIds = [];
   const seen = new Set();
   const priorityMap = {};
+  let accessToken = "";
+  try {
+    const userdata = await fetchSteamJson("https://store.steampowered.com/dynamicstore/userdata/", {
+      credentials: "include",
+      cache: "no-store"
+    });
+    accessToken = String(
+      userdata?.webapi_token
+      || userdata?.webapiToken
+      || userdata?.webapi_access_token
+      || ""
+    ).trim();
+  } catch {
+    accessToken = "";
+  }
 
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
     const startIndex = pageIndex * pageSize;
@@ -451,6 +466,9 @@ async function fetchWishlistOrderFromService(steamId, targetCount = 0) {
     const url = new URL("https://api.steampowered.com/IWishlistService/GetWishlistSortedFiltered/v1");
     url.searchParams.set("origin", "https://store.steampowered.com");
     url.searchParams.set("input_protobuf_encoded", toBase64(requestBytes));
+    if (accessToken) {
+      url.searchParams.set("access_token", accessToken);
+    }
 
     const responseBytes = await fetchSteamBytes(url.toString(), {
       credentials: "include"
@@ -804,25 +822,32 @@ function isMetaIncomplete(meta) {
 }
 
 async function loadWishlistAddedMap() {
+  const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+  const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+  const hasPriorityCache = Boolean(
+    cached?.priorityCachedAt && cached?.priorityMap && typeof cached.priorityMap === "object"
+  );
   try {
     await browser.runtime.sendMessage({
-      type: "sync-wishlist-order-cache"
+      type: "sync-wishlist-order-cache",
+      force: !hasPriorityCache
     });
   } catch {
     // Non-fatal: keep existing fallback flow.
   }
 
   const now = Date.now();
-  const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
-  const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
-  const cachedMap = cached.map || {};
-  const cachedOrderedIds = Array.isArray(cached.orderedAppIds)
-    ? cached.orderedAppIds.map((id) => String(id || "").trim()).filter(Boolean)
+  const refreshed = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+  const cachedAfterSync = refreshed[WISHLIST_ADDED_CACHE_KEY] || cached;
+  const effectiveCached = cachedAfterSync;
+  const cachedMap = effectiveCached.map || {};
+  const cachedOrderedIds = Array.isArray(effectiveCached.orderedAppIds)
+    ? effectiveCached.orderedAppIds.map((id) => String(id || "").trim()).filter(Boolean)
     : [];
-  const cachedPriorityMap = (cached.priorityMap && typeof cached.priorityMap === "object")
-    ? cached.priorityMap
+  const cachedPriorityMap = (effectiveCached.priorityMap && typeof effectiveCached.priorityMap === "object")
+    ? effectiveCached.priorityMap
     : {};
-  const lastFullSyncAt = Number(cached.lastFullSyncAt || 0);
+  const lastFullSyncAt = Number(effectiveCached.lastFullSyncAt || 0);
   wishlistPriorityMap = {};
   for (const [appId, priority] of Object.entries(cachedPriorityMap)) {
     const n = Number(priority);

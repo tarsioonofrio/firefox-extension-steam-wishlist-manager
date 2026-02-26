@@ -489,6 +489,12 @@ async function syncWishlistOrderCache(force = false) {
     || userData?.webapi_token_steamid
     || ""
   ).trim();
+  const accessToken = String(
+    userData?.webapi_token
+    || userData?.webapiToken
+    || userData?.webapi_access_token
+    || ""
+  ).trim();
   if (!steamId) {
     throw new Error("Could not resolve steamid for wishlist order sync.");
   }
@@ -503,6 +509,9 @@ async function syncWishlistOrderCache(force = false) {
     const url = new URL("https://api.steampowered.com/IWishlistService/GetWishlistSortedFiltered/v1");
     url.searchParams.set("origin", "https://store.steampowered.com");
     url.searchParams.set("input_protobuf_encoded", toBase64(requestBytes));
+    if (accessToken) {
+      url.searchParams.set("access_token", accessToken);
+    }
 
     const response = await fetch(url.toString(), { cache: "no-store" });
     if (!response.ok) {
