@@ -12,6 +12,7 @@ const parserUtils = window.SWMMetaParsers || null;
 const filtersUtils = window.SWMCollectionsFilters || null;
 const uiControlsUtils = window.SWMCollectionsUiControls || null;
 const panelsUtils = window.SWMCollectionsPanels || null;
+const rangeControlsUtils = window.SWMCollectionsRangeControls || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -2090,54 +2091,16 @@ async function render() {
 }
 
 function renderRatingControls() {
-  const minLabel = document.getElementById("rating-min-label");
-  const maxLabel = document.getElementById("rating-max-label");
-  const minRange = document.getElementById("rating-min-range");
-  const maxRange = document.getElementById("rating-max-range");
-  const minInput = document.getElementById("reviews-min-input");
-  const maxInput = document.getElementById("reviews-max-input");
-  const discountMinLabel = document.getElementById("discount-min-label");
-  const discountMaxLabel = document.getElementById("discount-max-label");
-  const discountMinRange = document.getElementById("discount-min-range");
-  const discountMaxRange = document.getElementById("discount-max-range");
-  const priceMinInput = document.getElementById("price-min-input");
-  const priceMaxInput = document.getElementById("price-max-input");
-  if (minLabel) {
-    minLabel.textContent = `${ratingMin}%`;
-  }
-  if (maxLabel) {
-    maxLabel.textContent = `${ratingMax}%`;
-  }
-  if (minRange) {
-    minRange.value = String(ratingMin);
-  }
-  if (maxRange) {
-    maxRange.value = String(ratingMax);
-  }
-  if (minInput) {
-    minInput.value = String(reviewsMin);
-  }
-  if (maxInput) {
-    maxInput.value = String(reviewsMax);
-  }
-  if (discountMinLabel) {
-    discountMinLabel.textContent = `${discountMin}%`;
-  }
-  if (discountMaxLabel) {
-    discountMaxLabel.textContent = `${discountMax}%`;
-  }
-  if (discountMinRange) {
-    discountMinRange.value = String(discountMin);
-  }
-  if (discountMaxRange) {
-    discountMaxRange.value = String(discountMax);
-  }
-  if (priceMinInput) {
-    priceMinInput.value = String(priceMin);
-  }
-  if (priceMaxInput) {
-    priceMaxInput.value = String(priceMax);
-  }
+  rangeControlsUtils?.renderRangeControls?.({
+    ratingMin,
+    ratingMax,
+    reviewsMin,
+    reviewsMax,
+    discountMin,
+    discountMax,
+    priceMin,
+    priceMax
+  });
 }
 
 function renderSortMenu() {
@@ -2449,58 +2412,55 @@ function bindFilterControls() {
     refreshCurrentPageItems().catch(() => setStatus("Failed to refresh visible items.", true));
   });
 
-  document.getElementById("rating-min-range")?.addEventListener("input", async (event) => {
-    const next = parseNonNegativeInt(event.target.value, ratingMin);
-    ratingMin = Math.max(0, Math.min(next, ratingMax));
-    renderRatingControls();
-    page = 1;
-    await renderCards();
-  });
-
-  document.getElementById("rating-max-range")?.addEventListener("input", async (event) => {
-    const next = parseNonNegativeInt(event.target.value, ratingMax);
-    ratingMax = Math.min(100, Math.max(next, ratingMin));
-    renderRatingControls();
-    page = 1;
-    await renderCards();
-  });
-
-  document.getElementById("apply-reviews-btn")?.addEventListener("click", async () => {
-    const minValue = parseNonNegativeInt(document.getElementById("reviews-min-input")?.value, 0);
-    const maxValue = parseNonNegativeInt(document.getElementById("reviews-max-input")?.value, 999999999);
-    reviewsMin = Math.min(minValue, maxValue);
-    reviewsMax = Math.max(minValue, maxValue);
-    renderRatingControls();
-    page = 1;
-    await renderCards();
-  });
-
-  document.getElementById("discount-min-range")?.addEventListener("input", async (event) => {
-    const next = parseNonNegativeInt(event.target.value, discountMin);
-    discountMin = Math.max(0, Math.min(next, discountMax));
-    renderRatingControls();
-    page = 1;
-    await renderCards();
-  });
-
-  document.getElementById("discount-max-range")?.addEventListener("input", async (event) => {
-    const next = parseNonNegativeInt(event.target.value, discountMax);
-    discountMax = Math.min(100, Math.max(next, discountMin));
-    renderRatingControls();
-    page = 1;
-    await renderCards();
-  });
-
-  document.getElementById("apply-price-btn")?.addEventListener("click", async () => {
-    const minValue = Number(document.getElementById("price-min-input")?.value || 0);
-    const maxValue = Number(document.getElementById("price-max-input")?.value || 9999999);
-    const normMin = Number.isFinite(minValue) && minValue >= 0 ? minValue : 0;
-    const normMax = Number.isFinite(maxValue) && maxValue >= 0 ? maxValue : 9999999;
-    priceMin = Math.min(normMin, normMax);
-    priceMax = Math.max(normMin, normMax);
-    renderRatingControls();
-    page = 1;
-    await renderCards();
+  rangeControlsUtils?.bindRangeControls?.({
+    onRatingMinInput: async (rawValue) => {
+      const next = parseNonNegativeInt(rawValue, ratingMin);
+      ratingMin = Math.max(0, Math.min(next, ratingMax));
+      renderRatingControls();
+      page = 1;
+      await renderCards();
+    },
+    onRatingMaxInput: async (rawValue) => {
+      const next = parseNonNegativeInt(rawValue, ratingMax);
+      ratingMax = Math.min(100, Math.max(next, ratingMin));
+      renderRatingControls();
+      page = 1;
+      await renderCards();
+    },
+    onApplyReviews: async (rawMin, rawMax) => {
+      const minValue = parseNonNegativeInt(rawMin, 0);
+      const maxValue = parseNonNegativeInt(rawMax, 999999999);
+      reviewsMin = Math.min(minValue, maxValue);
+      reviewsMax = Math.max(minValue, maxValue);
+      renderRatingControls();
+      page = 1;
+      await renderCards();
+    },
+    onDiscountMinInput: async (rawValue) => {
+      const next = parseNonNegativeInt(rawValue, discountMin);
+      discountMin = Math.max(0, Math.min(next, discountMax));
+      renderRatingControls();
+      page = 1;
+      await renderCards();
+    },
+    onDiscountMaxInput: async (rawValue) => {
+      const next = parseNonNegativeInt(rawValue, discountMax);
+      discountMax = Math.min(100, Math.max(next, discountMin));
+      renderRatingControls();
+      page = 1;
+      await renderCards();
+    },
+    onApplyPrice: async (rawMin, rawMax) => {
+      const minValue = Number(rawMin || 0);
+      const maxValue = Number(rawMax || 9999999);
+      const normMin = Number.isFinite(minValue) && minValue >= 0 ? minValue : 0;
+      const normMax = Number.isFinite(maxValue) && maxValue >= 0 ? maxValue : 9999999;
+      priceMin = Math.min(normMin, normMax);
+      priceMax = Math.max(normMin, normMax);
+      renderRatingControls();
+      page = 1;
+      await renderCards();
+    }
   });
 }
 

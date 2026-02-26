@@ -1,0 +1,69 @@
+(() => {
+  function renderRangeControls(values) {
+    const ratingMin = Number(values?.ratingMin ?? 0);
+    const ratingMax = Number(values?.ratingMax ?? 100);
+    const reviewsMin = Number(values?.reviewsMin ?? 0);
+    const reviewsMax = Number(values?.reviewsMax ?? 999999999);
+    const discountMin = Number(values?.discountMin ?? 0);
+    const discountMax = Number(values?.discountMax ?? 100);
+    const priceMin = Number(values?.priceMin ?? 0);
+    const priceMax = Number(values?.priceMax ?? 9999999);
+
+    const minLabel = document.getElementById("rating-min-label");
+    const maxLabel = document.getElementById("rating-max-label");
+    const minRange = document.getElementById("rating-min-range");
+    const maxRange = document.getElementById("rating-max-range");
+    const minInput = document.getElementById("reviews-min-input");
+    const maxInput = document.getElementById("reviews-max-input");
+    const discountMinLabel = document.getElementById("discount-min-label");
+    const discountMaxLabel = document.getElementById("discount-max-label");
+    const discountMinRange = document.getElementById("discount-min-range");
+    const discountMaxRange = document.getElementById("discount-max-range");
+    const priceMinInput = document.getElementById("price-min-input");
+    const priceMaxInput = document.getElementById("price-max-input");
+
+    if (minLabel) minLabel.textContent = `${ratingMin}%`;
+    if (maxLabel) maxLabel.textContent = `${ratingMax}%`;
+    if (minRange) minRange.value = String(ratingMin);
+    if (maxRange) maxRange.value = String(ratingMax);
+    if (minInput) minInput.value = String(reviewsMin);
+    if (maxInput) maxInput.value = String(reviewsMax);
+    if (discountMinLabel) discountMinLabel.textContent = `${discountMin}%`;
+    if (discountMaxLabel) discountMaxLabel.textContent = `${discountMax}%`;
+    if (discountMinRange) discountMinRange.value = String(discountMin);
+    if (discountMaxRange) discountMaxRange.value = String(discountMax);
+    if (priceMinInput) priceMinInput.value = String(priceMin);
+    if (priceMaxInput) priceMaxInput.value = String(priceMax);
+  }
+
+  function bindRangeControls(handlers) {
+    const h = handlers || {};
+    document.getElementById("rating-min-range")?.addEventListener("input", (event) => {
+      h.onRatingMinInput?.(event.target.value);
+    });
+    document.getElementById("rating-max-range")?.addEventListener("input", (event) => {
+      h.onRatingMaxInput?.(event.target.value);
+    });
+    document.getElementById("apply-reviews-btn")?.addEventListener("click", () => {
+      const min = document.getElementById("reviews-min-input")?.value;
+      const max = document.getElementById("reviews-max-input")?.value;
+      h.onApplyReviews?.(min, max);
+    });
+    document.getElementById("discount-min-range")?.addEventListener("input", (event) => {
+      h.onDiscountMinInput?.(event.target.value);
+    });
+    document.getElementById("discount-max-range")?.addEventListener("input", (event) => {
+      h.onDiscountMaxInput?.(event.target.value);
+    });
+    document.getElementById("apply-price-btn")?.addEventListener("click", () => {
+      const min = document.getElementById("price-min-input")?.value;
+      const max = document.getElementById("price-max-input")?.value;
+      h.onApplyPrice?.(min, max);
+    });
+  }
+
+  window.SWMCollectionsRangeControls = {
+    renderRangeControls,
+    bindRangeControls
+  };
+})();
