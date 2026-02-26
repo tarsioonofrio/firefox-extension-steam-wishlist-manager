@@ -489,6 +489,10 @@ async function syncWishlistOrderCache(force = false) {
     || userData?.webapi_token_steamid
     || ""
   ).trim();
+  const wishlistNowIds = Array.isArray(userData?.rgWishlist)
+    ? userData.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+  const wishlistNowSet = new Set(wishlistNowIds);
   const accessToken = String(
     userData?.webapi_token
     || userData?.webapiToken
@@ -524,7 +528,14 @@ async function syncWishlistOrderCache(force = false) {
     }
 
     for (const item of items) {
-      const appId = String(item.appid || "").trim();
+      const rawIdNum = Number(item.appid || 0);
+      let appId = String(rawIdNum || "").trim();
+      if (rawIdNum > 0 && !wishlistNowSet.has(appId) && rawIdNum % 10 === 0) {
+        const div10 = String(Math.floor(rawIdNum / 10));
+        if (wishlistNowSet.has(div10)) {
+          appId = div10;
+        }
+      }
       if (!appId || seen.has(appId)) {
         continue;
       }

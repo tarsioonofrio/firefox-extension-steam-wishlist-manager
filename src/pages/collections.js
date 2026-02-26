@@ -441,6 +441,10 @@ async function fetchWishlistOrderFromService(steamId, targetCount = 0) {
   const orderedIds = [];
   const seen = new Set();
   const priorityMap = {};
+  const wishlistNowIds = Array.isArray(userdata?.rgWishlist)
+    ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
+    : [];
+  const wishlistNowSet = new Set(wishlistNowIds);
   let accessToken = "";
   try {
     const userdata = await fetchSteamJson("https://store.steampowered.com/dynamicstore/userdata/", {
@@ -481,7 +485,14 @@ async function fetchWishlistOrderFromService(steamId, targetCount = 0) {
 
     for (let i = 0; i < items.length; i += 1) {
       const item = items[i];
-      const appId = String(item.appid || "").trim();
+      const rawIdNum = Number(item.appid || 0);
+      let appId = String(rawIdNum || "").trim();
+      if (rawIdNum > 0 && !wishlistNowSet.has(appId) && rawIdNum % 10 === 0) {
+        const div10 = String(Math.floor(rawIdNum / 10));
+        if (wishlistNowSet.has(div10)) {
+          appId = div10;
+        }
+      }
       if (!appId || seen.has(appId)) {
         continue;
       }
@@ -1025,6 +1036,7 @@ async function loadWishlistAddedMap() {
         lastFullSyncAt: nextLastFullSyncAt,
         orderedAppIds: wishlistOrderedAppIds,
         priorityMap: wishlistPriorityMap,
+        priorityCachedAt: Number(effectiveCached.priorityCachedAt || 0),
         map: wishlistAddedMap
       }
     });
