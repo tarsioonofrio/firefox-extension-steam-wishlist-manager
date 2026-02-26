@@ -59,13 +59,13 @@
         </div>
       </div>
       <div id="batch-menu-panel" class="collection-menu-panel hidden">
-        <div class="menu-form">
-          <select id="batch-mode-select">
-            <option value="add">Add to collection</option>
-            <option value="remove">Remove from collection</option>
-          </select>
+        <div class="menu-actions">
+          <button id="batch-action-add" type="button">Adicionar</button>
+          <button id="batch-action-remove" type="button" class="danger">Remover da coleção atual</button>
+        </div>
+        <div id="batch-add-form" class="menu-form batch-form hidden">
           <select id="batch-collection-select"></select>
-          <button id="batch-apply-btn" type="button">Apply</button>
+          <button id="batch-add-apply-btn" type="button">Adicionar selecionados</button>
         </div>
       </div>
       <section id="cards" class="cards"></section>

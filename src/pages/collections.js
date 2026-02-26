@@ -122,8 +122,7 @@ let priceMin = 0;
 let priceMax = 9999999;
 let filterSyncRunId = 0;
 let batchMode = false;
-let batchActionMode = "add";
-let batchTargetCollection = "";
+let batchAddTargetCollection = "";
 let batchSelectedIds = new Set();
 
 function todayKey() {
@@ -2077,15 +2076,11 @@ function renderPager(totalItems) {
 
 function renderBatchMenuState() {
   const btn = document.getElementById("batch-menu-btn");
-  const modeSelect = document.getElementById("batch-mode-select");
   const collectionSelect = document.getElementById("batch-collection-select");
   if (btn) {
     const count = batchSelectedIds.size;
     btn.textContent = count > 0 ? `Batch (${count})` : "Batch";
     btn.classList.toggle("active", batchMode);
-  }
-  if (modeSelect) {
-    modeSelect.value = batchActionMode;
   }
   if (collectionSelect) {
     const names = state?.collectionOrder || [];
@@ -2096,10 +2091,10 @@ function renderBatchMenuState() {
       option.textContent = name;
       collectionSelect.appendChild(option);
     }
-    if (!batchTargetCollection || !names.includes(batchTargetCollection)) {
-      batchTargetCollection = names[0] || "";
+    if (!batchAddTargetCollection || !names.includes(batchAddTargetCollection)) {
+      batchAddTargetCollection = names[0] || "";
     }
-    collectionSelect.value = batchTargetCollection;
+    collectionSelect.value = batchAddTargetCollection;
     collectionSelect.disabled = names.length === 0;
   }
 }
@@ -2112,7 +2107,7 @@ function toggleBatchMode(force = null) {
   renderBatchMenuState();
 }
 
-async function applyBatchAction() {
+async function applyBatchAdd() {
   if (!batchMode) {
     toggleBatchMode(true);
   }
@@ -2120,22 +2115,14 @@ async function applyBatchAction() {
     setStatus("Select one or more cards for batch action.", true);
     return;
   }
-  if (!batchTargetCollection || !(state?.collectionOrder || []).includes(batchTargetCollection)) {
-    setStatus("Choose a valid target collection.", true);
+  if (!batchAddTargetCollection || !(state?.collectionOrder || []).includes(batchAddTargetCollection)) {
+    setStatus("Choose a valid collection to add.", true);
     return;
   }
-  const modeLabel = batchActionMode === "remove" ? "remove from" : "add to";
-  const confirmed = window.confirm(
-    `Apply batch action: ${modeLabel} "${batchTargetCollection}" for ${batchSelectedIds.size} game(s)?`
-  );
-  if (!confirmed) {
-    return;
-  }
-
   await browser.runtime.sendMessage({
     type: "batch-update-collection",
-    mode: batchActionMode,
-    collectionName: batchTargetCollection,
+    mode: "add",
+    collectionName: batchAddTargetCollection,
     appIds: Array.from(batchSelectedIds)
   });
 
@@ -2144,7 +2131,41 @@ async function applyBatchAction() {
   quickPopulateFiltersFromCache();
   refreshFilterOptionsInBackground();
   await render();
-  setStatus("Batch action applied.");
+  setStatus("Selected games added to collection.");
+}
+
+async function applyBatchRemoveFromCurrentCollection() {
+  if (!batchMode) {
+    toggleBatchMode(true);
+  }
+  if (batchSelectedIds.size === 0) {
+    setStatus("Select one or more cards for batch action.", true);
+    return;
+  }
+  if (sourceMode !== "collections" || !activeCollection || activeCollection === "__all__") {
+    setStatus("Select a specific collection to remove selected games from it.", true);
+    return;
+  }
+  const confirmed = window.confirm(
+    `Tem certeza que quer remover ${batchSelectedIds.size} jogo(s) da coleção atual "${activeCollection}"?`
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  await browser.runtime.sendMessage({
+    type: "batch-update-collection",
+    mode: "remove",
+    collectionName: activeCollection,
+    appIds: Array.from(batchSelectedIds)
+  });
+
+  batchSelectedIds.clear();
+  await refreshState();
+  quickPopulateFiltersFromCache();
+  refreshFilterOptionsInBackground();
+  await render();
+  setStatus("Selected games removed from current collection.");
 }
 
 function getCollectionsContainingApp(appId) {
@@ -2514,9 +2535,11 @@ function bindCollectionMenuControls() {
 
 function bindBatchControls() {
   const batchBtn = document.getElementById("batch-menu-btn");
-  const modeSelect = document.getElementById("batch-mode-select");
+  const addActionBtn = document.getElementById("batch-action-add");
+  const removeActionBtn = document.getElementById("batch-action-remove");
+  const addForm = document.getElementById("batch-add-form");
   const collectionSelect = document.getElementById("batch-collection-select");
-  const applyBtn = document.getElementById("batch-apply-btn");
+  const addApplyBtn = document.getElementById("batch-add-apply-btn");
 
   batchBtn?.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -2533,21 +2556,25 @@ function bindBatchControls() {
     toggleSortMenu(false);
     toggleBatchMode(true);
     panelsUtils.togglePanel("batch-menu-panel");
+    addForm?.classList.add("hidden");
     render().catch(() => setStatus("Failed to enter batch mode.", true));
   });
 
-  modeSelect?.addEventListener("change", () => {
-    batchActionMode = String(modeSelect.value || "add") === "remove" ? "remove" : "add";
-    renderBatchMenuState();
+  addActionBtn?.addEventListener("click", () => {
+    addForm?.classList.remove("hidden");
   });
 
   collectionSelect?.addEventListener("change", () => {
-    batchTargetCollection = String(collectionSelect.value || "");
+    batchAddTargetCollection = String(collectionSelect.value || "");
     renderBatchMenuState();
   });
 
-  applyBtn?.addEventListener("click", () => {
-    applyBatchAction().catch(() => setStatus("Failed to apply batch action.", true));
+  addApplyBtn?.addEventListener("click", () => {
+    applyBatchAdd().catch(() => setStatus("Failed to apply batch add.", true));
+  });
+
+  removeActionBtn?.addEventListener("click", () => {
+    applyBatchRemoveFromCurrentCollection().catch(() => setStatus("Failed to apply batch remove.", true));
   });
 }
 
