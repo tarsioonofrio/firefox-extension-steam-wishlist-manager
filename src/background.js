@@ -745,6 +745,27 @@ browser.runtime.onMessage.addListener((message, sender) => {
         return { ok: true };
       }
 
+      case "set-wishlist-steamid": {
+        const steamId = String(message.steamId || "").trim();
+        if (!/^\d{10,20}$/.test(steamId)) {
+          throw new Error("Invalid steamId.");
+        }
+        const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+        const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+        await browser.storage.local.set({
+          [WISHLIST_ADDED_CACHE_KEY]: {
+            ...cached,
+            steamId
+          }
+        });
+        try {
+          await syncWishlistOrderCache(true);
+        } catch {
+          // non-fatal: collections page will retry and surface debug info
+        }
+        return { ok: true, steamId };
+      }
+
       case "sync-wishlist-order-cache": {
         try {
           return await syncWishlistOrderCache(Boolean(message.force));

@@ -320,5 +320,12 @@ async function syncWishlistOrderCache() {
 }
 
 if (window.location.pathname.startsWith("/wishlist")) {
+  const profileMatch = window.location.pathname.match(/\/wishlist\/profiles\/(\d{10,20})/);
+  if (profileMatch?.[1]) {
+    browser.runtime.sendMessage({
+      type: "set-wishlist-steamid",
+      steamId: profileMatch[1]
+    }).catch(() => {});
+  }
   syncWishlistOrderCache();
 }
