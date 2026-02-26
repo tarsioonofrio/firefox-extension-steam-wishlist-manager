@@ -27,6 +27,11 @@ function isTrustedSender(sender) {
     return false;
   }
 
+  // Allow internal extension calls even when sender.url is omitted.
+  if (senderId === browser.runtime.id) {
+    return true;
+  }
+
   const senderUrl = String(sender?.url || "");
   if (!senderUrl) {
     return false;
