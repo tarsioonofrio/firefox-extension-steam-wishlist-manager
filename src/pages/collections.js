@@ -2305,6 +2305,22 @@ function bindSortControls() {
 }
 
 function bindCollectionMenuControls() {
+  const showOnlyCollectionForm = (formId) => {
+    hideCollectionMenuForms();
+    document.getElementById(formId)?.classList.remove("hidden");
+  };
+
+  const bindMenuFormSubmit = (buttonId, inputOrSelectId, handler, failMessage, clearAfter = false) => {
+    document.getElementById(buttonId)?.addEventListener("click", () => {
+      const field = document.getElementById(inputOrSelectId);
+      const value = String(field?.value || "");
+      handler(value).catch(() => setStatus(failMessage, true));
+      if (clearAfter && field) {
+        field.value = "";
+      }
+    });
+  };
+
   document.getElementById("collection-menu-btn")?.addEventListener("click", (event) => {
     event.stopPropagation();
     toggleCollectionSelectMenu(false);
@@ -2313,43 +2329,20 @@ function bindCollectionMenuControls() {
   });
 
   document.getElementById("menu-action-rename")?.addEventListener("click", () => {
-    hideCollectionMenuForms();
-    document.getElementById("rename-collection-form")?.classList.remove("hidden");
+    showOnlyCollectionForm("rename-collection-form");
   });
 
   document.getElementById("menu-action-create")?.addEventListener("click", () => {
-    hideCollectionMenuForms();
-    document.getElementById("create-collection-form")?.classList.remove("hidden");
+    showOnlyCollectionForm("create-collection-form");
   });
 
   document.getElementById("menu-action-delete")?.addEventListener("click", () => {
-    hideCollectionMenuForms();
-    document.getElementById("delete-collection-form")?.classList.remove("hidden");
+    showOnlyCollectionForm("delete-collection-form");
   });
 
-  document.getElementById("rename-collection-ok")?.addEventListener("click", () => {
-    const input = document.getElementById("rename-collection-input");
-    const value = String(input?.value || "");
-    renameActiveCollectionByName(value).catch(() => setStatus("Failed to rename collection.", true));
-    if (input) {
-      input.value = "";
-    }
-  });
-
-  document.getElementById("create-collection-ok")?.addEventListener("click", () => {
-    const input = document.getElementById("create-collection-input");
-    const value = String(input?.value || "");
-    createCollectionByName(value).catch(() => setStatus("Failed to create collection.", true));
-    if (input) {
-      input.value = "";
-    }
-  });
-
-  document.getElementById("delete-collection-ok")?.addEventListener("click", () => {
-    const select = document.getElementById("delete-collection-select");
-    const value = String(select?.value || "");
-    deleteCollectionByName(value).catch(() => setStatus("Failed to delete collection.", true));
-  });
+  bindMenuFormSubmit("rename-collection-ok", "rename-collection-input", renameActiveCollectionByName, "Failed to rename collection.", true);
+  bindMenuFormSubmit("create-collection-ok", "create-collection-input", createCollectionByName, "Failed to create collection.", true);
+  bindMenuFormSubmit("delete-collection-ok", "delete-collection-select", deleteCollectionByName, "Failed to delete collection.", false);
 }
 
 function bindSearchAndPagingControls() {
