@@ -2030,9 +2030,25 @@ function renderCheckboxOptions(containerId, counts, selectedSet, query = "") {
   optionsEl.innerHTML = "";
 
   const normalizedQuery = String(query || "").toLowerCase();
-  const filteredCounts = normalizedQuery
-    ? counts.filter((item) => String(item.name || "").toLowerCase().includes(normalizedQuery))
-    : counts;
+  const sourceCounts = Array.isArray(counts) ? counts : [];
+  const selectedNames = selectedSet instanceof Set ? Array.from(selectedSet) : [];
+  const sourceByName = new Map(sourceCounts.map((item) => [String(item?.name || ""), item]));
+
+  const selectedItems = [];
+  for (const name of selectedNames) {
+    const normalizedName = String(name || "").trim();
+    if (!normalizedName) {
+      continue;
+    }
+    const fromSource = sourceByName.get(normalizedName);
+    selectedItems.push(fromSource || { name: normalizedName, count: 0 });
+  }
+
+  const remaining = normalizedQuery
+    ? sourceCounts.filter((item) => String(item.name || "").toLowerCase().includes(normalizedQuery))
+    : sourceCounts;
+  const remainingItems = remaining.filter((item) => !selectedSet.has(item.name));
+  const filteredCounts = [...selectedItems, ...remainingItems];
 
   for (const item of filteredCounts) {
     const row = document.createElement("label");
@@ -2047,6 +2063,8 @@ function renderCheckboxOptions(containerId, counts, selectedSet, query = "") {
       } else {
         selectedSet.delete(item.name);
       }
+      renderCheckboxOptions(containerId, counts, selectedSet, query);
+      updateFilterSummaryCount(containerId, selectedSet.size);
       page = 1;
       await renderCards();
     });
@@ -2065,6 +2083,23 @@ function renderCheckboxOptions(containerId, counts, selectedSet, query = "") {
     row.appendChild(count);
     optionsEl.appendChild(row);
   }
+}
+
+function updateFilterSummaryCount(containerId, selectedCount) {
+  const container = document.getElementById(containerId);
+  if (!container) {
+    return;
+  }
+  const details = container.closest("details");
+  const summary = details?.querySelector("summary");
+  if (!summary) {
+    return;
+  }
+  const baseLabel = String(summary.dataset.baseLabel || summary.textContent || "").replace(/\s+\(\d+\)\s*$/, "").trim();
+  if (!summary.dataset.baseLabel) {
+    summary.dataset.baseLabel = baseLabel;
+  }
+  summary.textContent = selectedCount > 0 ? `${baseLabel} (${selectedCount})` : baseLabel;
 }
 
 function uniqueSorted(values, compareFn = null) {
@@ -2368,8 +2403,21 @@ function renderTagOptions() {
   }
 
   const query = tagSearchQuery.toLowerCase();
+  const selectedItems = [];
+  const selectedSeen = new Set();
+  for (const name of selectedTags) {
+    const found = tagCounts.find((item) => item.name === name);
+    if (!found) {
+      selectedItems.push({ name, count: 0 });
+    } else {
+      selectedItems.push(found);
+    }
+    selectedSeen.add(name);
+  }
   const filtered = tagCounts.filter((t) => !query || t.name.toLowerCase().includes(query));
-  const visible = filtered.slice(0, tagShowLimit);
+  const remaining = filtered.filter((item) => !selectedSeen.has(item.name));
+  const ordered = [...selectedItems, ...remaining];
+  const visible = ordered.slice(0, tagShowLimit);
 
   optionsEl.innerHTML = "";
 
@@ -2386,6 +2434,7 @@ function renderTagOptions() {
       } else {
         selectedTags.delete(tag.name);
       }
+      renderTagOptions();
       page = 1;
       await renderCards();
     });
@@ -2405,25 +2454,38 @@ function renderTagOptions() {
     optionsEl.appendChild(row);
   }
 
-  showMoreBtn.style.display = filtered.length > tagShowLimit ? "" : "none";
+  showMoreBtn.style.display = ordered.length > tagShowLimit ? "" : "none";
+  updateFilterSummaryCount("tag-options", selectedTags.size);
 }
 
 function renderTypeOptions() {
   renderCheckboxOptions("type-options", typeCounts, selectedTypes);
+  updateFilterSummaryCount("type-options", selectedTypes.size);
 }
 
 function renderExtraFilterOptions() {
   renderCheckboxOptions("players-options", playerCounts, selectedPlayers);
+  updateFilterSummaryCount("players-options", selectedPlayers.size);
   renderCheckboxOptions("features-options", featureCounts, selectedFeatures);
+  updateFilterSummaryCount("features-options", selectedFeatures.size);
   renderCheckboxOptions("hardware-options", hardwareCounts, selectedHardware);
+  updateFilterSummaryCount("hardware-options", selectedHardware.size);
   renderCheckboxOptions("accessibility-options", accessibilityCounts, selectedAccessibility);
+  updateFilterSummaryCount("accessibility-options", selectedAccessibility.size);
   renderCheckboxOptions("platforms-options", platformCounts, selectedPlatforms);
+  updateFilterSummaryCount("platforms-options", selectedPlatforms.size);
   renderCheckboxOptions("languages-options", languageCounts, selectedLanguages, languageSearchQuery);
+  updateFilterSummaryCount("languages-options", selectedLanguages.size);
   renderCheckboxOptions("full-audio-languages-options", fullAudioLanguageCounts, selectedFullAudioLanguages, fullAudioLanguageSearchQuery);
+  updateFilterSummaryCount("full-audio-languages-options", selectedFullAudioLanguages.size);
   renderCheckboxOptions("subtitle-languages-options", subtitleLanguageCounts, selectedSubtitleLanguages, subtitleLanguageSearchQuery);
+  updateFilterSummaryCount("subtitle-languages-options", selectedSubtitleLanguages.size);
   renderCheckboxOptions("technologies-options", technologyCounts, selectedTechnologies, technologySearchQuery);
+  updateFilterSummaryCount("technologies-options", selectedTechnologies.size);
   renderCheckboxOptions("developers-options", developerCounts, selectedDevelopers, developerSearchQuery);
+  updateFilterSummaryCount("developers-options", selectedDevelopers.size);
   renderCheckboxOptions("publishers-options", publisherCounts, selectedPublishers, publisherSearchQuery);
+  updateFilterSummaryCount("publishers-options", selectedPublishers.size);
 }
 
 function getFilteredAndSorted(ids) {
