@@ -19,6 +19,7 @@ const crudUtils = window.SWMCollectionsCrud || null;
 const initUtils = window.SWMCollectionsInit || null;
 const selectionBindingsUtils = window.SWMCollectionsSelectionBindings || null;
 const generalBindingsUtils = window.SWMCollectionsGeneralBindings || null;
+const menuBindingsUtils = window.SWMCollectionsMenuBindings || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -2206,44 +2207,16 @@ function bindSortControls() {
 }
 
 function bindCollectionMenuControls() {
-  const showOnlyCollectionForm = (formId) => {
-    hideCollectionMenuForms();
-    document.getElementById(formId)?.classList.remove("hidden");
-  };
-
-  const bindMenuFormSubmit = (buttonId, inputOrSelectId, handler, failMessage, clearAfter = false) => {
-    document.getElementById(buttonId)?.addEventListener("click", () => {
-      const field = document.getElementById(inputOrSelectId);
-      const value = String(field?.value || "");
-      handler(value).catch(() => setStatus(failMessage, true));
-      if (clearAfter && field) {
-        field.value = "";
-      }
-    });
-  };
-
-  document.getElementById("collection-menu-btn")?.addEventListener("click", (event) => {
-    event.stopPropagation();
-    toggleCollectionSelectMenu(false);
-    toggleSortMenu(false);
-    toggleCollectionMenu();
+  menuBindingsUtils.bindCollectionMenuControls({
+    hideForms: hideCollectionMenuForms,
+    toggleCollectionSelectMenu,
+    toggleSortMenu,
+    toggleCollectionMenu,
+    renameHandler: renameActiveCollectionByName,
+    createHandler: createCollectionByName,
+    deleteHandler: deleteCollectionByName,
+    onError: (message) => setStatus(message, true)
   });
-
-  document.getElementById("menu-action-rename")?.addEventListener("click", () => {
-    showOnlyCollectionForm("rename-collection-form");
-  });
-
-  document.getElementById("menu-action-create")?.addEventListener("click", () => {
-    showOnlyCollectionForm("create-collection-form");
-  });
-
-  document.getElementById("menu-action-delete")?.addEventListener("click", () => {
-    showOnlyCollectionForm("delete-collection-form");
-  });
-
-  bindMenuFormSubmit("rename-collection-ok", "rename-collection-input", renameActiveCollectionByName, "Failed to rename collection.", true);
-  bindMenuFormSubmit("create-collection-ok", "create-collection-input", createCollectionByName, "Failed to create collection.", true);
-  bindMenuFormSubmit("delete-collection-ok", "delete-collection-select", deleteCollectionByName, "Failed to delete collection.", false);
 }
 
 function bindFilterControls() {
