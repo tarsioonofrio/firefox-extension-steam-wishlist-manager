@@ -858,28 +858,12 @@ function isMetaIncomplete(meta) {
 }
 
 async function loadWishlistAddedMap() {
+  wishlistOrderSyncResult = "cache-only (sync on wishlist page)";
   const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
   const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
-  const hasPriorityCache = Boolean(
-    cached?.priorityCachedAt && cached?.priorityMap && typeof cached.priorityMap === "object"
-  );
-  try {
-    const syncResult = await browser.runtime.sendMessage({
-      type: "sync-wishlist-order-cache",
-      force: !hasPriorityCache
-    });
-    wishlistOrderSyncResult = syncResult?.ok
-      ? `ok(${Number(syncResult?.updated || 0)})`
-      : `fail(${String(syncResult?.error || "unknown")})`;
-  } catch {
-    wishlistOrderSyncResult = "message-failed";
-    // Non-fatal: keep existing fallback flow.
-  }
 
   const now = Date.now();
-  const refreshed = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
-  const cachedAfterSync = refreshed[WISHLIST_ADDED_CACHE_KEY] || cached;
-  const effectiveCached = cachedAfterSync;
+  const effectiveCached = cached;
   const cachedMap = effectiveCached.map || {};
   const cachedOrderedIds = Array.isArray(effectiveCached.orderedAppIds)
     ? effectiveCached.orderedAppIds.map((id) => String(id || "").trim()).filter(Boolean)

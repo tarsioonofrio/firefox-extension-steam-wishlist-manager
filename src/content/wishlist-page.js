@@ -346,24 +346,29 @@ function buildWishlistSortedFilteredRequest({ steamId, startIndex = 0, pageSize 
   ]);
 }
 
-async function getCurrentSteamId() {
+async function getCurrentWishlistContext() {
   const response = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
     cache: "no-store"
   });
   if (!response.ok) {
-    return "";
+    return { steamId: "", wishlistIds: [] };
   }
   const data = await response.json();
-  return String(
+  return {
+    steamId: String(
     data?.steamid
     || data?.strSteamId
     || data?.str_steamid
     || data?.webapi_token_steamid
     || ""
-  ).trim();
+    ).trim(),
+    wishlistIds: Array.isArray(data?.rgWishlist)
+      ? data.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
+      : []
+  };
 }
 
-async function fetchWishlistOrderFromService(steamId) {
+async function fetchWishlistOrderFromService(steamId, wishlistNowSet) {
   const orderedAppIds = [];
   const priorityMap = {};
   const pageSize = 500;
@@ -390,7 +395,14 @@ async function fetchWishlistOrderFromService(steamId) {
     }
 
     for (const item of items) {
-      const appId = String(item.appid || "").trim();
+      const rawIdNum = Number(item.appid || 0);
+      let appId = String(rawIdNum || "").trim();
+      if (rawIdNum > 0 && wishlistNowSet && wishlistNowSet.size > 0 && !wishlistNowSet.has(appId) && rawIdNum % 10 === 0) {
+        const div10 = String(Math.floor(rawIdNum / 10));
+        if (wishlistNowSet.has(div10)) {
+          appId = div10;
+        }
+      }
       if (!appId || seen.has(appId)) {
         continue;
       }
@@ -418,17 +430,25 @@ async function syncWishlistOrderCache() {
     const now = Date.now();
     const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
     const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+    await browser.storage.local.set({
+      [WISHLIST_ADDED_CACHE_KEY]: {
+        ...cached,
+        priorityLastError: "content-sync-started"
+      }
+    });
     const last = Number(cached.priorityCachedAt || 0);
     if (now - last < ORDER_SYNC_INTERVAL_MS) {
       return;
     }
 
-    const steamId = await getCurrentSteamId();
+    const context = await getCurrentWishlistContext();
+    const steamId = String(context.steamId || "").trim();
+    const wishlistNowSet = new Set(context.wishlistIds || []);
     if (!steamId) {
       return;
     }
 
-    const { orderedAppIds, priorityMap } = await fetchWishlistOrderFromService(steamId);
+    const { orderedAppIds, priorityMap } = await fetchWishlistOrderFromService(steamId, wishlistNowSet);
     if (!Array.isArray(orderedAppIds) || orderedAppIds.length === 0) {
       return;
     }
