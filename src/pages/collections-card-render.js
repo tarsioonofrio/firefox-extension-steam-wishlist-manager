@@ -57,7 +57,7 @@
       card.appidEl.textContent = `AppID: ${appId}`;
     }
     if (card.wishlistAddedEl) {
-      card.wishlistAddedEl.textContent = `Wishlist: ${wishlistDate}`;
+      card.wishlistAddedEl.textContent = `Wishlisted: ${wishlistDate}`;
     }
   }
 
