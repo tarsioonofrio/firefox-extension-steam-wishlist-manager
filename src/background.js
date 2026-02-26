@@ -156,6 +156,9 @@ function normalizeState(rawState) {
   const referencedAppIds = new Set();
 
   for (const collectionName of validCollectionOrder) {
+    if (normalizedDynamicCollections[collectionName]) {
+      continue;
+    }
     if (!state.collections[collectionName]) {
       continue;
     }
@@ -939,6 +942,35 @@ browser.runtime.onMessage.addListener((message, sender) => {
         return { ok: true, state };
       }
 
+      case "add-item-to-collection": {
+        const appId = String(message.appId || "").trim();
+        const item = message.item || {};
+        const collectionName = ensureCollection(state, message.collectionName);
+
+        if (!appId) {
+          throw new Error("appId is required.");
+        }
+        validateAppId(appId);
+
+        const list = Array.isArray(state.collections[collectionName]) ? state.collections[collectionName] : [];
+        if (!list.includes(appId)) {
+          list.push(appId);
+        }
+        if (list.length > MAX_ITEMS_PER_COLLECTION) {
+          state.collections[collectionName] = list.slice(0, MAX_ITEMS_PER_COLLECTION);
+        } else {
+          state.collections[collectionName] = list;
+        }
+
+        state.items[appId] = {
+          appId,
+          title: String(item.title || state.items[appId]?.title || "").slice(0, 200)
+        };
+
+        await setState(state);
+        return { ok: true, state };
+      }
+
       case "remove-item-from-collection": {
         const appId = String(message.appId || "").trim();
         const collectionName = normalizeCollectionName(message.collectionName);
@@ -977,9 +1009,24 @@ browser.runtime.onMessage.addListener((message, sender) => {
         }
         validateAppId(appId);
 
-        const selectedCollectionNames = Array.isArray(message.collectionNames)
+        const requestedCollectionNames = Array.isArray(message.collectionNames)
           ? message.collectionNames.map((name) => normalizeCollectionName(name)).filter(Boolean)
           : [];
+        const selectedCollectionNames = [];
+        const seen = new Set();
+        for (const collectionName of requestedCollectionNames) {
+          if (!collectionName || seen.has(collectionName)) {
+            continue;
+          }
+          seen.add(collectionName);
+          if (state.dynamicCollections?.[collectionName]) {
+            continue;
+          }
+          if (!state.collections?.[collectionName]) {
+            ensureCollection(state, collectionName);
+          }
+          selectedCollectionNames.push(collectionName);
+        }
         const selectedSet = new Set(selectedCollectionNames);
 
         for (const collectionName of Object.keys(state.collections || {})) {
@@ -1007,7 +1054,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
         }
 
         await setState(state);
-        return { ok: true, state };
+        return { ok: true, state, selectedCollectionNames };
       }
 
       case "batch-update-collection": {

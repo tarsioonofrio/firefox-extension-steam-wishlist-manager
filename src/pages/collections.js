@@ -249,7 +249,12 @@ function isDynamicCollectionName(name) {
 }
 
 function getStaticCollectionNames() {
-  return (state?.collectionOrder || []).filter((name) => !isDynamicCollectionName(name));
+  return (state?.collectionOrder || []).filter((name) => {
+    if (isDynamicCollectionName(name)) {
+      return false;
+    }
+    return Array.isArray(state?.collections?.[name]);
+  });
 }
 
 function getDynamicCollectionNames() {
@@ -2724,7 +2729,7 @@ async function applyBatchRemoveFromCurrentCollection() {
 
 function getCollectionsContainingApp(appId) {
   const out = [];
-  for (const collectionName of state?.collectionOrder || []) {
+  for (const collectionName of Object.keys(state?.collections || {})) {
     const list = state?.collections?.[collectionName] || [];
     if (list.includes(appId)) {
       out.push(collectionName);
@@ -2915,19 +2920,30 @@ async function renderCards() {
       setStatus,
       confirmFn: (message) => window.confirm(message),
       onRefreshItem: (id) => refreshSingleItem(id),
-      onSetCollections: async (id, collectionNames) => {
-        await browser.runtime.sendMessage({
-          type: "set-item-collections",
-          appId: id,
-          collectionNames,
-          item: {
-            title: state?.items?.[id]?.title || metaCache?.[id]?.titleText || title
+      onToggleCollection: async (id, collectionName, checked) => {
+        const payload = checked
+          ? {
+            type: "add-item-to-collection",
+            appId: id,
+            collectionName,
+            item: {
+              title: state?.items?.[id]?.title || metaCache?.[id]?.titleText || title
+            }
           }
-        });
+          : {
+            type: "remove-item-from-collection",
+            appId: id,
+            collectionName
+          };
+        const response = await browser.runtime.sendMessage(payload);
+        if (!response?.ok) {
+          throw new Error(String(response?.error || "Failed to update item collections."));
+        }
         await refreshState();
         quickPopulateFiltersFromCache();
         refreshFilterOptionsInBackground();
         await render();
+        setStatus(`Collection ${checked ? "added" : "removed"}: ${collectionName}`);
       },
       batchMode,
       isBatchSelected: (id) => batchSelectedIds.has(id),

@@ -149,7 +149,7 @@
 
     const allCollectionNames = Array.isArray(options?.allCollectionNames) ? options.allCollectionNames : [];
     const selectedCollectionNames = new Set(Array.isArray(options?.selectedCollectionNames) ? options.selectedCollectionNames : []);
-    const onSetCollections = options?.onSetCollections || (() => Promise.resolve());
+    const onToggleCollection = options?.onToggleCollection || (() => Promise.resolve());
     const batchMode = Boolean(options?.batchMode);
     const isBatchSelected = typeof options?.isBatchSelected === "function"
       ? options.isBatchSelected
@@ -179,12 +179,17 @@
           checkbox.type = "checkbox";
           checkbox.checked = selectedCollectionNames.has(collectionName);
           checkbox.addEventListener("change", async () => {
-            if (checkbox.checked) {
-              selectedCollectionNames.add(collectionName);
-            } else {
-              selectedCollectionNames.delete(collectionName);
+            try {
+              await onToggleCollection(appId, collectionName, checkbox.checked);
+              if (checkbox.checked) {
+                selectedCollectionNames.add(collectionName);
+              } else {
+                selectedCollectionNames.delete(collectionName);
+              }
+            } catch (error) {
+              checkbox.checked = !checkbox.checked;
+              setStatus(String(error?.message || "Failed to update collections."), true);
             }
-            await onSetCollections(appId, Array.from(selectedCollectionNames));
           });
 
           const name = document.createElement("span");
@@ -205,11 +210,6 @@
       });
       card.collectionsDropdown.addEventListener("click", (event) => {
         event.stopPropagation();
-      });
-      card.collectionsToggleBtn.addEventListener("blur", () => {
-        setTimeout(() => {
-          card.collectionsDropdown.classList.add("hidden");
-        }, 120);
       });
       if (allCollectionNames.length === 0) {
         card.collectionsDropdown.classList.add("hidden");
