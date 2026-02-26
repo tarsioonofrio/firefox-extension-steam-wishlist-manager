@@ -31,7 +31,7 @@ const SAFE_FETCH_CONCURRENCY_FORCE = 1;
 const SAFE_FETCH_FORCE_BASE_DELAY_MS = 700;
 const SAFE_FETCH_FORCE_JITTER_MS = 500;
 const WISHLIST_SELECT_VALUE = "__wishlist__";
-const RELEASE_YEAR_MIN = 1970;
+const RELEASE_YEAR_DEFAULT_MIN = 2010;
 const steamFetchUtils = window.SWMSteamFetch;
 // Source baseline: SteamDB tags taxonomy (static seed for fast first render).
 const FILTER_SEED = {
@@ -113,11 +113,11 @@ let developerSearchQuery = "";
 let selectedPublishers = new Set();
 let publisherCounts = [];
 let publisherSearchQuery = "";
-let selectedReleaseYears = new Set();
-let releaseYearCounts = [];
-let releaseYearRangeEnabled = false;
-let releaseYearMin = RELEASE_YEAR_MIN;
+let releaseTextEnabled = true;
+let releaseYearRangeEnabled = true;
+let releaseYearMin = RELEASE_YEAR_DEFAULT_MIN;
 let releaseYearMax = new Date().getUTCFullYear() + 1;
+let releaseYearCounts = [];
 let ratingMin = 0;
 let ratingMax = 100;
 let reviewsMin = 0;
@@ -352,10 +352,24 @@ function getReleaseYearMaxBound() {
   return new Date().getUTCFullYear() + 1;
 }
 
-function clampReleaseYearValue(value, fallback) {
+function getReleaseYearMinBound() {
+  const knownYears = [];
+  for (const appId of Object.keys(metaCache || {})) {
+    const info = getReleaseFilterData(appId);
+    if (Number.isFinite(info.year) && info.year > 0) {
+      knownYears.push(info.year);
+    }
+  }
+  if (knownYears.length === 0) {
+    return RELEASE_YEAR_DEFAULT_MIN;
+  }
+  return Math.min(RELEASE_YEAR_DEFAULT_MIN, ...knownYears);
+}
+
+function clampReleaseYearValue(value, fallback, minOverride = null, maxOverride = null) {
   const n = Number(value);
-  const min = RELEASE_YEAR_MIN;
-  const max = getReleaseYearMaxBound();
+  const min = Number.isFinite(Number(minOverride)) ? Number(minOverride) : getReleaseYearMinBound();
+  const max = Number.isFinite(Number(maxOverride)) ? Number(maxOverride) : getReleaseYearMaxBound();
   if (!Number.isFinite(n)) {
     return fallback;
   }
@@ -384,7 +398,8 @@ function normalizeReleaseTextFilterValue(raw) {
   ) {
     return "TBA";
   }
-  if (/^\d{4}$/.test(text)) {
+  // Text toggle should only match non-numeric release labels (e.g., TBA/Soon).
+  if (/\d/.test(text)) {
     return "";
   }
   return text;
@@ -400,7 +415,7 @@ function extractYearFromReleaseText(raw) {
     return 0;
   }
   const year = Number(match[1]);
-  if (!Number.isFinite(year) || year < RELEASE_YEAR_MIN || year > getReleaseYearMaxBound()) {
+  if (!Number.isFinite(year) || year < RELEASE_YEAR_DEFAULT_MIN || year > getReleaseYearMaxBound()) {
     return 0;
   }
   return year;
@@ -412,7 +427,7 @@ function getReleaseFilterData(appId) {
   let year = 0;
   if (Number.isFinite(unix) && unix > 0) {
     const y = new Date(unix * 1000).getUTCFullYear();
-    if (Number.isFinite(y) && y >= RELEASE_YEAR_MIN && y <= getReleaseYearMaxBound()) {
+    if (Number.isFinite(y) && y >= RELEASE_YEAR_DEFAULT_MIN && y <= getReleaseYearMaxBound()) {
       year = y;
     }
   }
@@ -2151,7 +2166,6 @@ function renderExtraFilterOptions() {
   renderCheckboxOptions("technologies-options", technologyCounts, selectedTechnologies, technologySearchQuery);
   renderCheckboxOptions("developers-options", developerCounts, selectedDevelopers, developerSearchQuery);
   renderCheckboxOptions("publishers-options", publisherCounts, selectedPublishers, publisherSearchQuery);
-  renderCheckboxOptions("release-year-options", releaseYearCounts, selectedReleaseYears);
 }
 
 function getFilteredAndSorted(ids) {
@@ -2187,7 +2201,7 @@ function getFiltersContext() {
     selectedTechnologies,
     selectedDevelopers,
     selectedPublishers,
-    selectedReleaseYears,
+    releaseTextEnabled,
     getReleaseFilterData,
     releaseYearRangeEnabled,
     releaseYearMin,
@@ -2786,9 +2800,10 @@ async function render() {
 }
 
 function renderRatingControls() {
+  const minBound = getReleaseYearMinBound();
   const maxBound = getReleaseYearMaxBound();
-  releaseYearMin = clampReleaseYearValue(releaseYearMin, RELEASE_YEAR_MIN);
-  releaseYearMax = clampReleaseYearValue(releaseYearMax, maxBound);
+  releaseYearMin = clampReleaseYearValue(releaseYearMin, RELEASE_YEAR_DEFAULT_MIN, minBound, maxBound);
+  releaseYearMax = clampReleaseYearValue(releaseYearMax, maxBound, minBound, maxBound);
   if (releaseYearMin > releaseYearMax) {
     releaseYearMin = releaseYearMax;
   }
@@ -2802,10 +2817,11 @@ function renderRatingControls() {
     discountMax,
     priceMin,
     priceMax,
+    releaseTextEnabled,
     releaseYearRangeEnabled,
     releaseYearMin,
     releaseYearMax,
-    releaseYearRangeMinBound: RELEASE_YEAR_MIN,
+    releaseYearRangeMinBound: minBound,
     releaseYearRangeMaxBound: maxBound
   });
 }
@@ -2868,8 +2884,7 @@ function resetAllFiltersState() {
       selectedSubtitleLanguages,
       selectedTechnologies,
       selectedDevelopers,
-      selectedPublishers,
-      selectedReleaseYears
+      selectedPublishers
     ]
   });
   languageSearchQuery = reset.languageSearchQuery;
@@ -2880,8 +2895,9 @@ function resetAllFiltersState() {
   publisherSearchQuery = reset.publisherSearchQuery;
   tagSearchQuery = reset.tagSearchQuery;
   tagShowLimit = reset.tagShowLimit;
-  releaseYearRangeEnabled = false;
-  releaseYearMin = RELEASE_YEAR_MIN;
+  releaseTextEnabled = true;
+  releaseYearRangeEnabled = true;
+  releaseYearMin = RELEASE_YEAR_DEFAULT_MIN;
   releaseYearMax = getReleaseYearMaxBound();
   clearFilterSearchInputs();
 }
@@ -3106,6 +3122,12 @@ function bindFilterControls() {
       page = 1;
       await renderCards();
     },
+    onReleaseTextToggle: async (enabled) => {
+      releaseTextEnabled = Boolean(enabled);
+      renderRatingControls();
+      page = 1;
+      await renderCards();
+    },
     onReleaseYearRangeToggle: async (enabled) => {
       releaseYearRangeEnabled = Boolean(enabled);
       renderRatingControls();
@@ -3113,15 +3135,18 @@ function bindFilterControls() {
       await renderCards();
     },
     onReleaseYearMinInput: async (rawValue) => {
-      const next = clampReleaseYearValue(rawValue, releaseYearMin);
-      releaseYearMin = Math.max(RELEASE_YEAR_MIN, Math.min(next, releaseYearMax));
+      const minBound = getReleaseYearMinBound();
+      const maxBound = getReleaseYearMaxBound();
+      const next = clampReleaseYearValue(rawValue, releaseYearMin, minBound, maxBound);
+      releaseYearMin = Math.max(minBound, Math.min(next, releaseYearMax));
       renderRatingControls();
       page = 1;
       await renderCards();
     },
     onReleaseYearMaxInput: async (rawValue) => {
-      const next = clampReleaseYearValue(rawValue, releaseYearMax);
+      const minBound = getReleaseYearMinBound();
       const maxBound = getReleaseYearMaxBound();
+      const next = clampReleaseYearValue(rawValue, releaseYearMax, minBound, maxBound);
       releaseYearMax = Math.min(maxBound, Math.max(next, releaseYearMin));
       renderRatingControls();
       page = 1;
