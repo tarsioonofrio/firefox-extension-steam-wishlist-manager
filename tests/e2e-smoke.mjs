@@ -117,8 +117,28 @@ function createRuntime(state) {
 }
 
 function createFetchMock() {
+  const localTagSeed = {
+    tags: [
+      { tagid: 19, name: "Action" },
+      { tagid: 122, name: "RPG" },
+      { tagid: 4434, name: "JRPG" }
+    ]
+  };
   return async (url) => {
     const href = String(url || "");
+    if (href.includes("steamdb-tags-hardcoded.json")) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return localTagSeed;
+        },
+        async text() {
+          return JSON.stringify(localTagSeed);
+        }
+      };
+    }
+
     if (href.includes("/dynamicstore/userdata/")) {
       return {
         ok: true,

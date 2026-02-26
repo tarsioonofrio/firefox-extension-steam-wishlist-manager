@@ -32,6 +32,22 @@ const SAFE_FETCH_FORCE_BASE_DELAY_MS = 700;
 const SAFE_FETCH_FORCE_JITTER_MS = 500;
 const WISHLIST_SELECT_VALUE = "__wishlist__";
 const steamFetchUtils = window.SWMSteamFetch;
+// Source baseline: SteamDB tags taxonomy (static seed for fast first render).
+const FILTER_SEED = {
+  tags: [],
+  types: ["Game", "DLC", "Demo", "Application", "Music", "Video", "Series", "Tool", "Beta", "Unknown"],
+  players: ["Single-player", "Multi-player", "Co-op", "PvP", "Online PvP", "MMO"],
+  features: ["Achievements", "Steam Cloud", "Trading Cards", "Leaderboards", "Remote Play Together"],
+  hardware: ["Full controller support", "Tracked Controller Support", "VR Supported"],
+  accessibility: ["Subtitles", "Full audio", "Captions available"],
+  platforms: ["Windows", "macOS", "Linux"],
+  languages: ["English", "Portuguese - Brazil", "Spanish - Spain", "French", "German", "Japanese", "Korean", "Russian", "Simplified Chinese", "Traditional Chinese"],
+  technologies: ["Steam Cloud", "Steam Workshop", "Valve Anti-Cheat", "Remote Play", "HDR"],
+  developers: ["Valve", "CAPCOM Co., Ltd.", "SEGA", "Ubisoft", "Square Enix", "Bandai Namco", "Electronic Arts", "Bethesda", "Larian Studios", "FromSoftware"],
+  publishers: ["Valve", "CAPCOM Co., Ltd.", "SEGA", "Ubisoft", "Square Enix", "Bandai Namco", "Electronic Arts", "Bethesda", "Sony Interactive Entertainment"],
+  releaseYears: ["2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016", "2015"]
+};
+const STEAMDB_TAGS_JSON_PATH = "src/data/steamdb-tags-hardcoded.json";
 
 let state = null;
 let activeCollection = "__all__";
@@ -61,6 +77,7 @@ let tagSearchQuery = "";
 let tagShowLimit = TAG_SHOW_STEP;
 let tagCounts = [];
 let tagCountsSource = "none";
+let steamDbTagSeedNames = null;
 let selectedTypes = new Set();
 let typeCounts = [];
 let selectedPlayers = new Set();
@@ -921,6 +938,7 @@ async function refreshSingleItem(appId) {
 }
 
 async function loadMetaCache() {
+  await loadSteamDbTagSeedFromJson();
   const stored = await browser.storage.local.get(META_CACHE_KEY);
   metaCache = stored[META_CACHE_KEY] || {};
 }
@@ -1625,9 +1643,111 @@ function uniqueSorted(values, compareFn = null) {
   return out;
 }
 
-function quickPopulateFiltersFromCache() {
-  const fromWishlist = Object.keys(wishlistAddedMap || {});
-  const appIds = fromWishlist.length > 0 ? fromWishlist : getAllKnownAppIds();
+function namesToCountObjects(values) {
+  return uniqueSorted(values).map((name) => ({ name }));
+}
+
+function getTagSeedNames() {
+  return Array.isArray(steamDbTagSeedNames) && steamDbTagSeedNames.length > 0
+    ? steamDbTagSeedNames
+    : [];
+}
+
+async function loadSteamDbTagSeedFromJson() {
+  if (Array.isArray(steamDbTagSeedNames) && steamDbTagSeedNames.length > 0) {
+    return;
+  }
+
+  try {
+    const url = browser?.runtime?.getURL
+      ? browser.runtime.getURL(STEAMDB_TAGS_JSON_PATH)
+      : STEAMDB_TAGS_JSON_PATH;
+    const payload = await fetchSteamJson(url, { cache: "no-store" });
+    const tags = Array.isArray(payload?.tags) ? payload.tags : [];
+    const out = [];
+    const seen = new Set();
+    for (const entry of tags) {
+      const name = String(entry?.name || "").trim();
+      if (!name || seen.has(name)) {
+        continue;
+      }
+      seen.add(name);
+      out.push(name);
+    }
+    if (out.length > 0) {
+      steamDbTagSeedNames = out;
+    }
+  } catch {
+    // Fallback keeps built-in hardcoded tags list.
+  }
+}
+
+function applyHardcodedFilterSeeds() {
+  tagCounts = namesToCountObjects(getTagSeedNames());
+  typeCounts = namesToCountObjects(FILTER_SEED.types);
+  playerCounts = namesToCountObjects(FILTER_SEED.players);
+  featureCounts = namesToCountObjects(FILTER_SEED.features);
+  hardwareCounts = namesToCountObjects(FILTER_SEED.hardware);
+  accessibilityCounts = namesToCountObjects(FILTER_SEED.accessibility);
+  platformCounts = namesToCountObjects(FILTER_SEED.platforms);
+  languageCounts = namesToCountObjects(FILTER_SEED.languages);
+  fullAudioLanguageCounts = namesToCountObjects(FILTER_SEED.languages);
+  subtitleLanguageCounts = namesToCountObjects(FILTER_SEED.languages);
+  technologyCounts = namesToCountObjects(FILTER_SEED.technologies);
+  developerCounts = namesToCountObjects(FILTER_SEED.developers);
+  publisherCounts = namesToCountObjects(FILTER_SEED.publishers);
+  releaseYearCounts = namesToCountObjects(FILTER_SEED.releaseYears).sort((a, b) => Number(b.name) - Number(a.name));
+  if (tagCountsSource === "none") {
+    tagCountsSource = "hardcoded";
+  }
+}
+
+function mergeSeedWithNames(seedNames, dynamicNames, compareFn = null) {
+  const merged = [];
+  const seen = new Set();
+  const pushName = (raw) => {
+    const name = String(raw || "").trim();
+    if (!name || seen.has(name)) {
+      return;
+    }
+    seen.add(name);
+    merged.push(name);
+  };
+
+  const sortedDynamic = uniqueSorted(dynamicNames || [], compareFn);
+  for (const name of sortedDynamic) {
+    pushName(name);
+  }
+  for (const name of seedNames || []) {
+    pushName(name);
+  }
+  return merged.map((name) => ({ name }));
+}
+
+function mergeOrderedSeedWithNames(seedNames, dynamicNames) {
+  const merged = [];
+  const seen = new Set();
+  const pushName = (raw) => {
+    const name = String(raw || "").trim();
+    if (!name || seen.has(name)) {
+      return;
+    }
+    seen.add(name);
+    merged.push(name);
+  };
+
+  for (const name of seedNames || []) {
+    pushName(name);
+  }
+  for (const name of uniqueSorted(dynamicNames || [])) {
+    pushName(name);
+  }
+
+  return merged.map((name) => ({ name }));
+}
+
+function populateGlobalFiltersFromMetaCache() {
+  const appIds = Object.keys(metaCache || {});
   if (appIds.length === 0) {
     return;
   }
@@ -1668,22 +1788,91 @@ function quickPopulateFiltersFromCache() {
   }
 
   if (tagCountsSource !== "popular-seed" && tagCountsSource !== "wishlist-frequency") {
-    tagCounts = uniqueSorted(tags).map((name) => ({ name }));
-    tagCountsSource = "cache-fast";
+    tagCounts = mergeOrderedSeedWithNames(getTagSeedNames(), tags);
+    tagCountsSource = "global-meta";
   }
-  typeCounts = uniqueSorted(types).map((name) => ({ name }));
-  playerCounts = uniqueSorted(players).map((name) => ({ name }));
-  featureCounts = uniqueSorted(features).map((name) => ({ name }));
-  hardwareCounts = uniqueSorted(hardware).map((name) => ({ name }));
-  accessibilityCounts = uniqueSorted(accessibility).map((name) => ({ name }));
-  platformCounts = uniqueSorted(platforms).map((name) => ({ name }));
-  languageCounts = uniqueSorted(languages).map((name) => ({ name }));
-  fullAudioLanguageCounts = uniqueSorted(fullAudioLanguages).map((name) => ({ name }));
-  subtitleLanguageCounts = uniqueSorted(subtitleLanguages).map((name) => ({ name }));
-  technologyCounts = uniqueSorted(technologies).map((name) => ({ name }));
-  developerCounts = uniqueSorted(developers).map((name) => ({ name }));
-  publisherCounts = uniqueSorted(publishers).map((name) => ({ name }));
-  releaseYearCounts = uniqueSorted(years, (a, b) => Number(b) - Number(a)).map((name) => ({ name }));
+  typeCounts = mergeSeedWithNames(FILTER_SEED.types, types);
+  playerCounts = mergeSeedWithNames(FILTER_SEED.players, players);
+  featureCounts = mergeSeedWithNames(FILTER_SEED.features, features);
+  hardwareCounts = mergeSeedWithNames(FILTER_SEED.hardware, hardware);
+  accessibilityCounts = mergeSeedWithNames(FILTER_SEED.accessibility, accessibility);
+  platformCounts = mergeSeedWithNames(FILTER_SEED.platforms, platforms);
+  languageCounts = mergeSeedWithNames(FILTER_SEED.languages, languages);
+  fullAudioLanguageCounts = mergeSeedWithNames(FILTER_SEED.languages, fullAudioLanguages);
+  subtitleLanguageCounts = mergeSeedWithNames(FILTER_SEED.languages, subtitleLanguages);
+  technologyCounts = mergeSeedWithNames(FILTER_SEED.technologies, technologies);
+  developerCounts = mergeSeedWithNames(FILTER_SEED.developers, developers);
+  publisherCounts = mergeSeedWithNames(FILTER_SEED.publishers, publishers);
+  releaseYearCounts = mergeSeedWithNames(FILTER_SEED.releaseYears, years, (a, b) => Number(b) - Number(a))
+    .sort((a, b) => Number(b.name) - Number(a.name));
+}
+
+function quickPopulateFiltersFromCache() {
+  applyHardcodedFilterSeeds();
+  populateGlobalFiltersFromMetaCache();
+
+  const fromWishlist = Object.keys(wishlistAddedMap || {});
+  const appIds = fromWishlist.length > 0 ? fromWishlist : getAllKnownAppIds();
+  if (appIds.length === 0) {
+    renderTagOptions();
+    renderTypeOptions();
+    renderExtraFilterOptions();
+    return;
+  }
+
+  const tags = [];
+  const types = [];
+  const players = [];
+  const features = [];
+  const hardware = [];
+  const accessibility = [];
+  const platforms = [];
+  const languages = [];
+  const fullAudioLanguages = [];
+  const subtitleLanguages = [];
+  const technologies = [];
+  const developers = [];
+  const publishers = [];
+  const years = [];
+
+  for (const appId of appIds) {
+    tags.push(...getMetaTags(appId));
+    types.push(getMetaType(appId));
+    players.push(...getMetaArray(appId, "players"));
+    features.push(...getMetaArray(appId, "features"));
+    hardware.push(...getMetaArray(appId, "hardware"));
+    accessibility.push(...getMetaArray(appId, "accessibility"));
+    platforms.push(...getMetaArray(appId, "platforms"));
+    languages.push(...getMetaArray(appId, "languages"));
+    fullAudioLanguages.push(...getMetaArray(appId, "fullAudioLanguages"));
+    subtitleLanguages.push(...getMetaArray(appId, "subtitleLanguages"));
+    technologies.push(...getMetaArray(appId, "technologies"));
+    developers.push(...getMetaArray(appId, "developers"));
+    publishers.push(...getMetaArray(appId, "publishers"));
+    const releaseUnix = getMetaNumber(appId, "releaseUnix", 0);
+    if (releaseUnix > 0) {
+      years.push(String(new Date(releaseUnix * 1000).getUTCFullYear()));
+    }
+  }
+
+  if (tagCountsSource !== "popular-seed" && tagCountsSource !== "wishlist-frequency") {
+    tagCounts = mergeOrderedSeedWithNames(getTagSeedNames(), tags);
+    tagCountsSource = "wishlist-cache";
+  }
+  typeCounts = mergeSeedWithNames(FILTER_SEED.types, types);
+  playerCounts = mergeSeedWithNames(FILTER_SEED.players, players);
+  featureCounts = mergeSeedWithNames(FILTER_SEED.features, features);
+  hardwareCounts = mergeSeedWithNames(FILTER_SEED.hardware, hardware);
+  accessibilityCounts = mergeSeedWithNames(FILTER_SEED.accessibility, accessibility);
+  platformCounts = mergeSeedWithNames(FILTER_SEED.platforms, platforms);
+  languageCounts = mergeSeedWithNames(FILTER_SEED.languages, languages);
+  fullAudioLanguageCounts = mergeSeedWithNames(FILTER_SEED.languages, fullAudioLanguages);
+  subtitleLanguageCounts = mergeSeedWithNames(FILTER_SEED.languages, subtitleLanguages);
+  technologyCounts = mergeSeedWithNames(FILTER_SEED.technologies, technologies);
+  developerCounts = mergeSeedWithNames(FILTER_SEED.developers, developers);
+  publisherCounts = mergeSeedWithNames(FILTER_SEED.publishers, publishers);
+  releaseYearCounts = mergeSeedWithNames(FILTER_SEED.releaseYears, years, (a, b) => Number(b) - Number(a))
+    .sort((a, b) => Number(b.name) - Number(a.name));
 
   renderTagOptions();
   renderTypeOptions();
