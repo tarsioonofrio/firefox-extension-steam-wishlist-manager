@@ -10,7 +10,12 @@
       fragment,
       title,
       link,
+      cardEl: fragment.querySelector(".card"),
       batchCheckbox: fragment.querySelector(".card-batch-checkbox"),
+      orderUpBtn: fragment.querySelector(".order-up-btn"),
+      orderDownBtn: fragment.querySelector(".order-down-btn"),
+      orderPositionInput: fragment.querySelector(".order-position-input"),
+      orderPositionApplyBtn: fragment.querySelector(".order-position-apply-btn"),
       coverLink: fragment.querySelector(".cover-link"),
       cover: fragment.querySelector(".cover"),
       titleEl: fragment.querySelector(".title"),
@@ -105,6 +110,12 @@
       ? options.isBatchSelected
       : () => false;
     const onBatchSelectionChange = options?.onBatchSelectionChange || (() => {});
+    const reorderEnabled = Boolean(options?.reorderEnabled);
+    const itemPosition = Number(options?.itemPosition || 0);
+    const totalItems = Number(options?.totalItems || 0);
+    const onMoveUp = options?.onMoveUp || (() => Promise.resolve());
+    const onMoveDown = options?.onMoveDown || (() => Promise.resolve());
+    const onMoveToPosition = options?.onMoveToPosition || (() => Promise.resolve());
 
     if (card.collectionsDropdown) {
       card.collectionsDropdown.innerHTML = "";
@@ -162,10 +173,39 @@
     if (card.batchCheckbox) {
       card.batchCheckbox.checked = Boolean(isBatchSelected(appId));
       card.batchCheckbox.disabled = !batchMode;
+      card.batchCheckbox.style.display = batchMode ? "" : "none";
       card.batchCheckbox.addEventListener("change", () => {
         onBatchSelectionChange(appId, card.batchCheckbox.checked);
       });
     }
+
+    if (card.orderUpBtn) {
+      card.orderUpBtn.disabled = !reorderEnabled || itemPosition <= 1;
+      card.orderUpBtn.addEventListener("click", () => {
+        onMoveUp(appId).catch(() => setStatus("Failed to move item up.", true));
+      });
+    }
+
+    if (card.orderDownBtn) {
+      card.orderDownBtn.disabled = !reorderEnabled || itemPosition <= 0 || itemPosition >= totalItems;
+      card.orderDownBtn.addEventListener("click", () => {
+        onMoveDown(appId).catch(() => setStatus("Failed to move item down.", true));
+      });
+    }
+
+    if (card.orderPositionInput) {
+      card.orderPositionInput.value = itemPosition > 0 ? String(itemPosition) : "";
+      card.orderPositionInput.disabled = !reorderEnabled;
+    }
+
+    if (card.orderPositionApplyBtn) {
+      card.orderPositionApplyBtn.disabled = !reorderEnabled;
+      card.orderPositionApplyBtn.addEventListener("click", () => {
+        const target = Number(card.orderPositionInput?.value || 0);
+        onMoveToPosition(appId, target).catch(() => setStatus("Failed to move item to position.", true));
+      });
+    }
+
   }
 
   function hydrateCardMeta(options) {

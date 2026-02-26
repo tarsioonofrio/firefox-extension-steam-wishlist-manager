@@ -359,7 +359,7 @@ main {
 
 .card {
   display: grid;
-  grid-template-columns: 184px 1fr;
+  grid-template-columns: 72px 184px 1fr;
   gap: 10px;
   align-items: stretch;
   border: 1px solid #2f445a;
@@ -368,8 +368,66 @@ main {
   overflow: hidden;
 }
 
-.cards.batch-mode .card {
-  grid-template-columns: 30px 184px 1fr;
+.order-col {
+  display: grid;
+  grid-template-rows: auto auto auto auto auto;
+  gap: 4px;
+  align-content: start;
+  padding: 6px 0 6px 6px;
+  grid-column: 1;
+  grid-row: 1;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.order-col button {
+  height: 24px;
+  width: 100%;
+  padding: 0 4px;
+  font-size: 11px;
+}
+
+.order-position-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  gap: 2px;
+}
+
+.order-position-input {
+  height: 22px;
+  padding: 2px 4px;
+  font-size: 11px;
+  text-align: center;
+}
+
+.order-position-apply-btn {
+  height: 22px;
+  min-width: 0;
+  font-size: 10px;
+  padding: 0;
+}
+
+.card-batch-checkbox {
+  display: none;
+  width: 16px;
+  height: 16px;
+  justify-self: center;
+}
+
+.cards.batch-mode .card-batch-checkbox {
+  display: block;
+}
+
+.cards.batch-mode .order-col {
+  border-right: 1px solid #2f445a;
+}
+
+.cards.batch-mode .order-col .order-up-btn,
+.cards.batch-mode .order-col .order-down-btn,
+.cards.batch-mode .order-col .order-position-row {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .batch-col {
@@ -382,16 +440,13 @@ main {
   display: flex;
 }
 
-.card-batch-checkbox {
-  width: 16px;
-  height: 16px;
-}
-
 .cover-link,
 .cover {
   width: 184px;
   height: 69px;
   display: block;
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .cover {
@@ -406,6 +461,8 @@ main {
   align-items: start;
   padding: 8px 0;
   min-width: 0;
+  grid-column: 3;
+  grid-row: 1;
 }
 
 .title {
@@ -605,13 +662,26 @@ main {
   .title-row,
   .left-col,
   .right-col,
-  .batch-col {
+  .batch-col,
+  .order-col {
     grid-column: 1;
     grid-row: auto;
   }
 
-  .batch-col {
-    display: none !important;
+  .order-col {
+    grid-template-columns: repeat(5, auto);
+    grid-template-rows: auto;
+    padding: 0;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .order-position-row {
+    grid-template-columns: auto auto;
+  }
+
+  .order-position-input {
+    width: 56px;
   }
 
   .right-col {

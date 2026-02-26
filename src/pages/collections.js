@@ -2179,6 +2179,64 @@ function getCollectionsContainingApp(appId) {
   return out;
 }
 
+function canManualReorder() {
+  return sourceMode === "collections" && activeCollection !== "__all__" && sortMode === "position" && !batchMode;
+}
+
+function getActiveCollectionOrder() {
+  if (sourceMode !== "collections" || activeCollection === "__all__") {
+    return [];
+  }
+  return Array.isArray(state?.collections?.[activeCollection]) ? [...state.collections[activeCollection]] : [];
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+async function persistActiveCollectionOrder(nextOrder) {
+  if (sourceMode !== "collections" || activeCollection === "__all__") {
+    return;
+  }
+  await browser.runtime.sendMessage({
+    type: "set-collection-items-order",
+    collectionName: activeCollection,
+    appIds: nextOrder
+  });
+  await refreshState();
+  await render();
+}
+
+async function moveCollectionItemByDelta(appId, delta) {
+  const order = getActiveCollectionOrder();
+  const index = order.indexOf(appId);
+  if (index < 0) {
+    return;
+  }
+  const target = clamp(index + delta, 0, order.length - 1);
+  if (target === index) {
+    return;
+  }
+  const [item] = order.splice(index, 1);
+  order.splice(target, 0, item);
+  await persistActiveCollectionOrder(order);
+}
+
+async function moveCollectionItemToPosition(appId, targetPositionOneBased) {
+  const order = getActiveCollectionOrder();
+  const index = order.indexOf(appId);
+  if (index < 0) {
+    return;
+  }
+  const targetZero = clamp(Number(targetPositionOneBased || 1) - 1, 0, order.length - 1);
+  if (!Number.isFinite(targetZero) || targetZero === index) {
+    return;
+  }
+  const [item] = order.splice(index, 1);
+  order.splice(targetZero, 0, item);
+  await persistActiveCollectionOrder(order);
+}
+
 async function renderCards() {
   const cardsEl = document.getElementById("cards");
   const emptyEl = document.getElementById("empty");
@@ -2206,6 +2264,12 @@ async function renderCards() {
   }
 
   const appIds = getFilteredAndSorted(sourceIds);
+  const manualReorderEnabled = canManualReorder();
+  const activeOrder = getActiveCollectionOrder();
+  const orderIndex = new Map();
+  for (let i = 0; i < activeOrder.length; i += 1) {
+    orderIndex.set(activeOrder[i], i + 1);
+  }
   renderPager(appIds.length);
 
   const start = (page - 1) * PAGE_SIZE;
@@ -2272,6 +2336,12 @@ async function renderCards() {
         }
         renderBatchMenuState();
       },
+      reorderEnabled: manualReorderEnabled,
+      itemPosition: Number(orderIndex.get(appId) || 0),
+      totalItems: activeOrder.length,
+      onMoveUp: (id) => moveCollectionItemByDelta(id, -1),
+      onMoveDown: (id) => moveCollectionItemByDelta(id, 1),
+      onMoveToPosition: (id, position) => moveCollectionItemToPosition(id, position),
       onRemoveItem: async (id, collectionName) => {
         await browser.runtime.sendMessage({
           type: "remove-item-from-collection",

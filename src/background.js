@@ -970,6 +970,30 @@ browser.runtime.onMessage.addListener((message, sender) => {
         return { ok: true, updated: appIds.length, state };
       }
 
+      case "set-collection-items-order": {
+        const collectionName = normalizeCollectionName(message.collectionName || "");
+        if (!collectionName || !state.collections[collectionName]) {
+          throw new Error("Collection not found.");
+        }
+
+        const nextOrder = sanitizeAppIdList(message.appIds);
+        const current = state.collections[collectionName] || [];
+        if (nextOrder.length !== current.length) {
+          throw new Error("Invalid collection order payload length.");
+        }
+
+        const currentSet = new Set(current);
+        for (const appId of nextOrder) {
+          if (!currentSet.has(appId)) {
+            throw new Error("Invalid collection order payload items.");
+          }
+        }
+
+        state.collections[collectionName] = nextOrder;
+        await setState(state);
+        return { ok: true, state };
+      }
+
       case "create-collection": {
         ensureCollection(state, message.collectionName);
         await setState(state);
