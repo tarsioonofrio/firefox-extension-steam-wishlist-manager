@@ -479,7 +479,7 @@ async function fetchWishlistOrderFromService(steamId, targetCount = 0) {
     }
 
     const responseBytes = await fetchSteamBytes(url.toString(), {
-      credentials: "include"
+      credentials: "omit"
     });
     const items = decodeWishlistSortedFilteredResponse(responseBytes);
     if (items.length === 0) {

@@ -563,7 +563,7 @@ async function syncWishlistOrderCache(force = false) {
 
     const response = await fetch(url.toString(), {
       cache: "no-store",
-      credentials: "include"
+      credentials: "omit"
     });
     if (!response.ok) {
       throw new Error(`Wishlist order request failed (${response.status})`);
