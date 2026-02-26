@@ -22,6 +22,7 @@ const generalBindingsUtils = window.SWMCollectionsGeneralBindings;
 const menuBindingsUtils = window.SWMCollectionsMenuBindings;
 const cardRenderUtils = window.SWMCollectionsCardRender;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
+const TAG_SEED_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
 const TAG_SHOW_STEP = 12;
@@ -59,6 +60,7 @@ let selectedTags = new Set();
 let tagSearchQuery = "";
 let tagShowLimit = TAG_SHOW_STEP;
 let tagCounts = [];
+let tagCountsSource = "none";
 let selectedTypes = new Set();
 let typeCounts = [];
 let selectedPlayers = new Set();
@@ -1326,6 +1328,7 @@ async function ensureTagCounts() {
   const appIds = Object.keys(wishlistAddedMap);
   const bucket = buildTagCacheBucketKey();
   const day = todayKey();
+  const now = Date.now();
 
   const storage = await browser.storage.local.get(TAG_COUNTS_CACHE_KEY);
   const cache = storage[TAG_COUNTS_CACHE_KEY] || {};
@@ -1340,7 +1343,49 @@ async function ensureTagCounts() {
 
   if (cachedBucket && cachedBucket.day === day && cachedBucket.appCount === appIds.length) {
     tagCounts = Array.isArray(cachedBucket.counts) ? cachedBucket.counts : [];
+    tagCountsSource = "wishlist-frequency";
     return;
+  }
+
+  const cachedSeedCounts = Array.isArray(cachedBucket?.seedCounts) ? cachedBucket.seedCounts : [];
+  const seedIsFresh = Number.isFinite(Number(cachedBucket?.seedFetchedAt))
+    && (now - Number(cachedBucket.seedFetchedAt) < TAG_SEED_REFRESH_INTERVAL_MS);
+
+  if (seedIsFresh && cachedSeedCounts.length > 0) {
+    tagCounts = cachedSeedCounts;
+    tagCountsSource = "popular-seed";
+    renderTagOptions();
+  } else {
+    try {
+      const popular = await fetchSteamJson("https://store.steampowered.com/tagdata/populartags/english", {
+        credentials: "omit",
+        cache: "no-store"
+      });
+      const seedCounts = Array.isArray(popular)
+        ? popular
+          .map((entry, index) => {
+            const name = String(entry?.name || "").trim();
+            if (!name) {
+              return null;
+            }
+            return { name, seedOrder: index };
+          })
+          .filter(Boolean)
+        : [];
+      if (seedCounts.length > 0) {
+        tagCounts = seedCounts;
+        tagCountsSource = "popular-seed";
+        renderTagOptions();
+        cache[bucket] = {
+          ...(cachedBucket || {}),
+          seedFetchedAt: now,
+          seedCounts
+        };
+        await browser.storage.local.set({ [TAG_COUNTS_CACHE_KEY]: cache });
+      }
+    } catch {
+      // Keep existing tags if seed endpoint is unavailable.
+    }
   }
 
   setStatus("Recalculating tag frequencies for full wishlist...");
@@ -1349,12 +1394,15 @@ async function ensureTagCounts() {
   const nextCounts = buildTagCountsFromAppIds(appIds);
   if (nextCounts.length === 0 && cachedBucket && Array.isArray(cachedBucket.counts) && cachedBucket.counts.length > 0) {
     tagCounts = cachedBucket.counts;
+    tagCountsSource = "wishlist-frequency";
     setStatus("Steam blocked metadata refresh. Keeping previous tag filters.", true);
     return;
   }
   tagCounts = nextCounts;
+  tagCountsSource = "wishlist-frequency";
 
   cache[bucket] = {
+    ...(cachedBucket || {}),
     day,
     appCount: appIds.length,
     counts: tagCounts
@@ -1619,7 +1667,10 @@ function quickPopulateFiltersFromCache() {
     }
   }
 
-  tagCounts = uniqueSorted(tags).map((name) => ({ name }));
+  if (tagCountsSource !== "popular-seed" && tagCountsSource !== "wishlist-frequency") {
+    tagCounts = uniqueSorted(tags).map((name) => ({ name }));
+    tagCountsSource = "cache-fast";
+  }
   typeCounts = uniqueSorted(types).map((name) => ({ name }));
   playerCounts = uniqueSorted(players).map((name) => ({ name }));
   featureCounts = uniqueSorted(features).map((name) => ({ name }));
@@ -1687,7 +1738,8 @@ function renderTagOptions() {
 
     const count = document.createElement("span");
     count.className = "tag-count";
-    count.textContent = formatCompactCount(tag.count);
+    const hasCount = Number.isFinite(Number(tag.count)) && Number(tag.count) > 0;
+    count.textContent = hasCount ? formatCompactCount(tag.count) : "";
 
     row.appendChild(checkbox);
     row.appendChild(name);

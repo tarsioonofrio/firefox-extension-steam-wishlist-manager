@@ -135,6 +135,23 @@ function createFetchMock() {
       };
     }
 
+    if (href.includes("/tagdata/populartags/english")) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return [
+            { tagid: 19, name: "Action" },
+            { tagid: 122, name: "RPG" },
+            { tagid: 4434, name: "JRPG" }
+          ];
+        },
+        async text() {
+          return "";
+        }
+      };
+    }
+
     if (href.includes("/api/appdetails")) {
       const appIdMatch = href.match(/appids=(\d+)/);
       const appId = appIdMatch?.[1] || "0";
