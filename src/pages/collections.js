@@ -29,6 +29,8 @@ let wishlistAddedMap = {};
 let wishlistOrderedAppIds = [];
 let wishlistPriorityMap = {};
 let wishlistPriorityCachedAt = 0;
+let wishlistPriorityLastError = "";
+let wishlistOrderSyncResult = "";
 let wishlistSortSignature = "";
 let wishlistSortOrders = {};
 let wishlistSnapshotDay = "";
@@ -532,6 +534,8 @@ function renderOrderDebug() {
   el.textContent = [
     `Order debug`,
     `source=${sourceMode}`,
+    `sync=${wishlistOrderSyncResult || "-"}`,
+    `lastError=${wishlistPriorityLastError || "-"}`,
     `priorityCachedAt=${cachedAtText}`,
     `orderedCount=${wishlistOrderedAppIds.length}`,
     `first10=${first10 || "-"}`
@@ -858,11 +862,15 @@ async function loadWishlistAddedMap() {
     cached?.priorityCachedAt && cached?.priorityMap && typeof cached.priorityMap === "object"
   );
   try {
-    await browser.runtime.sendMessage({
+    const syncResult = await browser.runtime.sendMessage({
       type: "sync-wishlist-order-cache",
       force: !hasPriorityCache
     });
+    wishlistOrderSyncResult = syncResult?.ok
+      ? `ok(${Number(syncResult?.updated || 0)})`
+      : `fail(${String(syncResult?.error || "unknown")})`;
   } catch {
+    wishlistOrderSyncResult = "message-failed";
     // Non-fatal: keep existing fallback flow.
   }
 
@@ -878,6 +886,7 @@ async function loadWishlistAddedMap() {
     ? effectiveCached.priorityMap
     : {};
   wishlistPriorityCachedAt = Number(effectiveCached.priorityCachedAt || 0);
+  wishlistPriorityLastError = String(effectiveCached.priorityLastError || "");
   const lastFullSyncAt = Number(effectiveCached.lastFullSyncAt || 0);
   wishlistPriorityMap = {};
   for (const [appId, priority] of Object.entries(cachedPriorityMap)) {

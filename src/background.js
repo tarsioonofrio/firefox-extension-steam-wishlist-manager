@@ -482,7 +482,10 @@ async function syncWishlistOrderCache(force = false) {
     return { ok: true, skipped: true };
   }
 
-  const userDataResponse = await fetch("https://store.steampowered.com/dynamicstore/userdata/", { cache: "no-store" });
+  const userDataResponse = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
+    cache: "no-store",
+    credentials: "include"
+  });
   if (!userDataResponse.ok) {
     throw new Error(`Failed to fetch userdata (${userDataResponse.status})`);
   }
@@ -522,7 +525,10 @@ async function syncWishlistOrderCache(force = false) {
       url.searchParams.set("access_token", accessToken);
     }
 
-    const response = await fetch(url.toString(), { cache: "no-store" });
+    const response = await fetch(url.toString(), {
+      cache: "no-store",
+      credentials: "include"
+    });
     if (!response.ok) {
       throw new Error(`Wishlist order request failed (${response.status})`);
     }
@@ -565,11 +571,12 @@ async function syncWishlistOrderCache(force = false) {
       ...cached,
       orderedAppIds,
       priorityMap,
-      priorityCachedAt: now
+      priorityCachedAt: now,
+      priorityLastError: ""
     }
   });
 
-  return { ok: true, updated: orderedAppIds.length };
+  return { ok: true, updated: orderedAppIds.length, cachedAt: now };
 }
 
 browser.runtime.onMessage.addListener((message, sender) => {
@@ -702,7 +709,19 @@ browser.runtime.onMessage.addListener((message, sender) => {
       }
 
       case "sync-wishlist-order-cache": {
-        return await syncWishlistOrderCache(Boolean(message.force));
+        try {
+          return await syncWishlistOrderCache(Boolean(message.force));
+        } catch (error) {
+          const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+          const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+          await browser.storage.local.set({
+            [WISHLIST_ADDED_CACHE_KEY]: {
+              ...cached,
+              priorityLastError: String(error?.message || error || "unknown sync error")
+            }
+          });
+          return { ok: false, error: String(error?.message || error || "unknown sync error") };
+        }
       }
 
       default:
