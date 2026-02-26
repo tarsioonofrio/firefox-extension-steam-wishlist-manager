@@ -219,12 +219,19 @@
   <template id="card-template">
     <article class="card">
       <div class="order-col">
+        <div class="order-card-actions">
+          <button class="refresh-item-btn" type="button">Refresh</button>
+          <button class="collections-toggle-btn" type="button">Collections</button>
+        </div>
+        <div class="order-manual-row">
         <button class="order-up-btn" type="button" aria-label="Move up">▲</button>
         <button class="order-down-btn" type="button" aria-label="Move down">▼</button>
         <div class="order-position-row">
           <input class="order-position-input" type="number" min="1" step="1" aria-label="Move to position">
           <button class="order-position-apply-btn" type="button" aria-label="Apply position">Go</button>
         </div>
+        </div>
+        <div class="collections-dropdown hidden"></div>
         <input class="card-batch-checkbox" type="checkbox" aria-label="Select card for batch action">
       </div>
       <a class="cover-link" target="_blank" rel="noopener noreferrer">
@@ -242,9 +249,6 @@
         </div>
         <div class="right-col">
           <p class="meta wishlist-added">Wishlist: -</p>
-          <button class="refresh-item-btn" type="button">Refresh</button>
-          <button class="collections-toggle-btn" type="button">Collections</button>
-          <div class="collections-dropdown hidden"></div>
           <p class="meta pricing">Price: -</p>
           <p class="meta discount">Discount: -</p>
           <button class="remove-btn" type="button">Remove</button>
