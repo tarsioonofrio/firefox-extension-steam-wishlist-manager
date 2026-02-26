@@ -186,6 +186,25 @@ function pageFetchBytes(url, timeoutMs = 20000) {
   });
 }
 
+async function pageWorldFetchBytes(url) {
+  const pageWindow = window.wrappedJSObject;
+  if (!pageWindow || typeof pageWindow.fetch !== "function") {
+    return pageFetchBytes(url);
+  }
+
+  try {
+    const response = await pageWindow.fetch(String(url || ""), { cache: "no-store" });
+    const status = Number(response?.status || 0);
+    const buffer = await response.arrayBuffer();
+    return {
+      status,
+      bytes: new Uint8Array(buffer)
+    };
+  } catch {
+    return pageFetchBytes(url);
+  }
+}
+
 function decodeWishlistSortedFilteredItem(bytes) {
   const item = {
     appid: 0,
@@ -360,7 +379,7 @@ async function fetchWishlistOrderFromService(steamId) {
     url.searchParams.set("origin", "https://store.steampowered.com");
     url.searchParams.set("input_protobuf_encoded", toBase64(requestBytes));
 
-    const pageResponse = await pageFetchBytes(url.toString());
+    const pageResponse = await pageWorldFetchBytes(url.toString());
     if (!pageResponse || pageResponse.status < 200 || pageResponse.status >= 300) {
       throw new Error(`Wishlist order request failed (${pageResponse?.status || 0})`);
     }
@@ -424,8 +443,15 @@ async function syncWishlistOrderCache() {
         steamId
       }
     });
-  } catch {
-    // Silent by design; collections page has fallback ordering.
+  } catch (error) {
+    const storedOnError = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+    const cachedOnError = storedOnError[WISHLIST_ADDED_CACHE_KEY] || {};
+    await browser.storage.local.set({
+      [WISHLIST_ADDED_CACHE_KEY]: {
+        ...cachedOnError,
+        priorityLastError: String(error?.message || error || "wishlist content sync failed")
+      }
+    });
   }
 }
 
