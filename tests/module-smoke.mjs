@@ -77,9 +77,9 @@ function testCollectionsFilters(context) {
 
   const ids = ["100", "101", "102"];
   const meta = {
-    "100": { titleText: "Arc Raiders", tags: ["Shooter"], appType: "Game", discountPercent: 20, releaseUnix: 1704067200 },
-    "101": { titleText: "Pragmata", tags: ["Sci-fi"], appType: "Game", discountPercent: 0, releaseUnix: 1735689600 },
-    "102": { titleText: "Ghost", tags: ["Action"], appType: "Game", discountPercent: 50, releaseUnix: 1711929600 }
+    "100": { titleText: "Arc Raiders", tags: ["Shooter"], appType: "Game", discountPercent: 20, releaseUnix: 1704067200, releaseText: "Jan 1, 2024" },
+    "101": { titleText: "Pragmata", tags: ["Sci-fi"], appType: "Game", discountPercent: 0, releaseUnix: 0, releaseText: "Coming soon" },
+    "102": { titleText: "Ghost", tags: ["Action"], appType: "Game", discountPercent: 50, releaseUnix: 1711929600, releaseText: "Apr 1, 2024" }
   };
 
   const result = filters.getFilteredAndSorted(ids, {
@@ -116,7 +116,19 @@ function testCollectionsFilters(context) {
     selectedTechnologies: new Set(),
     selectedDevelopers: new Set(),
     selectedPublishers: new Set(),
-    selectedReleaseYears: new Set(["2024"]),
+    selectedReleaseYears: new Set(["Soon"]),
+    getReleaseFilterData: (id) => {
+      const releaseText = String(meta[id].releaseText || "");
+      if (releaseText.toLowerCase().includes("coming soon")) {
+        return { year: 0, textLabel: "Soon" };
+      }
+      const unix = Number(meta[id].releaseUnix || 0);
+      const year = unix > 0 ? new Date(unix * 1000).getUTCFullYear() : 0;
+      return { year, textLabel: "" };
+    },
+    releaseYearRangeEnabled: false,
+    releaseYearMin: 1970,
+    releaseYearMax: 2030,
     ratingMin: 0,
     ratingMax: 100,
     reviewsMin: 0,
@@ -127,7 +139,7 @@ function testCollectionsFilters(context) {
     priceMax: 9999999
   });
 
-  assert.deepEqual(Array.from(result), ["102", "100"]);
+  assert.deepEqual(Array.from(result), ["101"]);
 }
 
 function main() {

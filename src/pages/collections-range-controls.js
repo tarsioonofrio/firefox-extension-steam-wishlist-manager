@@ -8,6 +8,11 @@
     const discountMax = Number(values?.discountMax ?? 100);
     const priceMin = Number(values?.priceMin ?? 0);
     const priceMax = Number(values?.priceMax ?? 9999999);
+    const releaseYearRangeEnabled = Boolean(values?.releaseYearRangeEnabled);
+    const releaseYearMin = Number(values?.releaseYearMin ?? 1970);
+    const releaseYearMax = Number(values?.releaseYearMax ?? new Date().getUTCFullYear() + 1);
+    const releaseYearRangeMinBound = Number(values?.releaseYearRangeMinBound ?? 1970);
+    const releaseYearRangeMaxBound = Number(values?.releaseYearRangeMaxBound ?? new Date().getUTCFullYear() + 1);
 
     const minLabel = document.getElementById("rating-min-label");
     const maxLabel = document.getElementById("rating-max-label");
@@ -21,6 +26,12 @@
     const discountMaxRange = document.getElementById("discount-max-range");
     const priceMinInput = document.getElementById("price-min-input");
     const priceMaxInput = document.getElementById("price-max-input");
+    const releaseYearToggle = document.getElementById("release-year-range-enabled");
+    const releaseYearPanel = document.getElementById("release-year-range-panel");
+    const releaseYearMinLabel = document.getElementById("release-year-min-label");
+    const releaseYearMaxLabel = document.getElementById("release-year-max-label");
+    const releaseYearMinRange = document.getElementById("release-year-min-range");
+    const releaseYearMaxRange = document.getElementById("release-year-max-range");
 
     if (minLabel) minLabel.textContent = `${ratingMin}%`;
     if (maxLabel) maxLabel.textContent = `${ratingMax}%`;
@@ -34,6 +45,24 @@
     if (discountMaxRange) discountMaxRange.value = String(discountMax);
     if (priceMinInput) priceMinInput.value = String(priceMin);
     if (priceMaxInput) priceMaxInput.value = String(priceMax);
+    if (releaseYearToggle) releaseYearToggle.checked = releaseYearRangeEnabled;
+    if (releaseYearMinLabel) releaseYearMinLabel.textContent = String(releaseYearMin);
+    if (releaseYearMaxLabel) releaseYearMaxLabel.textContent = String(releaseYearMax);
+    if (releaseYearMinRange) {
+      releaseYearMinRange.min = String(releaseYearRangeMinBound);
+      releaseYearMinRange.max = String(releaseYearRangeMaxBound);
+      releaseYearMinRange.value = String(releaseYearMin);
+      releaseYearMinRange.disabled = !releaseYearRangeEnabled;
+    }
+    if (releaseYearMaxRange) {
+      releaseYearMaxRange.min = String(releaseYearRangeMinBound);
+      releaseYearMaxRange.max = String(releaseYearRangeMaxBound);
+      releaseYearMaxRange.value = String(releaseYearMax);
+      releaseYearMaxRange.disabled = !releaseYearRangeEnabled;
+    }
+    if (releaseYearPanel) {
+      releaseYearPanel.classList.toggle("disabled", !releaseYearRangeEnabled);
+    }
   }
 
   function bindRangeControls(handlers) {
@@ -59,6 +88,15 @@
       const min = document.getElementById("price-min-input")?.value;
       const max = document.getElementById("price-max-input")?.value;
       h.onApplyPrice?.(min, max);
+    });
+    document.getElementById("release-year-range-enabled")?.addEventListener("change", (event) => {
+      h.onReleaseYearRangeToggle?.(Boolean(event.target.checked));
+    });
+    document.getElementById("release-year-min-range")?.addEventListener("input", (event) => {
+      h.onReleaseYearMinInput?.(event.target.value);
+    });
+    document.getElementById("release-year-max-range")?.addEventListener("input", (event) => {
+      h.onReleaseYearMaxInput?.(event.target.value);
     });
   }
 

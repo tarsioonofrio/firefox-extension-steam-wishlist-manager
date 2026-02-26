@@ -68,6 +68,36 @@
     const selectedDevelopers = ctx?.selectedDevelopers || new Set();
     const selectedPublishers = ctx?.selectedPublishers || new Set();
     const selectedReleaseYears = ctx?.selectedReleaseYears || new Set();
+    const getReleaseFilterData = typeof ctx?.getReleaseFilterData === "function"
+      ? ctx.getReleaseFilterData
+      : (appId) => {
+        const meta = getMeta(appId);
+        const releaseText = String(meta?.releaseText || "").replace(/\s+/g, " ").trim();
+        let textLabel = "";
+        if (releaseText && releaseText !== "-") {
+          const lower = releaseText.toLowerCase();
+          if (lower.includes("coming soon") || lower === "soon") {
+            textLabel = "Soon";
+          } else if (lower.includes("tba") || lower.includes("to be announced")) {
+            textLabel = "TBA";
+          } else {
+            textLabel = releaseText;
+          }
+        }
+
+        let year = 0;
+        const unix = getMetaNumber(appId, "releaseUnix", 0);
+        if (unix > 0) {
+          year = new Date(unix * 1000).getUTCFullYear();
+        } else {
+          const yearMatch = releaseText.match(/\b(19\d{2}|20\d{2}|21\d{2})\b/);
+          year = yearMatch?.[1] ? Number(yearMatch[1]) : 0;
+        }
+        return { year, textLabel };
+      };
+    const releaseYearRangeEnabled = Boolean(ctx?.releaseYearRangeEnabled);
+    const releaseYearMin = Number(ctx?.releaseYearMin ?? 1970);
+    const releaseYearMax = Number(ctx?.releaseYearMax ?? new Date().getUTCFullYear() + 1);
 
     const ratingMin = Number(ctx?.ratingMin ?? 0);
     const ratingMax = Number(ctx?.ratingMax ?? 100);
@@ -129,15 +159,28 @@
     }
 
     function passesReleaseYearFilter(appId) {
-      if (selectedReleaseYears.size === 0) {
+      const hasTextFilter = selectedReleaseYears.size > 0;
+      const hasRangeFilter = releaseYearRangeEnabled;
+      if (!hasTextFilter && !hasRangeFilter) {
         return true;
       }
-      const unix = getMetaNumber(appId, "releaseUnix", 0);
-      if (!unix) {
-        return false;
+
+      const info = getReleaseFilterData(appId) || {};
+      const textLabel = String(info.textLabel || "");
+      const year = Number(info.year || 0);
+
+      const textMatch = hasTextFilter ? selectedReleaseYears.has(textLabel) : false;
+      const rangeMatch = hasRangeFilter
+        ? (Number.isFinite(year) && year >= releaseYearMin && year <= releaseYearMax)
+        : false;
+
+      if (hasTextFilter && hasRangeFilter) {
+        return textMatch || rangeMatch;
       }
-      const year = String(new Date(unix * 1000).getUTCFullYear());
-      return selectedReleaseYears.has(year);
+      if (hasTextFilter) {
+        return textMatch;
+      }
+      return rangeMatch;
     }
 
     const effectiveSortMode = (sortMode === "position" && !isWishlistRankReady(source))

@@ -254,6 +254,30 @@ button.danger,
   min-width: 0;
 }
 
+.inline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.inline-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  min-height: 14px;
+  padding: 0;
+}
+
+.release-year-range-panel {
+  display: grid;
+  gap: 6px;
+}
+
+.release-year-range-panel.disabled {
+  opacity: 0.55;
+}
+
 .filter-content input,
 .filter-content button {
   max-width: 100%;

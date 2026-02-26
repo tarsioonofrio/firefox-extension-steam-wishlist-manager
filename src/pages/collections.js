@@ -24,13 +24,14 @@ const cardRenderUtils = window.SWMCollectionsCardRender;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TAG_SEED_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
-const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
+const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV2";
 const TAG_SHOW_STEP = 12;
 const SAFE_FETCH_CONCURRENCY = 4;
 const SAFE_FETCH_CONCURRENCY_FORCE = 1;
 const SAFE_FETCH_FORCE_BASE_DELAY_MS = 700;
 const SAFE_FETCH_FORCE_JITTER_MS = 500;
 const WISHLIST_SELECT_VALUE = "__wishlist__";
+const RELEASE_YEAR_MIN = 1970;
 const steamFetchUtils = window.SWMSteamFetch;
 // Source baseline: SteamDB tags taxonomy (static seed for fast first render).
 const FILTER_SEED = {
@@ -45,7 +46,8 @@ const FILTER_SEED = {
   technologies: ["Steam Cloud", "Steam Workshop", "Valve Anti-Cheat", "Remote Play", "HDR"],
   developers: ["Valve", "CAPCOM Co., Ltd.", "SEGA", "Ubisoft", "Square Enix", "Bandai Namco", "Electronic Arts", "Bethesda", "Larian Studios", "FromSoftware"],
   publishers: ["Valve", "CAPCOM Co., Ltd.", "SEGA", "Ubisoft", "Square Enix", "Bandai Namco", "Electronic Arts", "Bethesda", "Sony Interactive Entertainment"],
-  releaseYears: ["2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016", "2015"]
+  releaseYears: ["2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016", "2015"],
+  releaseTexts: ["TBA", "Soon"]
 };
 const STEAMDB_TAGS_JSON_PATH = "src/data/steamdb-tags-hardcoded.json";
 const STEAM_FILTER_SEEDS_JSON_PATH = "src/data/steam-filter-seeds-hardcoded.json";
@@ -113,6 +115,9 @@ let publisherCounts = [];
 let publisherSearchQuery = "";
 let selectedReleaseYears = new Set();
 let releaseYearCounts = [];
+let releaseYearRangeEnabled = false;
+let releaseYearMin = RELEASE_YEAR_MIN;
+let releaseYearMax = new Date().getUTCFullYear() + 1;
 let ratingMin = 0;
 let ratingMax = 100;
 let reviewsMin = 0;
@@ -341,6 +346,85 @@ function getMetaNumber(appId, key, fallback = 0) {
 function getMetaArray(appId, key) {
   const value = metaCache?.[appId]?.[key];
   return Array.isArray(value) ? value : [];
+}
+
+function getReleaseYearMaxBound() {
+  return new Date().getUTCFullYear() + 1;
+}
+
+function clampReleaseYearValue(value, fallback) {
+  const n = Number(value);
+  const min = RELEASE_YEAR_MIN;
+  const max = getReleaseYearMaxBound();
+  if (!Number.isFinite(n)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function normalizeReleaseTextFilterValue(raw) {
+  const text = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!text || text === "-") {
+    return "";
+  }
+  const lower = text.toLowerCase();
+  if (
+    lower.includes("coming soon")
+    || lower === "soon"
+    || lower.includes("em breve")
+    || lower.includes("breve")
+  ) {
+    return "Soon";
+  }
+  if (
+    lower.includes("tba")
+    || lower.includes("to be announced")
+    || lower.includes("a definir")
+    || lower.includes("a ser anunciado")
+  ) {
+    return "TBA";
+  }
+  if (/^\d{4}$/.test(text)) {
+    return "";
+  }
+  return text;
+}
+
+function extractYearFromReleaseText(raw) {
+  const text = String(raw || "");
+  if (!text) {
+    return 0;
+  }
+  const match = text.match(/\b(19\d{2}|20\d{2}|21\d{2})\b/);
+  if (!match?.[1]) {
+    return 0;
+  }
+  const year = Number(match[1]);
+  if (!Number.isFinite(year) || year < RELEASE_YEAR_MIN || year > getReleaseYearMaxBound()) {
+    return 0;
+  }
+  return year;
+}
+
+function getReleaseFilterData(appId) {
+  const meta = metaCache?.[appId] || {};
+  const unix = Number(meta?.releaseUnix || 0);
+  let year = 0;
+  if (Number.isFinite(unix) && unix > 0) {
+    const y = new Date(unix * 1000).getUTCFullYear();
+    if (Number.isFinite(y) && y >= RELEASE_YEAR_MIN && y <= getReleaseYearMaxBound()) {
+      year = y;
+    }
+  }
+  const releaseText = String(meta?.releaseText || "").trim();
+  const textLabel = normalizeReleaseTextFilterValue(releaseText);
+  if (!year) {
+    year = extractYearFromReleaseText(releaseText);
+  }
+  return {
+    year,
+    textLabel
+  };
 }
 
 function normalizeAppTypeLabel(value) {
@@ -1327,20 +1411,79 @@ function buildArrayFieldCountsFromAppIds(appIds, fieldName) {
 function buildReleaseYearCountsFromAppIds(appIds) {
   const counts = new Map();
   for (const appId of appIds) {
-    const unix = getMetaNumber(appId, "releaseUnix", 0);
-    if (!unix) {
+    const info = getReleaseFilterData(appId);
+    const key = String(info?.textLabel || "").trim();
+    if (!key) {
       continue;
     }
-    const year = new Date(unix * 1000).getUTCFullYear();
-    if (!Number.isFinite(year) || year < 1970) {
-      continue;
-    }
-    const key = String(year);
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   return Array.from(counts.entries())
     .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => Number(b.name) - Number(a.name));
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+}
+
+function buildCountsFromNames(values) {
+  const counts = new Map();
+  for (const raw of values || []) {
+    const name = normalizeReleaseTextFilterValue(raw);
+    if (!name) {
+      continue;
+    }
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return Array.from(counts.entries()).map(([name, count]) => ({ name, count }));
+}
+
+function mergeReleaseTextCountsWithSeed(dynamicCounts) {
+  const seedNames = getSeedList("releaseTexts");
+  const normalizedDynamic = [];
+  for (const entry of Array.isArray(dynamicCounts) ? dynamicCounts : []) {
+    const name = normalizeReleaseTextFilterValue(entry?.name);
+    if (!name) {
+      continue;
+    }
+    normalizedDynamic.push({
+      name,
+      count: Number(entry?.count || 0)
+    });
+  }
+
+  const mergedMap = new Map();
+  for (const entry of normalizedDynamic) {
+    mergedMap.set(entry.name, (mergedMap.get(entry.name) || 0) + entry.count);
+  }
+  for (const seed of seedNames) {
+    const name = normalizeReleaseTextFilterValue(seed);
+    if (!name) {
+      continue;
+    }
+    if (!mergedMap.has(name)) {
+      mergedMap.set(name, 0);
+    }
+  }
+
+  const seedOrder = new Map();
+  seedNames.forEach((name, index) => {
+    const key = normalizeReleaseTextFilterValue(name);
+    if (key && !seedOrder.has(key)) {
+      seedOrder.set(key, index);
+    }
+  });
+
+  return Array.from(mergedMap.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => {
+      const aSeed = seedOrder.has(a.name);
+      const bSeed = seedOrder.has(b.name);
+      if (aSeed && bSeed) {
+        return seedOrder.get(a.name) - seedOrder.get(b.name);
+      }
+      if (aSeed !== bSeed) {
+        return aSeed ? -1 : 1;
+      }
+      return b.count - a.count || a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" });
+    });
 }
 
 function getUnknownTypeAppIds(appIds) {
@@ -1507,7 +1650,9 @@ async function ensureExtraFilterCounts() {
       technologyCounts = Array.isArray(cachedBucket.technologyCounts) ? cachedBucket.technologyCounts : [];
       developerCounts = Array.isArray(cachedBucket.developerCounts) ? cachedBucket.developerCounts : [];
       publisherCounts = Array.isArray(cachedBucket.publisherCounts) ? cachedBucket.publisherCounts : [];
-      releaseYearCounts = Array.isArray(cachedBucket.releaseYearCounts) ? cachedBucket.releaseYearCounts : [];
+      releaseYearCounts = mergeReleaseTextCountsWithSeed(
+        Array.isArray(cachedBucket.releaseYearCounts) ? cachedBucket.releaseYearCounts : []
+      );
     }
     return;
   }
@@ -1524,7 +1669,9 @@ async function ensureExtraFilterCounts() {
     technologyCounts = Array.isArray(cachedBucket.technologyCounts) ? cachedBucket.technologyCounts : [];
     developerCounts = Array.isArray(cachedBucket.developerCounts) ? cachedBucket.developerCounts : [];
     publisherCounts = Array.isArray(cachedBucket.publisherCounts) ? cachedBucket.publisherCounts : [];
-    releaseYearCounts = Array.isArray(cachedBucket.releaseYearCounts) ? cachedBucket.releaseYearCounts : [];
+    releaseYearCounts = mergeReleaseTextCountsWithSeed(
+      Array.isArray(cachedBucket.releaseYearCounts) ? cachedBucket.releaseYearCounts : []
+    );
     return;
   }
 
@@ -1542,7 +1689,7 @@ async function ensureExtraFilterCounts() {
   const nextTechnologyCounts = buildArrayFieldCountsFromAppIds(appIds, "technologies");
   const nextDeveloperCounts = buildArrayFieldCountsFromAppIds(appIds, "developers");
   const nextPublisherCounts = buildArrayFieldCountsFromAppIds(appIds, "publishers");
-  const nextReleaseYearCounts = buildReleaseYearCountsFromAppIds(appIds);
+  const nextReleaseYearCounts = mergeReleaseTextCountsWithSeed(buildReleaseYearCountsFromAppIds(appIds));
 
   const totalNext =
     nextPlayerCounts.length + nextFeatureCounts.length + nextHardwareCounts.length
@@ -1563,7 +1710,9 @@ async function ensureExtraFilterCounts() {
     technologyCounts = Array.isArray(cachedBucket.technologyCounts) ? cachedBucket.technologyCounts : [];
     developerCounts = Array.isArray(cachedBucket.developerCounts) ? cachedBucket.developerCounts : [];
     publisherCounts = Array.isArray(cachedBucket.publisherCounts) ? cachedBucket.publisherCounts : [];
-    releaseYearCounts = Array.isArray(cachedBucket.releaseYearCounts) ? cachedBucket.releaseYearCounts : [];
+    releaseYearCounts = mergeReleaseTextCountsWithSeed(
+      Array.isArray(cachedBucket.releaseYearCounts) ? cachedBucket.releaseYearCounts : []
+    );
     setStatus("Steam blocked metadata refresh. Keeping previous advanced filters.", true);
     return;
   }
@@ -1723,7 +1872,8 @@ async function loadGeneralFilterSeedFromJson() {
       technologies: normalize(seed.technologies),
       developers: normalize(seed.developers),
       publishers: normalize(seed.publishers),
-      releaseYears: normalize(seed.releaseYears)
+      releaseYears: normalize(seed.releaseYears),
+      releaseTexts: normalize(seed.releaseTexts)
     };
   } catch {
     // Fallback keeps built-in hardcoded seed.
@@ -1744,7 +1894,7 @@ function applyHardcodedFilterSeeds() {
   technologyCounts = namesToCountObjects(getSeedList("technologies"));
   developerCounts = namesToCountObjects(getSeedList("developers"));
   publisherCounts = namesToCountObjects(getSeedList("publishers"));
-  releaseYearCounts = namesToCountObjects(getSeedList("releaseYears")).sort((a, b) => Number(b.name) - Number(a.name));
+  releaseYearCounts = mergeReleaseTextCountsWithSeed([]);
   if (tagCountsSource === "none") {
     tagCountsSource = "hardcoded";
   }
@@ -1813,7 +1963,7 @@ function populateGlobalFiltersFromMetaCache() {
   const technologies = [];
   const developers = [];
   const publishers = [];
-  const years = [];
+  const releaseTexts = [];
 
   for (const appId of appIds) {
     tags.push(...getMetaTags(appId));
@@ -1829,9 +1979,9 @@ function populateGlobalFiltersFromMetaCache() {
     technologies.push(...getMetaArray(appId, "technologies"));
     developers.push(...getMetaArray(appId, "developers"));
     publishers.push(...getMetaArray(appId, "publishers"));
-    const releaseUnix = getMetaNumber(appId, "releaseUnix", 0);
-    if (releaseUnix > 0) {
-      years.push(String(new Date(releaseUnix * 1000).getUTCFullYear()));
+    const releaseInfo = getReleaseFilterData(appId);
+    if (releaseInfo.textLabel) {
+      releaseTexts.push(releaseInfo.textLabel);
     }
   }
 
@@ -1851,8 +2001,7 @@ function populateGlobalFiltersFromMetaCache() {
   technologyCounts = mergeSeedWithNames(getSeedList("technologies"), technologies);
   developerCounts = mergeSeedWithNames(getSeedList("developers"), developers);
   publisherCounts = mergeSeedWithNames(getSeedList("publishers"), publishers);
-  releaseYearCounts = mergeSeedWithNames(getSeedList("releaseYears"), years, (a, b) => Number(b) - Number(a))
-    .sort((a, b) => Number(b.name) - Number(a.name));
+  releaseYearCounts = mergeReleaseTextCountsWithSeed(buildCountsFromNames(releaseTexts));
 }
 
 function quickPopulateFiltersFromCache() {
@@ -1881,7 +2030,7 @@ function quickPopulateFiltersFromCache() {
   const technologies = [];
   const developers = [];
   const publishers = [];
-  const years = [];
+  const releaseTexts = [];
 
   for (const appId of appIds) {
     tags.push(...getMetaTags(appId));
@@ -1897,9 +2046,9 @@ function quickPopulateFiltersFromCache() {
     technologies.push(...getMetaArray(appId, "technologies"));
     developers.push(...getMetaArray(appId, "developers"));
     publishers.push(...getMetaArray(appId, "publishers"));
-    const releaseUnix = getMetaNumber(appId, "releaseUnix", 0);
-    if (releaseUnix > 0) {
-      years.push(String(new Date(releaseUnix * 1000).getUTCFullYear()));
+    const releaseInfo = getReleaseFilterData(appId);
+    if (releaseInfo.textLabel) {
+      releaseTexts.push(releaseInfo.textLabel);
     }
   }
 
@@ -1919,8 +2068,7 @@ function quickPopulateFiltersFromCache() {
   technologyCounts = mergeSeedWithNames(getSeedList("technologies"), technologies);
   developerCounts = mergeSeedWithNames(getSeedList("developers"), developers);
   publisherCounts = mergeSeedWithNames(getSeedList("publishers"), publishers);
-  releaseYearCounts = mergeSeedWithNames(getSeedList("releaseYears"), years, (a, b) => Number(b) - Number(a))
-    .sort((a, b) => Number(b.name) - Number(a.name));
+  releaseYearCounts = mergeReleaseTextCountsWithSeed(buildCountsFromNames(releaseTexts));
 
   renderTagOptions();
   renderTypeOptions();
@@ -2040,6 +2188,10 @@ function getFiltersContext() {
     selectedDevelopers,
     selectedPublishers,
     selectedReleaseYears,
+    getReleaseFilterData,
+    releaseYearRangeEnabled,
+    releaseYearMin,
+    releaseYearMax,
     ratingMin,
     ratingMax,
     reviewsMin,
@@ -2634,6 +2786,13 @@ async function render() {
 }
 
 function renderRatingControls() {
+  const maxBound = getReleaseYearMaxBound();
+  releaseYearMin = clampReleaseYearValue(releaseYearMin, RELEASE_YEAR_MIN);
+  releaseYearMax = clampReleaseYearValue(releaseYearMax, maxBound);
+  if (releaseYearMin > releaseYearMax) {
+    releaseYearMin = releaseYearMax;
+  }
+
   rangeControlsUtils.renderRangeControls({
     ratingMin,
     ratingMax,
@@ -2642,7 +2801,12 @@ function renderRatingControls() {
     discountMin,
     discountMax,
     priceMin,
-    priceMax
+    priceMax,
+    releaseYearRangeEnabled,
+    releaseYearMin,
+    releaseYearMax,
+    releaseYearRangeMinBound: RELEASE_YEAR_MIN,
+    releaseYearRangeMaxBound: maxBound
   });
 }
 
@@ -2716,6 +2880,9 @@ function resetAllFiltersState() {
   publisherSearchQuery = reset.publisherSearchQuery;
   tagSearchQuery = reset.tagSearchQuery;
   tagShowLimit = reset.tagShowLimit;
+  releaseYearRangeEnabled = false;
+  releaseYearMin = RELEASE_YEAR_MIN;
+  releaseYearMax = getReleaseYearMaxBound();
   clearFilterSearchInputs();
 }
 
@@ -2935,6 +3102,27 @@ function bindFilterControls() {
       const normMax = Number.isFinite(maxValue) && maxValue >= 0 ? maxValue : 9999999;
       priceMin = Math.min(normMin, normMax);
       priceMax = Math.max(normMin, normMax);
+      renderRatingControls();
+      page = 1;
+      await renderCards();
+    },
+    onReleaseYearRangeToggle: async (enabled) => {
+      releaseYearRangeEnabled = Boolean(enabled);
+      renderRatingControls();
+      page = 1;
+      await renderCards();
+    },
+    onReleaseYearMinInput: async (rawValue) => {
+      const next = clampReleaseYearValue(rawValue, releaseYearMin);
+      releaseYearMin = Math.max(RELEASE_YEAR_MIN, Math.min(next, releaseYearMax));
+      renderRatingControls();
+      page = 1;
+      await renderCards();
+    },
+    onReleaseYearMaxInput: async (rawValue) => {
+      const next = clampReleaseYearValue(rawValue, releaseYearMax);
+      const maxBound = getReleaseYearMaxBound();
+      releaseYearMax = Math.min(maxBound, Math.max(next, releaseYearMin));
       renderRatingControls();
       page = 1;
       await renderCards();

@@ -136,7 +136,8 @@ function createFetchMock() {
       technologies: ["Steam Cloud"],
       developers: ["Valve"],
       publishers: ["Valve"],
-      releaseYears: ["2026", "2025", "2024"]
+      releaseYears: ["2026", "2025", "2024"],
+      releaseTexts: ["TBA", "Soon"]
     }
   };
   return async (url) => {
