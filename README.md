@@ -52,6 +52,10 @@ Manual load alternative:
 - `collections-actions.js`: pure transition rules for source/sort selection.
 - `collections-crud.js`: create/rename/delete collection flows.
 - `collections-init.js`: page bootstrap/initialization sequence.
+- `collections-selection-bindings.js`: source/sort selector event bindings.
+- `collections-general-bindings.js`: search, pagination, textual filter, refresh bindings.
+- `collections-menu-bindings.js`: collection menu and form submit bindings.
+- `collections-card-render.js`: card node creation, static render, card actions, async hydration.
 
 Script load order is declared at the bottom of `src/pages/collections.html`.
 

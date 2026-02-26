@@ -18,6 +18,10 @@
 - `src/pages/collections-actions.js`: source/sort transition rules.
 - `src/pages/collections-crud.js`: create/rename/delete collection flows.
 - `src/pages/collections-init.js`: bootstrap initializer for collections page.
+- `src/pages/collections-selection-bindings.js`: collection and sort selector bindings.
+- `src/pages/collections-general-bindings.js`: search/pagination/text-filter/refresh bindings.
+- `src/pages/collections-menu-bindings.js`: collection menu/form bindings.
+- `src/pages/collections-card-render.js`: card rendering/actions/hydration helpers.
 - `src/popup/popup.html|css|js`: browser action popup that opens the collections page.
 - `src/styles/content.css`: shared styles for injected UI.
 - `README.md`: MVP usage notes and current limitations.
@@ -38,6 +42,8 @@ This repository uses `web-ext` via npm scripts.
   - Builds extension artifact in `web-ext-artifacts/`.
 - `npm run check:manifest`
   - Validates `manifest.json` JSON syntax.
+- `npm run test:logic`
+  - Runs smoke checks for rank/sort/filter logic modules.
 - `about:debugging` -> **This Firefox** -> **Load Temporary Add-on...** -> select `manifest.json`.
 
 ## Coding Style & Naming Conventions
