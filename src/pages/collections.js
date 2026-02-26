@@ -9,6 +9,7 @@ const WISHLIST_RANK_SOURCE = rankUtils?.RANK_SOURCE || "wishlist-api-v1";
 const WISHLIST_RANK_SOURCE_VERSION = rankUtils?.RANK_SOURCE_VERSION || 3;
 const sortUtils = window.SWMWishlistSort || null;
 const parserUtils = window.SWMMetaParsers || null;
+const filtersUtils = window.SWMCollectionsFilters || null;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -1737,149 +1738,48 @@ function renderExtraFilterOptions() {
   renderCheckboxOptions("release-year-options", releaseYearCounts, selectedReleaseYears);
 }
 
-function passesTagFilter(appId) {
-  if (selectedTags.size === 0) {
-    return true;
-  }
-
-  const tags = getMetaTags(appId);
-  if (tags.length === 0) {
-    return false;
-  }
-
-  return tags.some((t) => selectedTags.has(t));
-}
-
-function passesTypeFilter(appId) {
-  if (selectedTypes.size === 0) {
-    return true;
-  }
-  return selectedTypes.has(getMetaType(appId));
-}
-
-function passesArrayFilter(appId, key, selectedSet) {
-  if (selectedSet.size === 0) {
-    return true;
-  }
-  const values = getMetaArray(appId, key);
-  return values.some((value) => selectedSet.has(value));
-}
-
-function passesReviewFilter(appId) {
-  const hasPctFilter = ratingMin > 0 || ratingMax < 100;
-  const hasCountFilter = reviewsMin > 0 || reviewsMax < 999999999;
-  if (!hasPctFilter && !hasCountFilter) {
-    return true;
-  }
-
-  const meta = metaCache?.[appId] || {};
-  const pct = Number(meta.reviewPositivePct);
-  const votes = parseNonNegativeInt(meta.reviewTotalVotes, 0);
-
-  if (!Number.isFinite(pct)) {
-    // Keep items visible when review metrics are still unavailable.
-    return true;
-  }
-
-  return pct >= ratingMin && pct <= ratingMax && votes >= reviewsMin && votes <= reviewsMax;
-}
-
-function passesDiscountFilter(appId) {
-  const hasDiscountFilter = discountMin > 0 || discountMax < 100;
-  if (!hasDiscountFilter) {
-    return true;
-  }
-  const pct = getMetaNumber(appId, "discountPercent", 0);
-  return pct >= discountMin && pct <= discountMax;
-}
-
-function getPriceForFilter(appId) {
-  const meta = metaCache?.[appId] || {};
-  const isFree = String(meta.priceText || "").trim().toLowerCase() === "free";
-  if (isFree) {
-    return 0;
-  }
-  const finalPrice = Number(meta.priceFinal);
-  if (Number.isFinite(finalPrice) && finalPrice > 0) {
-    return finalPrice / 100;
-  }
-  return null;
-}
-
-function passesPriceFilter(appId) {
-  const hasPriceFilter = priceMin > 0 || priceMax < 9999999;
-  if (!hasPriceFilter) {
-    return true;
-  }
-  const price = getPriceForFilter(appId);
-  if (price === null) {
-    return false;
-  }
-  return price >= priceMin && price <= priceMax;
-}
-
-function passesReleaseYearFilter(appId) {
-  if (selectedReleaseYears.size === 0) {
-    return true;
-  }
-  const unix = getMetaNumber(appId, "releaseUnix", 0);
-  if (!unix) {
-    return false;
-  }
-  const year = String(new Date(unix * 1000).getUTCFullYear());
-  return selectedReleaseYears.has(year);
-}
-
 function getFilteredAndSorted(ids) {
-  const normalizedQuery = searchQuery.toLowerCase();
-  const effectiveSortMode = (sourceMode === "wishlist" && sortMode === "position" && !isWishlistRankReady(ids))
-    ? "title"
-    : sortMode;
-  const baseIds = (sourceMode === "wishlist" && wishlistSortOrders?.[effectiveSortMode]?.length)
-    ? wishlistSortOrders[effectiveSortMode]
-    : ids;
-
-  const list = baseIds.filter((appId) => {
-    const title = String(state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || "").toLowerCase();
-    const textOk = !normalizedQuery || title.includes(normalizedQuery) || appId.includes(normalizedQuery);
-    return textOk
-      && passesTagFilter(appId)
-      && passesTypeFilter(appId)
-      && passesReviewFilter(appId)
-      && passesDiscountFilter(appId)
-      && passesPriceFilter(appId)
-      && passesReleaseYearFilter(appId)
-      && passesArrayFilter(appId, "players", selectedPlayers)
-      && passesArrayFilter(appId, "features", selectedFeatures)
-      && passesArrayFilter(appId, "hardware", selectedHardware)
-      && passesArrayFilter(appId, "accessibility", selectedAccessibility)
-      && passesArrayFilter(appId, "platforms", selectedPlatforms)
-      && passesArrayFilter(appId, "languages", selectedLanguages)
-      && passesArrayFilter(appId, "fullAudioLanguages", selectedFullAudioLanguages)
-      && passesArrayFilter(appId, "subtitleLanguages", selectedSubtitleLanguages)
-      && passesArrayFilter(appId, "technologies", selectedTechnologies)
-      && passesArrayFilter(appId, "developers", selectedDevelopers)
-      && passesArrayFilter(appId, "publishers", selectedPublishers);
+  if (!filtersUtils?.getFilteredAndSorted) {
+    return Array.isArray(ids) ? [...ids] : [];
+  }
+  return filtersUtils.getFilteredAndSorted(ids, {
+    searchQuery,
+    sourceMode,
+    sortMode,
+    wishlistSortOrders,
+    isWishlistRankReady,
+    getSortContext,
+    sortUtils,
+    sortByWishlistPriority,
+    getTitle: (appId) => String(state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || ""),
+    getMeta: (appId) => metaCache?.[appId] || {},
+    getMetaTags,
+    getMetaType,
+    getMetaNumber,
+    getMetaArray,
+    selectedTags,
+    selectedTypes,
+    selectedPlayers,
+    selectedFeatures,
+    selectedHardware,
+    selectedAccessibility,
+    selectedPlatforms,
+    selectedLanguages,
+    selectedFullAudioLanguages,
+    selectedSubtitleLanguages,
+    selectedTechnologies,
+    selectedDevelopers,
+    selectedPublishers,
+    selectedReleaseYears,
+    ratingMin,
+    ratingMax,
+    reviewsMin,
+    reviewsMax,
+    discountMin,
+    discountMax,
+    priceMin,
+    priceMax
   });
-
-  if (sourceMode === "wishlist" && wishlistSortOrders?.[effectiveSortMode]?.length) {
-    return list;
-  }
-
-  if (sortUtils?.sortIdsByMode) {
-    if (effectiveSortMode === "position" && sourceMode === "wishlist") {
-      return sortUtils.sortIdsByMode(list, "position", getSortContext());
-    }
-    if (effectiveSortMode !== "position") {
-      return sortUtils.sortIdsByMode(list, effectiveSortMode, getSortContext());
-    }
-  }
-
-  if (effectiveSortMode === "position" && sourceMode === "wishlist") {
-    return sortByWishlistPriority(list);
-  }
-
-  return list;
 }
 
 function renderCollectionSelect() {
