@@ -33,7 +33,8 @@ function isTrustedSender(sender) {
   }
 
   if (/^(moz|chrome)-extension:\/\//.test(senderUrl)) {
-    return senderId === browser.runtime.id;
+    // Extension pages/scripts may omit sender.id in some Firefox contexts.
+    return !senderId || senderId === browser.runtime.id;
   }
 
   return /^https:\/\/store\.steampowered\.com\/(app|wishlist)\//.test(senderUrl);
