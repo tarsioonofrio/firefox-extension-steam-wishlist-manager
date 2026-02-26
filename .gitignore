@@ -1,6 +1,7 @@
 # Runtime logs
 logs/
 *.log
+mcp/data/*.json
 
 # Build/package artifacts
 *.zip

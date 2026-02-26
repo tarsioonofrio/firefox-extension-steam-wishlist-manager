@@ -3,12 +3,116 @@ const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
+const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV2";
+const BACKUP_SETTINGS_KEY = "steamWishlistBackupSettingsV1";
+const BACKUP_HISTORY_KEY = "steamWishlistBackupHistoryV1";
+const BACKUP_ALARM_NAME = "steamWishlistAutoBackup";
+const BACKUP_SCHEMA_VERSION = 1;
+const BACKUP_MAX_HISTORY = 20;
+const BACKUP_MIN_INTERVAL_HOURS = 1;
+const BACKUP_MAX_INTERVAL_HOURS = 168;
+const BACKUP_DATA_KEYS = [
+  STORAGE_KEY,
+  META_CACHE_KEY,
+  WISHLIST_ADDED_CACHE_KEY,
+  TAG_COUNTS_CACHE_KEY,
+  TYPE_COUNTS_CACHE_KEY,
+  EXTRA_FILTER_COUNTS_CACHE_KEY,
+  BACKUP_SETTINGS_KEY
+];
 const WISHLIST_ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_COLLECTION_NAME_LENGTH = 64;
 const MAX_COLLECTIONS = 100;
 const MAX_ITEMS_PER_COLLECTION = 5000;
 const VALID_APP_ID_PATTERN = /^\d{1,10}$/;
 let backgroundWishlistDomSyncInFlight = false;
+
+function normalizeBackupSettings(rawSettings) {
+  const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
+  const enabled = Boolean(raw.enabled);
+  const intervalHoursRaw = Number(raw.intervalHours);
+  const intervalHours = Number.isFinite(intervalHoursRaw)
+    ? Math.max(BACKUP_MIN_INTERVAL_HOURS, Math.min(BACKUP_MAX_INTERVAL_HOURS, Math.floor(intervalHoursRaw)))
+    : 24;
+  return {
+    enabled,
+    intervalHours
+  };
+}
+
+async function getBackupSettings() {
+  const stored = await browser.storage.local.get(BACKUP_SETTINGS_KEY);
+  return normalizeBackupSettings(stored[BACKUP_SETTINGS_KEY]);
+}
+
+async function setBackupSettings(rawSettings) {
+  const settings = normalizeBackupSettings(rawSettings);
+  await browser.storage.local.set({ [BACKUP_SETTINGS_KEY]: settings });
+  await scheduleBackupAlarm(settings);
+  return settings;
+}
+
+async function scheduleBackupAlarm(settings) {
+  if (!browser?.alarms) {
+    return;
+  }
+  const safeSettings = normalizeBackupSettings(settings);
+  try {
+    await browser.alarms.clear(BACKUP_ALARM_NAME);
+  } catch {
+    // ignore
+  }
+  if (!safeSettings.enabled) {
+    return;
+  }
+  browser.alarms.create(BACKUP_ALARM_NAME, {
+    delayInMinutes: safeSettings.intervalHours * 60,
+    periodInMinutes: safeSettings.intervalHours * 60
+  });
+}
+
+function createBackupId() {
+  return `bkp_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+}
+
+async function createBackupSnapshot(reason = "manual") {
+  const payload = await browser.storage.local.get(BACKUP_DATA_KEYS);
+  const snapshot = {
+    schemaVersion: BACKUP_SCHEMA_VERSION,
+    id: createBackupId(),
+    createdAt: Date.now(),
+    reason: String(reason || "manual"),
+    data: payload
+  };
+  const stored = await browser.storage.local.get(BACKUP_HISTORY_KEY);
+  const history = Array.isArray(stored[BACKUP_HISTORY_KEY]) ? stored[BACKUP_HISTORY_KEY] : [];
+  history.unshift(snapshot);
+  const trimmed = history.slice(0, BACKUP_MAX_HISTORY);
+  await browser.storage.local.set({ [BACKUP_HISTORY_KEY]: trimmed });
+  return {
+    id: snapshot.id,
+    createdAt: snapshot.createdAt,
+    reason: snapshot.reason
+  };
+}
+
+async function getBackupSummary() {
+  const stored = await browser.storage.local.get([BACKUP_HISTORY_KEY, BACKUP_SETTINGS_KEY]);
+  const history = Array.isArray(stored[BACKUP_HISTORY_KEY]) ? stored[BACKUP_HISTORY_KEY] : [];
+  const settings = normalizeBackupSettings(stored[BACKUP_SETTINGS_KEY]);
+  const latest = history.length > 0 ? history[0] : null;
+  return {
+    settings,
+    count: history.length,
+    latest: latest
+      ? {
+        id: String(latest.id || ""),
+        createdAt: Number(latest.createdAt || 0),
+        reason: String(latest.reason || "")
+      }
+      : null
+  };
+}
 
 const DEFAULT_STATE = {
   collectionOrder: [],
@@ -1149,9 +1253,31 @@ browser.runtime.onMessage.addListener((message, sender) => {
           META_CACHE_KEY,
           WISHLIST_ADDED_CACHE_KEY,
           TAG_COUNTS_CACHE_KEY,
-          TYPE_COUNTS_CACHE_KEY
+          TYPE_COUNTS_CACHE_KEY,
+          EXTRA_FILTER_COUNTS_CACHE_KEY
         ]);
         return { ok: true };
+      }
+
+      case "create-backup-snapshot": {
+        const meta = await createBackupSnapshot(String(message.reason || "manual"));
+        return { ok: true, backup: meta };
+      }
+
+      case "get-backup-summary": {
+        const summary = await getBackupSummary();
+        return { ok: true, summary };
+      }
+
+      case "set-backup-settings": {
+        const settings = await setBackupSettings(message.settings || {});
+        return { ok: true, settings };
+      }
+
+      case "apply-backup-settings": {
+        const settings = await getBackupSettings();
+        await scheduleBackupAlarm(settings);
+        return { ok: true, settings };
       }
 
       case "clear-all-data": {
@@ -1217,3 +1343,31 @@ browser.runtime.onMessage.addListener((message, sender) => {
     }
   })();
 });
+
+if (browser?.alarms?.onAlarm) {
+  browser.alarms.onAlarm.addListener((alarm) => {
+    if (!alarm || alarm.name !== BACKUP_ALARM_NAME) {
+      return;
+    }
+    createBackupSnapshot("auto").catch(() => {});
+  });
+}
+
+async function initializeBackupScheduler() {
+  try {
+    const settings = await getBackupSettings();
+    await scheduleBackupAlarm(settings);
+  } catch {
+    // ignore
+  }
+}
+
+browser.runtime.onInstalled?.addListener(() => {
+  initializeBackupScheduler().catch(() => {});
+});
+
+browser.runtime.onStartup?.addListener(() => {
+  initializeBackupScheduler().catch(() => {});
+});
+
+initializeBackupScheduler().catch(() => {});

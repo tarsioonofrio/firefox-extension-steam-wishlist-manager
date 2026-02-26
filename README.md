@@ -56,6 +56,7 @@ Notes:
 - Install: `npm install`
 - Dev (auto-reload): `npm run dev`
 - Build package: `npm run build`
+- Start MCP server (local JSON DB): `npm run mcp:server`
 - Validate manifest: `npm run check:manifest`
 - Logic smoke test: `npm run test:logic`
 
@@ -91,6 +92,34 @@ Script load order is declared at the bottom of `src/pages/collections.html`.
 2. Select `Steam wishlist` or a custom collection.
 3. Use search, sort, filters, and pagination.
 4. Add/remove collection items from Steam app pages (where enabled).
+
+## MCP Server (Initial)
+
+This repository now includes an initial MCP server implementation at:
+- `mcp/server.mjs`
+
+Persistence:
+- Local JSON DB (default): `mcp/data/state.json`
+- Override path with env var: `SWM_MCP_DB_PATH=/path/to/state.json`
+
+Available tools (v0.1):
+- `swm_list_collections`
+- `swm_create_static_collection`
+- `swm_create_or_update_dynamic_collection`
+- `swm_add_item_to_collection`
+- `swm_remove_item_from_collection`
+- `swm_get_collection_items`
+- `swm_import_extension_backup_json`
+- `swm_import_extension_backup_file`
+- `swm_sync_extension_state_incremental`
+
+Notes:
+- This is an initial MCP layer to start external automation/workflows.
+- It currently uses its own local DB and supports bridge import from extension backup JSON.
+- For best results:
+  - Export backup from Configurations page.
+  - Import with `swm_import_extension_backup_file` (`mode=replace` first sync).
+  - Use `swm_sync_extension_state_incremental` for upsert/incremental updates.
 
 ## Security / Compliance
 

@@ -36,6 +36,13 @@ header p {
   gap: 10px;
 }
 
+.panel hr {
+  width: 100%;
+  border: 0;
+  border-top: 1px solid #2f445a;
+  margin: 4px 0;
+}
+
 button {
   border: 1px solid #2f445a;
   border-radius: 4px;
@@ -52,6 +59,26 @@ button:hover {
 
 button.danger {
   background: #8d3d3d;
+}
+
+.inline-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 8px;
+  color: #d6e7f7;
+}
+
+.inline-option select {
+  border: 1px solid #2f445a;
+  border-radius: 4px;
+  background: #101822;
+  color: #d6e7f7;
+  padding: 8px;
+}
+
+.hidden-input {
+  display: none;
 }
 
 .status {

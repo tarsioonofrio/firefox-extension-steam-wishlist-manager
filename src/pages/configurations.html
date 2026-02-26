@@ -16,6 +16,28 @@
     <section class="panel">
       <button id="refresh-db" type="button">Refresh Entire Database</button>
       <button id="clear-db" type="button" class="danger">Delete Entire Database</button>
+      <hr>
+      <button id="backup-now" type="button">Create Backup Now</button>
+      <button id="export-backup" type="button">Export Current Data (JSON)</button>
+      <button id="restore-backup" type="button">Restore From Backup File</button>
+      <input id="restore-backup-file" type="file" accept="application/json" class="hidden-input">
+      <label class="inline-option">
+        <input id="auto-backup-enabled" type="checkbox">
+        <span>Enable automatic backups</span>
+      </label>
+      <label class="inline-option">
+        <span>Backup interval</span>
+        <select id="auto-backup-interval">
+          <option value="1">Every 1 hour</option>
+          <option value="3">Every 3 hours</option>
+          <option value="6">Every 6 hours</option>
+          <option value="12">Every 12 hours</option>
+          <option value="24">Every 24 hours</option>
+          <option value="48">Every 48 hours</option>
+          <option value="72">Every 72 hours</option>
+        </select>
+      </label>
+      <p id="backup-summary" class="status"></p>
       <p id="status" class="status"></p>
     </section>
   </main>
