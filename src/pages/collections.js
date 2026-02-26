@@ -38,6 +38,7 @@ let wishlistSortOrders = {};
 let wishlistSnapshotDay = "";
 let wishlistMetaSyncInFlight = false;
 let currentRenderedPageIds = [];
+let rankFallbackNoticeShown = false;
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -944,6 +945,7 @@ async function loadWishlistAddedMap() {
   wishlistPriorityLastError = String(effectiveCached.priorityLastError || "");
   wishlistSteamId = String(effectiveCached.steamId || "");
   const lastFullSyncAt = Number(effectiveCached.lastFullSyncAt || 0);
+  const cachedPrioritySource = String(effectiveCached.prioritySource || "");
   wishlistPriorityMap = {};
   for (const [appId, priority] of Object.entries(cachedPriorityMap)) {
     const n = Number(priority);
@@ -1082,8 +1084,9 @@ async function loadWishlistAddedMap() {
     }
 
     const cacheHasRank = cachedOrderedIds.length > 0 && Object.keys(wishlistPriorityMap).length > 0;
+    const cacheFromCurrentRankApi = cachedPrioritySource === "wishlist-api-v1";
     const rankStale = (now - wishlistPriorityCachedAt) >= WISHLIST_RANK_SYNC_INTERVAL_MS;
-    const shouldRefreshRank = Boolean(steamId) && (wishlistChanged || !cacheHasRank || rankStale);
+    const shouldRefreshRank = Boolean(steamId) && (wishlistChanged || !cacheHasRank || rankStale || !cacheFromCurrentRankApi);
 
     if (shouldRefreshRank) {
       setStatus("Syncing wishlist rank from API...");
@@ -1111,6 +1114,7 @@ async function loadWishlistAddedMap() {
             priorityMap: wishlistPriorityMap,
             priorityCachedAt: now,
             priorityLastError: "",
+            prioritySource: "wishlist-api-v1",
             steamId,
             map: wishlistAddedMap
           }
@@ -1136,6 +1140,7 @@ async function loadWishlistAddedMap() {
         priorityMap: wishlistPriorityMap,
         priorityCachedAt: Number(effectiveCached.priorityCachedAt || 0),
         priorityLastError: wishlistPriorityLastError || String(effectiveCached.priorityLastError || ""),
+        prioritySource: String(effectiveCached.prioritySource || ""),
         map: wishlistAddedMap
       }
     });
@@ -1397,6 +1402,7 @@ async function ensureWishlistMetaFromSnapshot(appIds, options = {}) {
   let changed = false;
   let pagesScanned = 0;
   let failedPages = 0;
+  let consecutiveFailures = 0;
 
   try {
     for (let pageIndex = 0; pageIndex < 200 && unresolved.size > 0; pageIndex += 1) {
@@ -1412,11 +1418,16 @@ async function ensureWishlistMetaFromSnapshot(appIds, options = {}) {
         );
       } catch {
         failedPages += 1;
+        consecutiveFailures += 1;
         const resolved = totalNeeded - unresolved.size;
         const pct = totalNeeded > 0 ? Math.round((resolved / totalNeeded) * 100) : 100;
         setStatus(`Loading wishlist snapshot metadata... ${resolved}/${totalNeeded} (${pct}%) | page ${pageIndex + 1} | failed pages ${failedPages}`);
+        if (consecutiveFailures >= 3) {
+          break;
+        }
         continue;
       }
+      consecutiveFailures = 0;
       const entries = Object.entries(payload || {});
       if (entries.length === 0) {
         break;
@@ -1442,7 +1453,12 @@ async function ensureWishlistMetaFromSnapshot(appIds, options = {}) {
       wishlistSnapshotDay = todayKey();
       wishlistSortSignature = "";
       wishlistSortOrders = {};
-      setStatus(`Wishlist metadata sync done. ${totalNeeded - unresolved.size}/${totalNeeded} items, pages ${pagesScanned}, failed pages ${failedPages}.`);
+      const resolvedFinal = totalNeeded - unresolved.size;
+      if (resolvedFinal === 0 && failedPages > 0) {
+        setStatus(`Wishlist metadata sync paused: Steam blocked snapshot pages (${failedPages} failures).`, true);
+      } else {
+        setStatus(`Wishlist metadata sync done. ${resolvedFinal}/${totalNeeded} items, pages ${pagesScanned}, failed pages ${failedPages}.`);
+      }
     }
   } finally {
     if (!background) {
@@ -1487,21 +1503,13 @@ async function ensureWishlistPrecomputedSorts(appIds) {
   }
 
   const signature = buildWishlistSignature(appIds);
-  const day = todayKey();
-  const needsDailyRefresh = wishlistSnapshotDay !== day;
-
-  if (wishlistSortSignature === signature && wishlistSortOrders?.position?.length && !needsDailyRefresh) {
+  if (wishlistSortSignature === signature && wishlistSortOrders?.position?.length) {
     return;
   }
 
   wishlistSortOrders = buildWishlistSortOrders(appIds);
   wishlistSortSignature = signature;
-  if (needsDailyRefresh) {
-    startWishlistMetaSyncInBackground(appIds);
-  }
-  if (!needsDailyRefresh) {
-    wishlistSnapshotDay = day;
-  }
+  wishlistSnapshotDay = todayKey();
 }
 
 function getAllKnownAppIds() {
@@ -2608,6 +2616,17 @@ async function renderCards() {
   const needsMetaForSort = sortMode !== "position";
   const needsMetaForSearch = Boolean(String(searchQuery || "").trim());
   const shouldSkipHeavyMetaHydration = sourceMode === "wishlist";
+  const rankReadyNow = sourceMode !== "wishlist" || isWishlistRankReady(sourceIds);
+
+  if (sourceMode === "wishlist" && sortMode === "position" && !rankReadyNow) {
+    if (!rankFallbackNoticeShown) {
+      setStatus("Your rank is still syncing; temporarily showing Title order.");
+      rankFallbackNoticeShown = true;
+    }
+  } else if (rankFallbackNoticeShown) {
+    setStatus("");
+    rankFallbackNoticeShown = false;
+  }
 
   if (sourceMode === "wishlist") {
     await ensureWishlistPrecomputedSorts(sourceIds);
