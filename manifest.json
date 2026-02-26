@@ -5,6 +5,7 @@
   "description": "Organize Steam wishlist games into custom collections with independent ordering.",
   "permissions": ["storage"],
   "host_permissions": [
+    "*://api.steampowered.com/*",
     "*://store.steampowered.com/app/*",
     "*://store.steampowered.com/appreviews/*",
     "*://store.steampowered.com/api/*",
