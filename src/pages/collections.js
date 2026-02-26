@@ -130,6 +130,7 @@ let filterSyncRunId = 0;
 let batchMode = false;
 let batchAddTargetCollection = "";
 let batchSelectedIds = new Set();
+let dynamicCollectionSizes = {};
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -242,6 +243,163 @@ function getWishlistRankUnavailableReason() {
   });
 }
 
+function isDynamicCollectionName(name) {
+  const key = String(name || "").trim();
+  return Boolean(state?.dynamicCollections?.[key]);
+}
+
+function getStaticCollectionNames() {
+  return (state?.collectionOrder || []).filter((name) => !isDynamicCollectionName(name));
+}
+
+function getDynamicCollectionNames() {
+  return Object.keys(state?.dynamicCollections || {});
+}
+
+function getExistingCollectionNames() {
+  return state?.collectionOrder || [];
+}
+
+function exportCurrentFilterSnapshot() {
+  return {
+    selectedTags: Array.from(selectedTags),
+    selectedTypes: Array.from(selectedTypes),
+    selectedPlayers: Array.from(selectedPlayers),
+    selectedFeatures: Array.from(selectedFeatures),
+    selectedHardware: Array.from(selectedHardware),
+    selectedAccessibility: Array.from(selectedAccessibility),
+    selectedPlatforms: Array.from(selectedPlatforms),
+    selectedLanguages: Array.from(selectedLanguages),
+    selectedFullAudioLanguages: Array.from(selectedFullAudioLanguages),
+    selectedSubtitleLanguages: Array.from(selectedSubtitleLanguages),
+    selectedTechnologies: Array.from(selectedTechnologies),
+    selectedDevelopers: Array.from(selectedDevelopers),
+    selectedPublishers: Array.from(selectedPublishers),
+    ratingMin,
+    ratingMax,
+    reviewsMin,
+    reviewsMax,
+    discountMin,
+    discountMax,
+    priceMin,
+    priceMax,
+    releaseTextEnabled,
+    releaseYearRangeEnabled,
+    releaseYearMin,
+    releaseYearMax
+  };
+}
+
+function applyFilterSnapshot(snapshot) {
+  const data = snapshot && typeof snapshot === "object" ? snapshot : {};
+  selectedTags = new Set(Array.isArray(data.selectedTags) ? data.selectedTags : []);
+  selectedTypes = new Set(Array.isArray(data.selectedTypes) ? data.selectedTypes : []);
+  selectedPlayers = new Set(Array.isArray(data.selectedPlayers) ? data.selectedPlayers : []);
+  selectedFeatures = new Set(Array.isArray(data.selectedFeatures) ? data.selectedFeatures : []);
+  selectedHardware = new Set(Array.isArray(data.selectedHardware) ? data.selectedHardware : []);
+  selectedAccessibility = new Set(Array.isArray(data.selectedAccessibility) ? data.selectedAccessibility : []);
+  selectedPlatforms = new Set(Array.isArray(data.selectedPlatforms) ? data.selectedPlatforms : []);
+  selectedLanguages = new Set(Array.isArray(data.selectedLanguages) ? data.selectedLanguages : []);
+  selectedFullAudioLanguages = new Set(Array.isArray(data.selectedFullAudioLanguages) ? data.selectedFullAudioLanguages : []);
+  selectedSubtitleLanguages = new Set(Array.isArray(data.selectedSubtitleLanguages) ? data.selectedSubtitleLanguages : []);
+  selectedTechnologies = new Set(Array.isArray(data.selectedTechnologies) ? data.selectedTechnologies : []);
+  selectedDevelopers = new Set(Array.isArray(data.selectedDevelopers) ? data.selectedDevelopers : []);
+  selectedPublishers = new Set(Array.isArray(data.selectedPublishers) ? data.selectedPublishers : []);
+  ratingMin = parseNonNegativeInt(data.ratingMin, 0);
+  ratingMax = parseNonNegativeInt(data.ratingMax, 100);
+  reviewsMin = parseNonNegativeInt(data.reviewsMin, 0);
+  reviewsMax = parseNonNegativeInt(data.reviewsMax, 999999999);
+  discountMin = parseNonNegativeInt(data.discountMin, 0);
+  discountMax = parseNonNegativeInt(data.discountMax, 100);
+  priceMin = Number.isFinite(Number(data.priceMin)) ? Number(data.priceMin) : 0;
+  priceMax = Number.isFinite(Number(data.priceMax)) ? Number(data.priceMax) : 9999999;
+  releaseTextEnabled = Boolean(data.releaseTextEnabled);
+  releaseYearRangeEnabled = Boolean(data.releaseYearRangeEnabled);
+  releaseYearMin = Number.isFinite(Number(data.releaseYearMin)) ? Number(data.releaseYearMin) : RELEASE_YEAR_DEFAULT_MIN;
+  releaseYearMax = Number.isFinite(Number(data.releaseYearMax)) ? Number(data.releaseYearMax) : getReleaseYearMaxBound();
+}
+
+function buildDynamicDefinitionFromCurrentView() {
+  let baseSource = "wishlist";
+  let baseCollection = "";
+  if (sourceMode === "wishlist") {
+    baseSource = "wishlist";
+  } else if (activeCollection === "__all__") {
+    baseSource = "all-static";
+  } else if (isDynamicCollectionName(activeCollection)) {
+    const currentDef = state?.dynamicCollections?.[activeCollection] || {};
+    baseSource = String(currentDef.baseSource || "wishlist");
+    baseCollection = String(currentDef.baseCollection || "");
+  } else {
+    baseSource = "static-collection";
+    baseCollection = activeCollection;
+  }
+  return {
+    baseSource,
+    baseCollection,
+    sortMode,
+    filters: exportCurrentFilterSnapshot()
+  };
+}
+
+function getDynamicBaseIds(definition, stack = new Set()) {
+  const def = definition && typeof definition === "object" ? definition : {};
+  const baseSource = String(def.baseSource || "wishlist");
+  const baseCollection = String(def.baseCollection || "").trim();
+
+  if (baseSource === "wishlist") {
+    return wishlistOrderedAppIds.length > 0 ? [...wishlistOrderedAppIds] : Object.keys(wishlistAddedMap);
+  }
+
+  if (baseSource === "static-collection") {
+    return Array.isArray(state?.collections?.[baseCollection]) ? [...state.collections[baseCollection]] : [];
+  }
+
+  const all = [];
+  for (const name of getStaticCollectionNames()) {
+    for (const id of state?.collections?.[name] || []) {
+      all.push(id);
+    }
+  }
+  return Array.from(new Set(all));
+}
+
+function getDynamicCollectionAppIds(name, stack = new Set()) {
+  const collectionName = String(name || "").trim();
+  if (!collectionName || stack.has(collectionName)) {
+    return [];
+  }
+  const definition = state?.dynamicCollections?.[collectionName];
+  if (!definition) {
+    return [];
+  }
+  const nextStack = new Set(stack);
+  nextStack.add(collectionName);
+  const baseIds = getDynamicBaseIds(definition, nextStack);
+  const previousSortMode = sortMode;
+  const previousSourceMode = sourceMode;
+  const previousSearchQuery = searchQuery;
+  const previousPage = page;
+  const previousActiveCollection = activeCollection;
+  const previousSnapshot = exportCurrentFilterSnapshot();
+  try {
+    sourceMode = "collections";
+    activeCollection = collectionName;
+    sortMode = String(definition.sortMode || "title");
+    searchQuery = "";
+    page = 1;
+    applyFilterSnapshot(definition.filters || {});
+    return getFilteredAndSorted(baseIds);
+  } finally {
+    sortMode = previousSortMode;
+    sourceMode = previousSourceMode;
+    searchQuery = previousSearchQuery;
+    page = previousPage;
+    activeCollection = previousActiveCollection;
+    applyFilterSnapshot(previousSnapshot);
+  }
+}
+
 function getCurrentSourceAppIds() {
   if (sourceMode === "wishlist") {
     if (wishlistOrderedAppIds.length > 0) {
@@ -256,13 +414,17 @@ function getCurrentSourceAppIds() {
 
   if (activeCollection === "__all__") {
     const all = [];
-    for (const name of state.collectionOrder || []) {
+    for (const name of getStaticCollectionNames()) {
       const ids = state.collections?.[name] || [];
       for (const id of ids) {
         all.push(id);
       }
     }
     return Array.from(new Set(all));
+  }
+
+  if (isDynamicCollectionName(activeCollection)) {
+    return getDynamicCollectionAppIds(activeCollection);
   }
 
   return [...(state.collections?.[activeCollection] || [])];
@@ -2309,12 +2471,22 @@ function getFiltersContext() {
 }
 
 function renderCollectionSelect() {
+  dynamicCollectionSizes = {};
+  for (const name of state?.collectionOrder || []) {
+    if (isDynamicCollectionName(name)) {
+      dynamicCollectionSizes[name] = getDynamicCollectionAppIds(name).length;
+    } else {
+      dynamicCollectionSizes[name] = (state?.collections?.[name] || []).length;
+    }
+  }
   const result = uiControlsUtils.renderCollectionSelect({
     state,
     sourceMode,
     activeCollection,
     wishlistCount: Object.keys(wishlistAddedMap || {}).length,
-    wishlistSelectValue: WISHLIST_SELECT_VALUE
+    wishlistSelectValue: WISHLIST_SELECT_VALUE,
+    collectionSizes: dynamicCollectionSizes,
+    dynamicNames: Object.keys(state?.dynamicCollections || {})
   });
   if (result?.activeCollection) {
     activeCollection = result.activeCollection;
@@ -2465,7 +2637,7 @@ function renderBatchMenuState() {
     btn.classList.toggle("active", batchMode);
   }
   if (collectionSelect) {
-    const names = state?.collectionOrder || [];
+    const names = getStaticCollectionNames();
     collectionSelect.innerHTML = "";
     for (const name of names) {
       const option = document.createElement("option");
@@ -2497,7 +2669,7 @@ async function applyBatchAdd() {
     setStatus("Select one or more cards for batch action.", true);
     return;
   }
-  if (!batchAddTargetCollection || !(state?.collectionOrder || []).includes(batchAddTargetCollection)) {
+  if (!batchAddTargetCollection || !getStaticCollectionNames().includes(batchAddTargetCollection)) {
     setStatus("Choose a valid collection to add.", true);
     return;
   }
@@ -2524,7 +2696,7 @@ async function applyBatchRemoveFromCurrentCollection() {
     setStatus("Select one or more cards for batch action.", true);
     return;
   }
-  if (sourceMode !== "collections" || !activeCollection || activeCollection === "__all__") {
+  if (sourceMode !== "collections" || !activeCollection || activeCollection === "__all__" || isDynamicCollectionName(activeCollection)) {
     setStatus("Select a specific collection to remove selected games from it.", true);
     return;
   }
@@ -2562,11 +2734,15 @@ function getCollectionsContainingApp(appId) {
 }
 
 function canManualReorder() {
-  return sourceMode === "collections" && activeCollection !== "__all__" && sortMode === "position" && !batchMode;
+  return sourceMode === "collections"
+    && activeCollection !== "__all__"
+    && !isDynamicCollectionName(activeCollection)
+    && sortMode === "position"
+    && !batchMode;
 }
 
 function getActiveCollectionOrder() {
-  if (sourceMode !== "collections" || activeCollection === "__all__") {
+  if (sourceMode !== "collections" || activeCollection === "__all__" || isDynamicCollectionName(activeCollection)) {
     return [];
   }
   return Array.isArray(state?.collections?.[activeCollection]) ? [...state.collections[activeCollection]] : [];
@@ -2577,7 +2753,7 @@ function clamp(value, min, max) {
 }
 
 async function persistActiveCollectionOrder(nextOrder) {
-  if (sourceMode !== "collections" || activeCollection === "__all__") {
+  if (sourceMode !== "collections" || activeCollection === "__all__" || isDynamicCollectionName(activeCollection)) {
     return;
   }
   await browser.runtime.sendMessage({
@@ -2734,7 +2910,7 @@ async function renderCards() {
       appId,
       sourceMode,
       activeCollection,
-      allCollectionNames: state?.collectionOrder || [],
+      allCollectionNames: getStaticCollectionNames(),
       selectedCollectionNames: getCollectionsContainingApp(appId),
       setStatus,
       confirmFn: (message) => window.confirm(message),
@@ -2813,6 +2989,38 @@ async function createCollectionByName(rawName) {
     sourceMode = result.sourceMode ?? sourceMode;
     page = Number.isFinite(Number(result.page)) ? Number(result.page) : page;
   }
+  await render();
+}
+
+async function createOrUpdateDynamicCollectionByName(rawName) {
+  const name = normalizeCollectionName(rawName);
+  if (!name) {
+    setStatus("Type a dynamic collection name.", true);
+    return;
+  }
+  const existing = getExistingCollectionNames().includes(name);
+  if (existing) {
+    if (!isDynamicCollectionName(name)) {
+      setStatus(`"${name}" is a static collection. Choose another name for dynamic collection.`, true);
+      return;
+    }
+    const confirmed = window.confirm(`Collection "${name}" already exists. Update it as dynamic with current filters and sort?`);
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  const definition = buildDynamicDefinitionFromCurrentView();
+  await browser.runtime.sendMessage({
+    type: "create-or-update-dynamic-collection",
+    collectionName: name,
+    definition
+  });
+  await refreshState();
+  activeCollection = name;
+  sourceMode = "collections";
+  page = 1;
+  setStatus(`Dynamic collection "${name}" saved.`);
   await render();
 }
 
@@ -2940,6 +3148,7 @@ function toggleViewMenu(forceOpen = null) {
 function hideCollectionMenuForms() {
   document.getElementById("rename-collection-form")?.classList.add("hidden");
   document.getElementById("create-collection-form")?.classList.add("hidden");
+  document.getElementById("dynamic-collection-form")?.classList.add("hidden");
   document.getElementById("delete-collection-form")?.classList.add("hidden");
 }
 
@@ -3007,7 +3216,13 @@ async function handleCollectionChange(value) {
     });
   }
 
-  resetAllFiltersState();
+  const dynamicDef = sourceMode === "collections" ? state?.dynamicCollections?.[activeCollection] : null;
+  if (dynamicDef) {
+    applyFilterSnapshot(dynamicDef.filters || {});
+    sortMode = String(dynamicDef.sortMode || sortMode || "title");
+  } else {
+    resetAllFiltersState();
+  }
   quickPopulateFiltersFromCache();
   refreshFilterOptionsInBackground();
   await render();
@@ -3075,6 +3290,7 @@ function bindCollectionMenuControls() {
     toggleCollectionMenu,
     renameHandler: renameActiveCollectionByName,
     createHandler: createCollectionByName,
+    dynamicHandler: createOrUpdateDynamicCollectionByName,
     deleteHandler: deleteCollectionByName,
     onError: (message) => setStatus(message, true)
   });

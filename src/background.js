@@ -13,6 +13,7 @@ let backgroundWishlistDomSyncInFlight = false;
 const DEFAULT_STATE = {
   collectionOrder: [],
   collections: {},
+  dynamicCollections: {},
   items: {},
   activeCollection: "__all__"
 };
@@ -55,7 +56,7 @@ function validateAppId(appId) {
 function getReferencedAppIds(state) {
   const referenced = new Set();
 
-  for (const collectionName of state.collectionOrder) {
+  for (const collectionName of Object.keys(state.collections || {})) {
     const appIds = state.collections[collectionName] || [];
     for (const appId of appIds) {
       referenced.add(appId);
@@ -110,8 +111,30 @@ function normalizeState(rawState) {
     state.collections = {};
   }
 
+  if (!state.dynamicCollections || typeof state.dynamicCollections !== "object") {
+    state.dynamicCollections = {};
+  }
+
   if (!state.items || typeof state.items !== "object") {
     state.items = {};
+  }
+
+  const normalizedDynamicCollections = {};
+  for (const [rawName, rawDef] of Object.entries(state.dynamicCollections || {})) {
+    const name = normalizeCollectionName(rawName);
+    if (!name) {
+      continue;
+    }
+    const definition = rawDef && typeof rawDef === "object" ? rawDef : {};
+    normalizedDynamicCollections[name] = {
+      baseSource: String(definition.baseSource || "wishlist"),
+      baseCollection: normalizeCollectionName(definition.baseCollection || ""),
+      sortMode: String(definition.sortMode || "title"),
+      filters: definition.filters && typeof definition.filters === "object"
+        ? definition.filters
+        : {},
+      capturedAt: Number.isFinite(Number(definition.capturedAt)) ? Number(definition.capturedAt) : Date.now()
+    };
   }
 
   const validCollectionOrder = [];
@@ -122,6 +145,9 @@ function normalizeState(rawState) {
     if (!normalized || seenCollections.has(normalized)) {
       continue;
     }
+    if (!state.collections[normalized] && !normalizedDynamicCollections[normalized]) {
+      continue;
+    }
     seenCollections.add(normalized);
     validCollectionOrder.push(normalized);
   }
@@ -130,6 +156,9 @@ function normalizeState(rawState) {
   const referencedAppIds = new Set();
 
   for (const collectionName of validCollectionOrder) {
+    if (!state.collections[collectionName]) {
+      continue;
+    }
     const rawList = Array.isArray(state.collections[collectionName])
       ? state.collections[collectionName]
       : [];
@@ -162,6 +191,7 @@ function normalizeState(rawState) {
   return {
     collectionOrder: validCollectionOrder,
     collections: normalizedCollections,
+    dynamicCollections: normalizedDynamicCollections,
     items: normalizedItems,
     activeCollection: String(state.activeCollection || "__all__")
   };
@@ -180,6 +210,9 @@ function ensureCollection(state, name) {
   const normalized = normalizeCollectionName(name);
   if (!normalized) {
     throw new Error("Collection name is required.");
+  }
+  if (state.dynamicCollections?.[normalized]) {
+    throw new Error("A dynamic collection with this name already exists.");
   }
 
   if (!state.collections[normalized]) {
@@ -207,7 +240,7 @@ function removeFromAllCollections(state, appId) {
 function pruneItemsNotInWishlist(state, allowedAppIds) {
   const allowed = new Set(sanitizeAppIdList(allowedAppIds));
 
-  for (const collectionName of state.collectionOrder) {
+  for (const collectionName of Object.keys(state.collections || {})) {
     const current = state.collections[collectionName] || [];
     state.collections[collectionName] = current.filter((appId) => allowed.has(appId));
   }
@@ -217,7 +250,20 @@ function pruneItemsNotInWishlist(state, allowedAppIds) {
 
 function deleteCollection(state, name) {
   const normalized = normalizeCollectionName(name);
-  if (!normalized || !state.collections[normalized]) {
+  if (!normalized) {
+    return false;
+  }
+
+  if (state.dynamicCollections[normalized]) {
+    delete state.dynamicCollections[normalized];
+    state.collectionOrder = state.collectionOrder.filter((collectionName) => collectionName !== normalized);
+    if (state.activeCollection === normalized) {
+      state.activeCollection = "__all__";
+    }
+    return true;
+  }
+
+  if (!state.collections[normalized]) {
     return false;
   }
 
@@ -236,7 +282,7 @@ function renameCollection(state, fromName, toName) {
   const from = normalizeCollectionName(fromName);
   const to = normalizeCollectionName(toName);
 
-  if (!from || !state.collections[from]) {
+  if (!from || (!state.collections[from] && !state.dynamicCollections[from])) {
     throw new Error("Collection not found.");
   }
   if (!to) {
@@ -245,12 +291,17 @@ function renameCollection(state, fromName, toName) {
   if (from === to) {
     return to;
   }
-  if (state.collections[to]) {
+  if (state.collections[to] || state.dynamicCollections[to]) {
     throw new Error("A collection with this name already exists.");
   }
 
-  state.collections[to] = state.collections[from];
-  delete state.collections[from];
+  if (state.collections[from]) {
+    state.collections[to] = state.collections[from];
+    delete state.collections[from];
+  } else {
+    state.dynamicCollections[to] = state.dynamicCollections[from];
+    delete state.dynamicCollections[from];
+  }
   state.collectionOrder = state.collectionOrder.map((name) => (name === from ? to : name));
 
   if (state.activeCollection === from) {
@@ -258,6 +309,28 @@ function renameCollection(state, fromName, toName) {
   }
 
   return to;
+}
+
+function ensureDynamicCollection(state, name, definition) {
+  const normalized = normalizeCollectionName(name);
+  if (!normalized) {
+    throw new Error("Collection name is required.");
+  }
+  if (state.collections[normalized]) {
+    throw new Error("A static collection with this name already exists.");
+  }
+  const def = definition && typeof definition === "object" ? definition : {};
+  state.dynamicCollections[normalized] = {
+    baseSource: String(def.baseSource || "wishlist"),
+    baseCollection: normalizeCollectionName(def.baseCollection || ""),
+    sortMode: String(def.sortMode || "title"),
+    filters: def.filters && typeof def.filters === "object" ? def.filters : {},
+    capturedAt: Date.now()
+  };
+  if (!state.collectionOrder.includes(normalized)) {
+    state.collectionOrder.push(normalized);
+  }
+  return normalized;
 }
 
 function encodeVarint(value) {
@@ -909,7 +982,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
           : [];
         const selectedSet = new Set(selectedCollectionNames);
 
-        for (const collectionName of state.collectionOrder) {
+        for (const collectionName of Object.keys(state.collections || {})) {
           const list = state.collections[collectionName] || [];
           const hasItem = list.includes(appId);
           const shouldHave = selectedSet.has(collectionName);
@@ -998,6 +1071,12 @@ browser.runtime.onMessage.addListener((message, sender) => {
         ensureCollection(state, message.collectionName);
         await setState(state);
         return { ok: true, state };
+      }
+
+      case "create-or-update-dynamic-collection": {
+        const collectionName = ensureDynamicCollection(state, message.collectionName, message.definition);
+        await setState(state);
+        return { ok: true, collectionName, state };
       }
 
       case "rename-collection": {

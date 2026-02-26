@@ -5,6 +5,8 @@
     const activeCollection = String(options?.activeCollection || "__all__");
     const wishlistCount = Number(options?.wishlistCount || 0);
     const wishlistSelectValue = String(options?.wishlistSelectValue || "__wishlist__");
+    const collectionSizes = options?.collectionSizes || {};
+    const dynamicNames = new Set(Array.isArray(options?.dynamicNames) ? options.dynamicNames : []);
 
     const select = document.getElementById("collection-select");
     const selectBtn = document.getElementById("collection-select-btn");
@@ -29,7 +31,9 @@
     for (const name of state.collectionOrder || []) {
       const option = document.createElement("option");
       option.value = name;
-      option.textContent = `${name} (${(state.collections?.[name] || []).length})`;
+      const count = Number(collectionSizes?.[name] ?? (state.collections?.[name] || []).length);
+      const suffix = dynamicNames.has(name) ? " [dynamic]" : "";
+      option.textContent = `${name}${suffix} (${Number.isFinite(count) ? count : 0})`;
       select.appendChild(option);
     }
 
@@ -61,7 +65,9 @@
       for (const name of state.collectionOrder || []) {
         const option = document.createElement("option");
         option.value = name;
-        option.textContent = `${name} (${(state.collections?.[name] || []).length})`;
+        const count = Number(collectionSizes?.[name] ?? (state.collections?.[name] || []).length);
+        const suffix = dynamicNames.has(name) ? " [dynamic]" : "";
+        option.textContent = `${name}${suffix} (${Number.isFinite(count) ? count : 0})`;
         deleteSelect.appendChild(option);
       }
     }

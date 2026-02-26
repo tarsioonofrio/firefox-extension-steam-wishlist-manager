@@ -6,6 +6,7 @@
     const toggleCollectionMenu = options?.toggleCollectionMenu || (() => {});
     const renameHandler = options?.renameHandler || (async () => {});
     const createHandler = options?.createHandler || (async () => {});
+    const dynamicHandler = options?.dynamicHandler || (async () => {});
     const deleteHandler = options?.deleteHandler || (async () => {});
     const onError = options?.onError || (() => {});
 
@@ -38,12 +39,16 @@
     document.getElementById("menu-action-create")?.addEventListener("click", () => {
       showOnlyForm("create-collection-form");
     });
+    document.getElementById("menu-action-dynamic")?.addEventListener("click", () => {
+      showOnlyForm("dynamic-collection-form");
+    });
     document.getElementById("menu-action-delete")?.addEventListener("click", () => {
       showOnlyForm("delete-collection-form");
     });
 
     bindSubmit("rename-collection-ok", "rename-collection-input", renameHandler, "Failed to rename collection.", true);
     bindSubmit("create-collection-ok", "create-collection-input", createHandler, "Failed to create collection.", true);
+    bindSubmit("dynamic-collection-ok", "dynamic-collection-input", dynamicHandler, "Failed to save dynamic collection.", true);
     bindSubmit("delete-collection-ok", "delete-collection-select", deleteHandler, "Failed to delete collection.", false);
   }
 

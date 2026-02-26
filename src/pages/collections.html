@@ -49,8 +49,9 @@
       </div>
       <div id="collection-menu-panel" class="collection-menu-panel hidden">
         <div class="menu-actions">
-          <button id="menu-action-rename" type="button">Rename current collection</button>
-          <button id="menu-action-create" type="button">Create new collection</button>
+          <button id="menu-action-rename" type="button">Rename</button>
+          <button id="menu-action-create" type="button">New static</button>
+          <button id="menu-action-dynamic" type="button">New/Update dynamic</button>
           <button id="menu-action-delete" type="button" class="danger">Delete collection</button>
         </div>
         <div id="rename-collection-form" class="menu-form hidden">
@@ -60,6 +61,10 @@
         <div id="create-collection-form" class="menu-form hidden">
           <input id="create-collection-input" type="text" placeholder="New collection name">
           <button id="create-collection-ok" type="button">OK</button>
+        </div>
+        <div id="dynamic-collection-form" class="menu-form hidden">
+          <input id="dynamic-collection-input" type="text" placeholder="Dynamic collection name">
+          <button id="dynamic-collection-ok" type="button">OK</button>
         </div>
         <div id="delete-collection-form" class="menu-form hidden">
           <select id="delete-collection-select"></select>
