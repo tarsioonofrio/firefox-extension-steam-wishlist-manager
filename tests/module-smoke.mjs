@@ -116,7 +116,6 @@ function testCollectionsFilters(context) {
     selectedTechnologies: new Set(),
     selectedDevelopers: new Set(),
     selectedPublishers: new Set(),
-    selectedReleaseYears: new Set(["Soon"]),
     getReleaseFilterData: (id) => {
       const releaseText = String(meta[id].releaseText || "");
       if (releaseText.toLowerCase().includes("coming soon")) {
@@ -126,6 +125,7 @@ function testCollectionsFilters(context) {
       const year = unix > 0 ? new Date(unix * 1000).getUTCFullYear() : 0;
       return { year, textLabel: "" };
     },
+    releaseTextEnabled: true,
     releaseYearRangeEnabled: false,
     releaseYearMin: 1970,
     releaseYearMax: 2030,

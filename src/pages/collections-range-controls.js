@@ -8,6 +8,7 @@
     const discountMax = Number(values?.discountMax ?? 100);
     const priceMin = Number(values?.priceMin ?? 0);
     const priceMax = Number(values?.priceMax ?? 9999999);
+    const releaseTextEnabled = Boolean(values?.releaseTextEnabled);
     const releaseYearRangeEnabled = Boolean(values?.releaseYearRangeEnabled);
     const releaseYearMin = Number(values?.releaseYearMin ?? 1970);
     const releaseYearMax = Number(values?.releaseYearMax ?? new Date().getUTCFullYear() + 1);
@@ -27,6 +28,7 @@
     const priceMinInput = document.getElementById("price-min-input");
     const priceMaxInput = document.getElementById("price-max-input");
     const releaseYearToggle = document.getElementById("release-year-range-enabled");
+    const releaseTextToggle = document.getElementById("release-text-enabled");
     const releaseYearPanel = document.getElementById("release-year-range-panel");
     const releaseYearMinLabel = document.getElementById("release-year-min-label");
     const releaseYearMaxLabel = document.getElementById("release-year-max-label");
@@ -45,6 +47,7 @@
     if (discountMaxRange) discountMaxRange.value = String(discountMax);
     if (priceMinInput) priceMinInput.value = String(priceMin);
     if (priceMaxInput) priceMaxInput.value = String(priceMax);
+    if (releaseTextToggle) releaseTextToggle.checked = releaseTextEnabled;
     if (releaseYearToggle) releaseYearToggle.checked = releaseYearRangeEnabled;
     if (releaseYearMinLabel) releaseYearMinLabel.textContent = String(releaseYearMin);
     if (releaseYearMaxLabel) releaseYearMaxLabel.textContent = String(releaseYearMax);
@@ -88,6 +91,9 @@
       const min = document.getElementById("price-min-input")?.value;
       const max = document.getElementById("price-max-input")?.value;
       h.onApplyPrice?.(min, max);
+    });
+    document.getElementById("release-text-enabled")?.addEventListener("change", (event) => {
+      h.onReleaseTextToggle?.(Boolean(event.target.checked));
     });
     document.getElementById("release-year-range-enabled")?.addEventListener("change", (event) => {
       h.onReleaseYearRangeToggle?.(Boolean(event.target.checked));

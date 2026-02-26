@@ -138,19 +138,23 @@
         <details class="filter-group" open>
           <summary>Release Year</summary>
           <div class="filter-content">
-            <div id="release-year-options" class="tag-options"></div>
-            <label class="inline-toggle">
-              <input id="release-year-range-enabled" type="checkbox">
-              <span>Enable year range</span>
+            <label class="inline-toggle switch-toggle">
+              <input id="release-text-enabled" type="checkbox" checked>
+              <span>TBA/Soon</span>
             </label>
-            <div id="release-year-range-panel" class="release-year-range-panel">
+            <div class="release-year-range-row">
+              <label class="inline-toggle switch-toggle">
+                <input id="release-year-range-enabled" type="checkbox" checked>
+              </label>
+              <div id="release-year-range-panel" class="release-year-range-panel">
               <div class="range-header">
-                <span id="release-year-min-label">1970</span>
+                <span id="release-year-min-label">2010</span>
                 <span id="release-year-max-label">2027</span>
               </div>
               <div class="dual-range">
-                <input id="release-year-min-range" type="range" min="1970" max="2027" step="1" value="1970">
-                <input id="release-year-max-range" type="range" min="1970" max="2027" step="1" value="2027">
+                <input id="release-year-min-range" type="range" min="2010" max="2027" step="1" value="2010">
+                <input id="release-year-max-range" type="range" min="2010" max="2027" step="1" value="2027">
+              </div>
               </div>
             </div>
           </div>

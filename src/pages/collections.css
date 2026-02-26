@@ -278,6 +278,46 @@ button.danger,
   opacity: 0.55;
 }
 
+.release-year-range-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.switch-toggle input[type="checkbox"] {
+  appearance: none;
+  width: 30px;
+  height: 16px;
+  border-radius: 12px;
+  border: 1px solid #3f5c79;
+  background: #1b2a3c;
+  position: relative;
+  cursor: pointer;
+  margin: 0;
+}
+
+.switch-toggle input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  top: 1px;
+  left: 1px;
+  background: #b7cde2;
+  transition: transform 120ms ease;
+}
+
+.switch-toggle input[type="checkbox"]:checked {
+  background: #2d5e84;
+}
+
+.switch-toggle input[type="checkbox"]:checked::after {
+  transform: translateX(14px);
+  background: #e6f4ff;
+}
+
 .filter-content input,
 .filter-content button {
   max-width: 100%;

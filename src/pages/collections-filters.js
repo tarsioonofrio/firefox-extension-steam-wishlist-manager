@@ -67,7 +67,6 @@
     const selectedTechnologies = ctx?.selectedTechnologies || new Set();
     const selectedDevelopers = ctx?.selectedDevelopers || new Set();
     const selectedPublishers = ctx?.selectedPublishers || new Set();
-    const selectedReleaseYears = ctx?.selectedReleaseYears || new Set();
     const getReleaseFilterData = typeof ctx?.getReleaseFilterData === "function"
       ? ctx.getReleaseFilterData
       : (appId) => {
@@ -95,6 +94,7 @@
         }
         return { year, textLabel };
       };
+    const releaseTextEnabled = Boolean(ctx?.releaseTextEnabled);
     const releaseYearRangeEnabled = Boolean(ctx?.releaseYearRangeEnabled);
     const releaseYearMin = Number(ctx?.releaseYearMin ?? 1970);
     const releaseYearMax = Number(ctx?.releaseYearMax ?? new Date().getUTCFullYear() + 1);
@@ -159,17 +159,17 @@
     }
 
     function passesReleaseYearFilter(appId) {
-      const hasTextFilter = selectedReleaseYears.size > 0;
+      const hasTextFilter = releaseTextEnabled;
       const hasRangeFilter = releaseYearRangeEnabled;
       if (!hasTextFilter && !hasRangeFilter) {
-        return true;
+        return false;
       }
 
       const info = getReleaseFilterData(appId) || {};
       const textLabel = String(info.textLabel || "");
       const year = Number(info.year || 0);
 
-      const textMatch = hasTextFilter ? selectedReleaseYears.has(textLabel) : false;
+      const textMatch = hasTextFilter ? Boolean(textLabel) : false;
       const rangeMatch = hasRangeFilter
         ? (Number.isFinite(year) && year >= releaseYearMin && year <= releaseYearMax)
         : false;
