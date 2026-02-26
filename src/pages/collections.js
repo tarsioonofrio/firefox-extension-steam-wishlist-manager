@@ -4,6 +4,8 @@ const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const WISHLIST_RANK_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const WISHLIST_RANK_SOURCE = "wishlist-api-v1";
+const WISHLIST_RANK_SOURCE_VERSION = 3;
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV1";
@@ -31,6 +33,8 @@ let wishlistOrderedAppIds = [];
 let wishlistPriorityMap = {};
 let wishlistPriorityCachedAt = 0;
 let wishlistPriorityLastError = "";
+let wishlistPrioritySource = "";
+let wishlistPrioritySourceVersion = 0;
 let wishlistOrderSyncResult = "";
 let wishlistSteamId = "";
 let wishlistSortSignature = "";
@@ -38,7 +42,6 @@ let wishlistSortOrders = {};
 let wishlistSnapshotDay = "";
 let wishlistMetaSyncInFlight = false;
 let currentRenderedPageIds = [];
-let rankFallbackNoticeShown = false;
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -556,10 +559,13 @@ async function fetchWishlistSnapshotFromApi(steamId) {
     throw new Error("Wishlist API returned no valid appids.");
   }
 
-  // Steam wishlist rank: higher priority means closer to top.
+  // Steam wishlist rank: lower non-zero priority means closer to top.
+  // Priority 0 is treated as "unranked" and pushed to the end.
   normalized.sort((a, b) => {
-    if (b.priority !== a.priority) {
-      return b.priority - a.priority;
+    const aRank = a.priority === 0 ? Number.POSITIVE_INFINITY : a.priority;
+    const bRank = b.priority === 0 ? Number.POSITIVE_INFINITY : b.priority;
+    if (aRank !== bRank) {
+      return aRank - bRank;
     }
     if (b.dateAdded !== a.dateAdded) {
       return b.dateAdded - a.dateAdded;
@@ -617,6 +623,9 @@ function formatUnixDate(timestamp) {
 }
 
 function isWishlistRankReady(appIds = null) {
+  if (wishlistPrioritySource !== WISHLIST_RANK_SOURCE || Number(wishlistPrioritySourceVersion) !== WISHLIST_RANK_SOURCE_VERSION) {
+    return false;
+  }
   const ids = Array.isArray(appIds) ? appIds : Object.keys(wishlistAddedMap || {});
   if (ids.length === 0) {
     return false;
@@ -630,6 +639,16 @@ function isWishlistRankReady(appIds = null) {
     }
   }
   return true;
+}
+
+function getWishlistRankUnavailableReason() {
+  if (wishlistPrioritySource !== WISHLIST_RANK_SOURCE || Number(wishlistPrioritySourceVersion) !== WISHLIST_RANK_SOURCE_VERSION) {
+    return "Your rank cache is outdated; syncing latest ranking from API.";
+  }
+  if (wishlistPriorityLastError) {
+    return `Your rank unavailable: ${wishlistPriorityLastError}`;
+  }
+  return "Your rank is still syncing; temporarily showing Title order.";
 }
 
 function getCurrentSourceAppIds() {
@@ -943,9 +962,12 @@ async function loadWishlistAddedMap() {
     : {};
   wishlistPriorityCachedAt = Number(effectiveCached.priorityCachedAt || 0);
   wishlistPriorityLastError = String(effectiveCached.priorityLastError || "");
+  wishlistPrioritySource = String(effectiveCached.prioritySource || "");
+  wishlistPrioritySourceVersion = Number(effectiveCached.prioritySourceVersion || 0);
   wishlistSteamId = String(effectiveCached.steamId || "");
   const lastFullSyncAt = Number(effectiveCached.lastFullSyncAt || 0);
   const cachedPrioritySource = String(effectiveCached.prioritySource || "");
+  const cachedPrioritySourceVersion = Number(effectiveCached.prioritySourceVersion || 0);
   wishlistPriorityMap = {};
   for (const [appId, priority] of Object.entries(cachedPriorityMap)) {
     const n = Number(priority);
@@ -1084,7 +1106,8 @@ async function loadWishlistAddedMap() {
     }
 
     const cacheHasRank = cachedOrderedIds.length > 0 && Object.keys(wishlistPriorityMap).length > 0;
-    const cacheFromCurrentRankApi = cachedPrioritySource === "wishlist-api-v1";
+    const cacheFromCurrentRankApi = cachedPrioritySource === WISHLIST_RANK_SOURCE
+      && cachedPrioritySourceVersion === WISHLIST_RANK_SOURCE_VERSION;
     const rankStale = (now - wishlistPriorityCachedAt) >= WISHLIST_RANK_SYNC_INTERVAL_MS;
     const shouldRefreshRank = Boolean(steamId) && (wishlistChanged || !cacheHasRank || rankStale || !cacheFromCurrentRankApi);
 
@@ -1114,11 +1137,14 @@ async function loadWishlistAddedMap() {
             priorityMap: wishlistPriorityMap,
             priorityCachedAt: now,
             priorityLastError: "",
-            prioritySource: "wishlist-api-v1",
+            prioritySource: WISHLIST_RANK_SOURCE,
+            prioritySourceVersion: WISHLIST_RANK_SOURCE_VERSION,
             steamId,
             map: wishlistAddedMap
           }
         });
+        wishlistPrioritySource = WISHLIST_RANK_SOURCE;
+        wishlistPrioritySourceVersion = WISHLIST_RANK_SOURCE_VERSION;
         setStatus("");
         return;
       } catch (error) {
@@ -1141,6 +1167,7 @@ async function loadWishlistAddedMap() {
         priorityCachedAt: Number(effectiveCached.priorityCachedAt || 0),
         priorityLastError: wishlistPriorityLastError || String(effectiveCached.priorityLastError || ""),
         prioritySource: String(effectiveCached.prioritySource || ""),
+        prioritySourceVersion: Number(effectiveCached.prioritySourceVersion || 0),
         map: wishlistAddedMap
       }
     });
@@ -2440,7 +2467,7 @@ function passesReleaseYearFilter(appId) {
 function getFilteredAndSorted(ids) {
   const normalizedQuery = searchQuery.toLowerCase();
   const effectiveSortMode = (sourceMode === "wishlist" && sortMode === "position" && !isWishlistRankReady(ids))
-    ? "release-date"
+    ? "title"
     : sortMode;
   const baseIds = (sourceMode === "wishlist" && wishlistSortOrders?.[effectiveSortMode]?.length)
     ? wishlistSortOrders[effectiveSortMode]
@@ -2616,17 +2643,6 @@ async function renderCards() {
   const needsMetaForSort = sortMode !== "position";
   const needsMetaForSearch = Boolean(String(searchQuery || "").trim());
   const shouldSkipHeavyMetaHydration = sourceMode === "wishlist";
-  const rankReadyNow = sourceMode !== "wishlist" || isWishlistRankReady(sourceIds);
-
-  if (sourceMode === "wishlist" && sortMode === "position" && !rankReadyNow) {
-    if (!rankFallbackNoticeShown) {
-      setStatus("Your rank is still syncing; temporarily showing Title order.");
-      rankFallbackNoticeShown = true;
-    }
-  } else if (rankFallbackNoticeShown) {
-    setStatus("");
-    rankFallbackNoticeShown = false;
-  }
 
   if (sourceMode === "wishlist") {
     await ensureWishlistPrecomputedSorts(sourceIds);
@@ -2649,6 +2665,10 @@ async function renderCards() {
   currentRenderedPageIds = [...pageIds];
   if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
     setStatus("");
+  }
+  const rankReadyNow = sourceMode !== "wishlist" || isWishlistRankReady(sourceIds);
+  if (sourceMode === "wishlist" && sortMode === "position" && !rankReadyNow) {
+    setStatus(getWishlistRankUnavailableReason(), true);
   }
 
   cardsEl.innerHTML = "";
@@ -2925,17 +2945,6 @@ function renderSortMenu() {
     return;
   }
 
-  const rankReady = sourceMode !== "wishlist" || isWishlistRankReady();
-  for (const option of Array.from(select.options)) {
-    if (option.value === "position") {
-      option.disabled = !rankReady;
-    }
-  }
-  if (sourceMode === "wishlist" && sortMode === "position" && !rankReady) {
-    sortMode = "release-date";
-    select.value = sortMode;
-  }
-
   const selectedOption = select.options[select.selectedIndex];
   btn.textContent = `Sort by: ${selectedOption?.textContent || "Release Date"}`;
 
@@ -2944,10 +2953,6 @@ function renderSortMenu() {
     const itemBtn = document.createElement("button");
     itemBtn.type = "button";
     itemBtn.className = "dropdown-option";
-    if (option.disabled) {
-      itemBtn.disabled = true;
-      itemBtn.title = "Your rank will be available after wishlist rank sync is ready.";
-    }
     if (option.value === select.value) {
       itemBtn.classList.add("active");
     }
@@ -3103,8 +3108,8 @@ function attachEvents() {
     ]);
     const nextSort = allowed.has(event.target.value) ? event.target.value : "title";
     if (sourceMode === "wishlist" && nextSort === "position" && !isWishlistRankReady()) {
-      sortMode = "title";
-      setStatus("Your rank will be available after wishlist rank sync is ready.");
+      sortMode = "position";
+      setStatus("Your rank is still syncing; temporarily showing Title order.");
     } else {
       sortMode = nextSort;
     }
