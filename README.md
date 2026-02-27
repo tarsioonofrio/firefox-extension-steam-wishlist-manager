@@ -102,7 +102,7 @@ Persistence:
 - Local JSON DB (default): `mcp/data/state.json`
 - Override path with env var: `SWM_MCP_DB_PATH=/path/to/state.json`
 
-Available tools (v0.1):
+Available tools (v0.2):
 - `swm_list_collections`
 - `swm_create_static_collection`
 - `swm_create_or_update_dynamic_collection`
@@ -113,6 +113,15 @@ Available tools (v0.1):
 - `swm_import_extension_backup_file`
 - `swm_sync_extension_state_incremental`
 - `swm_query_games_with_codex`
+- `swm_refresh_wishlist_rank`
+- `swm_refresh_wishlist_data`
+- `swm_refresh_appdetails`
+- `swm_refresh_frequencies`
+- `swm_get_sync_status`
+- `swm_get_wishlist_snapshot`
+- `swm_refresh_all`
+- `swm_refresh_all_resume`
+- `swm_refresh_all_status_verbose`
 
 Notes:
 - This is an initial MCP layer to start external automation/workflows.
