@@ -3,6 +3,7 @@ const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const TRACK_FEED_CACHE_KEY = "steamWishlistTrackFeedV1";
+const TRACK_FEED_META_KEY = "steamWishlistTrackFeedMetaV1";
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const WISHLIST_RANK_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const rankUtils = window.SWMWishlistRank;
@@ -87,6 +88,8 @@ let wishlistSnapshotDay = "";
 let wishlistMetaSyncInFlight = false;
 let currentRenderedPageIds = [];
 let trackFeedEntries = [];
+let trackFeedRefreshing = false;
+let trackFeedLastRefreshedAt = 0;
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -227,6 +230,31 @@ function setTrackFeedProgress(text) {
   el.textContent = next;
   const shouldShow = activeCollection === TRACK_FEED_SELECT_VALUE && Boolean(next);
   el.classList.toggle("hidden", !shouldShow);
+}
+
+function renderTrackFeedMeta() {
+  const progressEl = document.getElementById("track-feed-progress");
+  if (!progressEl || activeCollection !== TRACK_FEED_SELECT_VALUE) {
+    return;
+  }
+  if (trackFeedRefreshing) {
+    return;
+  }
+  if (Number(trackFeedLastRefreshedAt || 0) > 0) {
+    const ts = new Date(Number(trackFeedLastRefreshedAt)).toLocaleString("pt-BR");
+    setTrackFeedProgress(`Last refreshed: ${ts} | events: ${trackFeedEntries.length}`);
+    return;
+  }
+  setTrackFeedProgress(`Track feed not refreshed yet | events: ${trackFeedEntries.length}`);
+}
+
+function updateTrackFeedRefreshButtonState() {
+  const refreshTrackFeedBtn = document.getElementById("refresh-track-feed-btn");
+  if (!refreshTrackFeedBtn) {
+    return;
+  }
+  refreshTrackFeedBtn.disabled = trackFeedRefreshing;
+  refreshTrackFeedBtn.textContent = trackFeedRefreshing ? "Refreshing..." : "Refresh track feed";
 }
 
 function invalidateWishlistPrecomputedSorts() {
@@ -652,65 +680,77 @@ function getTrackSourceAppIds() {
 }
 
 async function refreshTrackFeed() {
+  if (trackFeedRefreshing) {
+    setStatus("Track feed refresh already in progress.");
+    return;
+  }
   const trackIds = getTrackSourceAppIds();
   if (trackIds.length === 0) {
     setStatus("No tracked items to refresh feed.");
     setTrackFeedProgress("");
     return;
   }
-  setStatus(`Refreshing Track Feed... 0/${trackIds.length}`);
-  setTrackFeedProgress(`Refreshing track feed... 0/${trackIds.length}`);
-  const dedupe = new Map();
-  const nowSec = Math.floor(Date.now() / 1000);
-  const keepSince = nowSec - (60 * 24 * 60 * 60);
-  for (const old of trackFeedEntries) {
-    if (Number(old?.publishedAt || 0) >= keepSince && old?.eventId) {
-      dedupe.set(String(old.eventId), old);
-    }
-  }
-
-  let done = 0;
-  for (const appId of trackIds) {
-    try {
-      const payload = await fetchSteamJson(
-        `https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=${appId}&count=3&maxlength=280&format=json`
-      );
-      const items = Array.isArray(payload?.appnews?.newsitems) ? payload.appnews.newsitems : [];
-      for (const item of items) {
-        const gid = String(item?.gid || "").trim();
-        const url = String(item?.url || "").trim();
-        const title = String(item?.title || "").trim();
-        const publishedAt = Number(item?.date || 0);
-        if (!title || !url || !Number.isFinite(publishedAt) || publishedAt <= 0) {
-          continue;
-        }
-        if (publishedAt < keepSince) {
-          continue;
-        }
-        const eventId = gid ? `${appId}:${gid}` : `${appId}:${url}:${publishedAt}`;
-        dedupe.set(eventId, {
-          eventId,
-          appId: String(appId),
-          title,
-          url,
-          author: String(item?.author || "").trim(),
-          summary: String(item?.contents || "").replace(/\s+/g, " ").trim().slice(0, 320),
-          publishedAt
-        });
+  trackFeedRefreshing = true;
+  updateTrackFeedRefreshButtonState();
+  try {
+    setStatus(`Refreshing Track Feed... 0/${trackIds.length}`);
+    setTrackFeedProgress(`Refreshing track feed... 0/${trackIds.length}`);
+    const dedupe = new Map();
+    const nowSec = Math.floor(Date.now() / 1000);
+    const keepSince = nowSec - (60 * 24 * 60 * 60);
+    for (const old of trackFeedEntries) {
+      if (Number(old?.publishedAt || 0) >= keepSince && old?.eventId) {
+        dedupe.set(String(old.eventId), old);
       }
-    } catch {
-      // non-fatal per app
     }
-    done += 1;
-    setStatus(`Refreshing Track Feed... ${done}/${trackIds.length}`);
-    setTrackFeedProgress(`Refreshing track feed... ${done}/${trackIds.length}`);
-  }
 
-  trackFeedEntries = Array.from(dedupe.values())
-    .sort((a, b) => Number(b.publishedAt || 0) - Number(a.publishedAt || 0));
-  await saveTrackFeedCache();
-  setStatus(`Track Feed refreshed: ${trackFeedEntries.length} events.`);
-  setTrackFeedProgress(`Track feed refreshed: ${trackFeedEntries.length} events.`);
+    let done = 0;
+    for (const appId of trackIds) {
+      try {
+        const payload = await fetchSteamJson(
+          `https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=${appId}&count=3&maxlength=280&format=json`
+        );
+        const items = Array.isArray(payload?.appnews?.newsitems) ? payload.appnews.newsitems : [];
+        for (const item of items) {
+          const gid = String(item?.gid || "").trim();
+          const url = String(item?.url || "").trim();
+          const title = String(item?.title || "").trim();
+          const publishedAt = Number(item?.date || 0);
+          if (!title || !url || !Number.isFinite(publishedAt) || publishedAt <= 0) {
+            continue;
+          }
+          if (publishedAt < keepSince) {
+            continue;
+          }
+          const eventId = gid ? `${appId}:${gid}` : `${appId}:${url}:${publishedAt}`;
+          dedupe.set(eventId, {
+            eventId,
+            appId: String(appId),
+            title,
+            url,
+            author: String(item?.author || "").trim(),
+            summary: String(item?.contents || "").replace(/\s+/g, " ").trim().slice(0, 320),
+            publishedAt
+          });
+        }
+      } catch {
+        // non-fatal per app
+      }
+      done += 1;
+      setStatus(`Refreshing Track Feed... ${done}/${trackIds.length}`);
+      setTrackFeedProgress(`Refreshing track feed... ${done}/${trackIds.length}`);
+    }
+
+    trackFeedEntries = Array.from(dedupe.values())
+      .sort((a, b) => Number(b.publishedAt || 0) - Number(a.publishedAt || 0));
+    trackFeedLastRefreshedAt = Date.now();
+    await saveTrackFeedCache();
+    setStatus(`Track Feed refreshed: ${trackFeedEntries.length} events.`);
+    renderTrackFeedMeta();
+  } finally {
+    trackFeedRefreshing = false;
+    updateTrackFeedRefreshButtonState();
+  }
 }
 
 function hashStringToUint32(text) {
@@ -1702,7 +1742,7 @@ async function saveMetaCache() {
 }
 
 async function loadTrackFeedCache() {
-  const stored = await browser.storage.local.get(TRACK_FEED_CACHE_KEY);
+  const stored = await browser.storage.local.get([TRACK_FEED_CACHE_KEY, TRACK_FEED_META_KEY]);
   const source = Array.isArray(stored?.[TRACK_FEED_CACHE_KEY]) ? stored[TRACK_FEED_CACHE_KEY] : [];
   const out = [];
   const seen = new Set();
@@ -1730,10 +1770,16 @@ async function loadTrackFeedCache() {
     });
   }
   trackFeedEntries = out.sort((a, b) => Number(b.publishedAt || 0) - Number(a.publishedAt || 0));
+  trackFeedLastRefreshedAt = Number(stored?.[TRACK_FEED_META_KEY]?.lastRefreshedAt || 0);
 }
 
 async function saveTrackFeedCache() {
-  await browser.storage.local.set({ [TRACK_FEED_CACHE_KEY]: trackFeedEntries });
+  await browser.storage.local.set({
+    [TRACK_FEED_CACHE_KEY]: trackFeedEntries,
+    [TRACK_FEED_META_KEY]: {
+      lastRefreshedAt: Number(trackFeedLastRefreshedAt || 0)
+    }
+  });
 }
 
 function getCardImageUrl(appId) {
@@ -4086,8 +4132,11 @@ async function render() {
   if (refreshTrackFeedBtn) {
     refreshTrackFeedBtn.classList.toggle("hidden", activeCollection !== TRACK_FEED_SELECT_VALUE);
   }
+  updateTrackFeedRefreshButtonState();
   if (activeCollection !== TRACK_FEED_SELECT_VALUE) {
     setTrackFeedProgress("");
+  } else {
+    renderTrackFeedMeta();
   }
 
   renderSortMenu();

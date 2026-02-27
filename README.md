@@ -29,6 +29,7 @@ Main goal: make prioritization practical without changing your Steam account dat
 - Includes triage workflow (`Promote`, `Track`, `Bought`) with local mute/unmute.
 - Adds virtual views (`Inbox`, `Track`, `Track feed`, `Buy radar`, `Archive`, `Owned`) and Track time window (`7d`, `30d`, `all`).
 - `Refresh` updates the Track feed when `Track feed` is selected.
+- `Refresh track feed` button shows sync progress and last refresh timestamp.
 - Supports per-game target price and filter for games at/under target.
 - Highlights cards/rows when current price hits target.
 - Supports local per-game notes (saved in browser storage); search matches title, appid, and notes.
