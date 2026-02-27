@@ -474,7 +474,7 @@ async function main() {
   }
 
   const collectionSelect = dom.window.document.getElementById("collection-select");
-  assert.equal(collectionSelect?.value, "favorites");
+  assert.equal(collectionSelect?.value, "__wishlist__");
   assert.ok(Array.from(collectionSelect?.options || []).some((opt) => opt.value === "__wishlist__"));
 
   const firstTitle = dom.window.document.querySelector("#cards .card .title")?.textContent || "";

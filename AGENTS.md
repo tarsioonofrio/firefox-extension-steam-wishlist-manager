@@ -20,7 +20,7 @@ Required action semantics:
 - `Track`: toggle `track` independently (`track=1/0`), without changing `buy`.
 - `Clear buy`: explicit action to set `buy=0`.
 - `Mute`: toggle local mute only (no Steam-side mutation).
-- `Bought`: `owned=true`, `track=0`, `buy=0`, `bucket=ARCHIVE`.
+- `Archive`: `owned=true`, `track=0`, `buy=0`, `bucket=ARCHIVE`.
 
 Do not:
 - Rename or repurpose existing buttons.
@@ -83,7 +83,7 @@ Required fields:
 ### Milestone 4: Buy Radar
 - Target price per game.
 - "Reached target" and discount-aware ordering.
-- "Bought/Owned" flow to archive.
+- Archive/owned flow out of active radar.
 
 ## Architecture Rules
 - Keep `src/pages/collections.js` as orchestrator.

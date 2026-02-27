@@ -78,7 +78,6 @@
       triageTrackBtn: fragment.querySelector(".triage-track-btn"),
       triageArchiveBtn: fragment.querySelector(".triage-archive-btn"),
       wfClearBuyBtn: fragment.querySelector(".wf-clear-buy-btn"),
-      wfOwnedBtn: fragment.querySelector(".wf-owned-btn"),
       wfMuteBtn: fragment.querySelector(".wf-mute-btn"),
       targetPriceInput: fragment.querySelector(".target-price-input"),
       targetSaveBtn: fragment.querySelector(".target-save-btn"),
@@ -180,8 +179,7 @@
     }
 
     const workflowActions = [
-      { btn: card.wfClearBuyBtn, patch: { buy: 0 }, ok: "Buy priority cleared." },
-      { btn: card.wfOwnedBtn, patch: { track: 0, buy: 0, owned: true }, ok: "Marked as bought (owned)." }
+      { btn: card.wfClearBuyBtn, patch: { buy: 0 }, ok: "Buy priority cleared." }
     ];
     for (const entry of workflowActions) {
       if (!entry.btn) {

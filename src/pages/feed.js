@@ -252,21 +252,12 @@ function render() {
       render();
     });
 
-    const boughtBtn = document.createElement("button");
-    boughtBtn.type = "button";
-    boughtBtn.textContent = "Bought";
-    boughtBtn.addEventListener("click", async () => {
-      await setIntent(entry.appId, { track: 0, buy: 0, owned: true });
-      render();
-    });
-
     actions.appendChild(openBtn);
     actions.appendChild(trackBtn);
     actions.appendChild(muteBtn);
     actions.appendChild(buyBtn);
     actions.appendChild(maybeBtn);
     actions.appendChild(clearBuyBtn);
-    actions.appendChild(boughtBtn);
 
     row.appendChild(head);
     row.appendChild(summary);

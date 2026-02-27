@@ -65,7 +65,7 @@ const STEAM_FILTER_SEEDS_JSON_PATH = "src/data/steam-filter-seeds-hardcoded.json
 
 let state = null;
 let activeCollection = "__all__";
-let sourceMode = "collections";
+let sourceMode = "wishlist";
 let page = 1;
 let searchQuery = "";
 let triageFilter = "all";
@@ -1853,10 +1853,8 @@ async function handleKeyboardBatchIntent(actionCode) {
   }
   if (actionCode === "Digit3") {
     await applyBatchIntent(
-      { track: 0, buy: 0, owned: true },
-      "Selected games marked as bought (owned).",
-      true,
-      `Mark ${batchSelectedIds.size} selected game(s) as bought (owned)?`
+      { buy: 0 },
+      "Selected games cleared from buy priority."
     );
     return;
   }
@@ -3502,21 +3500,10 @@ function createLineRow(options) {
       .catch(() => setStatus("Failed to toggle track.", true));
   });
 
-  const ownedBtn = document.createElement("button");
-  ownedBtn.type = "button";
-  ownedBtn.className = "line-btn";
-  ownedBtn.textContent = "Bought";
-  ownedBtn.addEventListener("click", () => {
-    onSetIntent(appId, { track: 0, buy: 0, owned: true })
-      .then(() => setStatus("Marked as bought (owned)."))
-      .catch(() => setStatus("Failed to archive item.", true));
-  });
-
   wfWrap.appendChild(buyBtn);
   wfWrap.appendChild(maybeBtn);
   wfWrap.appendChild(clearBuyBtn);
   wfWrap.appendChild(trackBtn);
-  wfWrap.appendChild(ownedBtn);
 
   const muteBtn = document.createElement("button");
   muteBtn.type = "button";
@@ -3642,8 +3629,8 @@ function renderBatchMenuState() {
   if (batchHint) {
     const count = batchSelectedIds.size;
     batchHint.textContent = count > 0
-      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Buy, Shift+2 Track, Shift+3 Bought, Shift+4 Mute, Shift+5 Unmute`
-      : "Batch mode active | Select cards to use shortcuts: Shift+1 Buy, Shift+2 Track, Shift+3 Bought, Shift+4 Mute, Shift+5 Unmute";
+      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Buy, Shift+2 Track, Shift+3 Clear buy, Shift+4 Mute, Shift+5 Unmute`
+      : "Batch mode active | Select cards to use shortcuts: Shift+1 Buy, Shift+2 Track, Shift+3 Clear buy, Shift+4 Mute, Shift+5 Unmute";
     batchHint.classList.toggle("hidden", !batchMode);
   }
   if (collectionSelect) {
@@ -4646,7 +4633,6 @@ function bindBatchControls() {
   const maybeActionBtn = document.getElementById("batch-action-maybe");
   const clearBuyActionBtn = document.getElementById("batch-action-clear-buy");
   const trackActionBtn = document.getElementById("batch-action-track");
-  const ownedActionBtn = document.getElementById("batch-action-owned");
   const muteActionBtn = document.getElementById("batch-action-mute");
   const unmuteActionBtn = document.getElementById("batch-action-unmute");
   const addForm = document.getElementById("batch-add-form");
@@ -4716,15 +4702,6 @@ function bindBatchControls() {
       { track: 1 },
       "Selected games set to Track."
     ).catch(() => setStatus("Failed to apply batch track.", true));
-  });
-
-  ownedActionBtn?.addEventListener("click", () => {
-    applyBatchIntent(
-      { track: 0, buy: 0, owned: true },
-      "Selected games marked as bought (owned).",
-      true,
-      `Mark ${batchSelectedIds.size} selected game(s) as bought (owned)?`
-    ).catch(() => setStatus("Failed to apply batch owned action.", true));
   });
 
   muteActionBtn?.addEventListener("click", () => {
@@ -4958,6 +4935,7 @@ initUtils.run({
   },
   setActiveCollectionFromState: (nextState) => {
     activeCollection = nextState?.activeCollection || "__all__";
+    sourceMode = "wishlist";
   },
   attachEvents,
   quickPopulateFiltersFromCache,
