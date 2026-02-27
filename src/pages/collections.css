@@ -49,9 +49,8 @@ body {
 
 .top-controls {
   display: grid;
-  grid-template-columns: minmax(300px, auto) minmax(120px, auto) minmax(220px, 1fr) minmax(150px, auto) auto auto auto;
+  grid-template-columns: 1fr;
   gap: 8px;
-  align-items: center;
   width: 100%;
   margin-bottom: 10px;
 }
@@ -72,6 +71,31 @@ body {
 
 #sync-order-bg-btn {
   justify-self: end;
+}
+
+.top-row-collection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.top-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  min-width: 0;
+  scrollbar-width: thin;
+}
+
+.top-row-actions > * {
+  flex: 0 0 auto;
+}
+
+.top-row-actions #search-input {
+  flex: 1 1 auto;
+  min-width: 220px;
 }
 
 .dropdown-option {
@@ -104,19 +128,6 @@ body {
   display: grid;
   gap: 10px;
   margin-bottom: 10px;
-}
-
-.collection-tools {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.collection-tools button {
-  flex: 0 0 auto;
-  white-space: nowrap;
 }
 
 .collection-menu-panel {
@@ -1070,8 +1081,8 @@ main {
     grid-template-columns: 1fr;
   }
 
-  .collection-tools {
-    grid-template-columns: 1fr;
+  .top-row-actions {
+    overflow-x: auto;
   }
 
   .menu-form {
