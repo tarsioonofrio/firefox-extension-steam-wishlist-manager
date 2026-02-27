@@ -6,6 +6,9 @@ const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV2";
 const BACKUP_SETTINGS_KEY = "steamWishlistBackupSettingsV1";
 const BACKUP_SCHEMA_VERSION = 1;
+const DEFAULT_QUEUE_DAYS = 30;
+const MIN_QUEUE_DAYS = 1;
+const MAX_QUEUE_DAYS = 365;
 const BACKUP_DATA_KEYS = [
   STORAGE_KEY,
   META_CACHE_KEY,
@@ -49,6 +52,38 @@ function normalizeBackupSettings(rawSettings) {
   };
 }
 
+function normalizeQueuePolicy(rawPolicy) {
+  const raw = rawPolicy && typeof rawPolicy === "object" ? rawPolicy : {};
+  const maybeDays = Number.isFinite(Number(raw.maybeDays))
+    ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(Number(raw.maybeDays))))
+    : DEFAULT_QUEUE_DAYS;
+  const archiveDays = Number.isFinite(Number(raw.archiveDays))
+    ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(Number(raw.archiveDays))))
+    : DEFAULT_QUEUE_DAYS;
+  return { maybeDays, archiveDays };
+}
+
+function applyQueuePolicyToUI(policy) {
+  const safe = normalizeQueuePolicy(policy);
+  const maybeEl = document.getElementById("queue-maybe-days");
+  const archiveEl = document.getElementById("queue-archive-days");
+  if (maybeEl) {
+    maybeEl.value = String(safe.maybeDays);
+  }
+  if (archiveEl) {
+    archiveEl.value = String(safe.archiveDays);
+  }
+}
+
+function getQueuePolicyFromUI() {
+  const maybeEl = document.getElementById("queue-maybe-days");
+  const archiveEl = document.getElementById("queue-archive-days");
+  return normalizeQueuePolicy({
+    maybeDays: Number(maybeEl?.value || DEFAULT_QUEUE_DAYS),
+    archiveDays: Number(archiveEl?.value || DEFAULT_QUEUE_DAYS)
+  });
+}
+
 function applyBackupSettingsToUI(settings) {
   const safe = normalizeBackupSettings(settings);
   const enabledEl = document.getElementById("auto-backup-enabled");
@@ -79,6 +114,14 @@ async function refreshBackupSummary() {
   } catch {
     setBackupSummary("Could not load backup summary.");
   }
+}
+
+async function refreshQueuePolicySummary() {
+  const response = await browser.runtime.sendMessage({ type: "get-queue-policy" });
+  if (!response?.ok) {
+    throw new Error("Could not load queue policy.");
+  }
+  applyQueuePolicyToUI(response.policy || {});
 }
 
 async function openCollectionsWithRefresh() {
@@ -176,6 +219,18 @@ async function saveAutoBackupSettingsFromUI() {
   if (!response?.ok) {
     throw new Error("Could not save backup settings.");
   }
+}
+
+async function saveQueuePolicyFromUI() {
+  const policy = getQueuePolicyFromUI();
+  const response = await browser.runtime.sendMessage({
+    type: "set-queue-policy",
+    policy
+  });
+  if (!response?.ok) {
+    throw new Error("Could not save queue policy.");
+  }
+  applyQueuePolicyToUI(response.policy || policy);
 }
 
 document.getElementById("refresh-db")?.addEventListener("click", async () => {
@@ -307,4 +362,16 @@ document.getElementById("auto-backup-interval")?.addEventListener("change", asyn
   }
 });
 
+document.getElementById("save-queue-policy")?.addEventListener("click", async () => {
+  try {
+    await saveQueuePolicyFromUI();
+    setStatus("Queue timeouts updated.");
+  } catch {
+    setStatus("Failed to save queue timeouts.", true);
+  }
+});
+
 refreshBackupSummary().catch(() => {});
+refreshQueuePolicySummary().catch(() => {
+  applyQueuePolicyToUI({});
+});

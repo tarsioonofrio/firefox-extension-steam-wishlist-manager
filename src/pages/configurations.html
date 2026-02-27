@@ -14,6 +14,17 @@
     </header>
 
     <section class="panel">
+      <h2>Queue Automation</h2>
+      <label class="inline-option">
+        <span>Maybe timeout (days)</span>
+        <input id="queue-maybe-days" type="number" min="1" max="365" step="1">
+      </label>
+      <label class="inline-option">
+        <span>Archive timeout (days)</span>
+        <input id="queue-archive-days" type="number" min="1" max="365" step="1">
+      </label>
+      <button id="save-queue-policy" type="button">Save Queue Timeouts</button>
+      <hr>
       <button id="refresh-db" type="button">Refresh Entire Database</button>
       <button id="refresh-frequencies" type="button">Refresh Frequencies Only</button>
       <button id="publish-bridge" type="button">Publish Bridge Snapshot Now</button>

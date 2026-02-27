@@ -36,6 +36,12 @@ header p {
   gap: 10px;
 }
 
+.panel h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #d6e7f7;
+}
+
 .panel hr {
   width: 100%;
   border: 0;
@@ -69,7 +75,8 @@ button.danger {
   color: #d6e7f7;
 }
 
-.inline-option select {
+.inline-option select,
+.inline-option input[type="number"] {
   border: 1px solid #2f445a;
   border-radius: 4px;
   background: #101822;

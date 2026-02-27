@@ -9,6 +9,8 @@ const NATIVE_BRIDGE_HOST_NAME = "dev.tarsio.steam_wishlist_manager_bridge";
 const BACKUP_SETTINGS_KEY = "steamWishlistBackupSettingsV1";
 const BACKUP_HISTORY_KEY = "steamWishlistBackupHistoryV1";
 const BACKUP_ALARM_NAME = "steamWishlistAutoBackup";
+const QUEUE_POLICY_KEY = "steamWishlistQueuePolicyV1";
+const QUEUE_AUTOMATION_ALARM_NAME = "steamWishlistQueueAutomation";
 const BACKUP_SCHEMA_VERSION = 1;
 const BACKUP_MAX_HISTORY = 20;
 const BACKUP_MIN_INTERVAL_HOURS = 1;
@@ -41,6 +43,10 @@ const VALID_BUCKETS = new Set(["INBOX", "TRACK", "MAYBE", "BUY", "ARCHIVE"]);
 const VALID_BUY_INTENTS = new Set(["UNSET", "NONE", "MAYBE", "BUY"]);
 const VALID_TRACK_INTENTS = new Set(["UNSET", "OFF", "ON"]);
 const STEAM_WRITE_MIN_INTERVAL_MS = 250;
+const DEFAULT_QUEUE_DAYS = 30;
+const MIN_QUEUE_DAYS = 1;
+const MAX_QUEUE_DAYS = 365;
+const QUEUE_AUTOMATION_PERIOD_MINUTES = 360;
 let backgroundWishlistDomSyncInFlight = false;
 let nativeBridgePublishTimer = null;
 let steamSessionIdCache = "";
@@ -58,6 +64,49 @@ function normalizeBackupSettings(rawSettings) {
     enabled,
     intervalHours
   };
+}
+
+function normalizeQueuePolicy(rawPolicy) {
+  const raw = rawPolicy && typeof rawPolicy === "object" ? rawPolicy : {};
+  const maybeDaysRaw = Number(raw.maybeDays);
+  const archiveDaysRaw = Number(raw.archiveDays);
+  const maybeDays = Number.isFinite(maybeDaysRaw)
+    ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(maybeDaysRaw)))
+    : DEFAULT_QUEUE_DAYS;
+  const archiveDays = Number.isFinite(archiveDaysRaw)
+    ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(archiveDaysRaw)))
+    : DEFAULT_QUEUE_DAYS;
+  return {
+    maybeDays,
+    archiveDays
+  };
+}
+
+async function getQueuePolicy() {
+  const stored = await browser.storage.local.get(QUEUE_POLICY_KEY);
+  return normalizeQueuePolicy(stored[QUEUE_POLICY_KEY]);
+}
+
+async function setQueuePolicy(rawPolicy) {
+  const policy = normalizeQueuePolicy(rawPolicy);
+  await browser.storage.local.set({ [QUEUE_POLICY_KEY]: policy });
+  await scheduleQueueAutomationAlarm();
+  return policy;
+}
+
+async function scheduleQueueAutomationAlarm() {
+  if (!browser?.alarms) {
+    return;
+  }
+  try {
+    await browser.alarms.clear(QUEUE_AUTOMATION_ALARM_NAME);
+  } catch {
+    // ignore
+  }
+  browser.alarms.create(QUEUE_AUTOMATION_ALARM_NAME, {
+    delayInMinutes: 1,
+    periodInMinutes: QUEUE_AUTOMATION_PERIOD_MINUTES
+  });
 }
 
 async function getBackupSettings() {
@@ -281,7 +330,10 @@ function normalizeItemRecord(appId, rawItem) {
       : null,
     muted: Boolean(src.muted),
     labels: sanitizeLabels(src.labels || []),
-    triagedAt: Number.isFinite(Number(src.triagedAt)) ? Number(src.triagedAt) : 0
+    triagedAt: Number.isFinite(Number(src.triagedAt)) ? Number(src.triagedAt) : 0,
+    maybeQueuedAt: Number.isFinite(Number(src.maybeQueuedAt)) ? Number(src.maybeQueuedAt) : 0,
+    archiveQueuedAt: Number.isFinite(Number(src.archiveQueuedAt)) ? Number(src.archiveQueuedAt) : 0,
+    archiveLastActivityAt: Number.isFinite(Number(src.archiveLastActivityAt)) ? Number(src.archiveLastActivityAt) : 0
   };
 }
 
@@ -711,6 +763,159 @@ async function syncFollowedAppsFromSteam(state, force = false) {
     lastSyncedAt: now,
     followedCount: followedIds.length,
     updatedCount
+  };
+}
+
+function getTrackFeedLatestMap(entries) {
+  const latestByApp = new Map();
+  const list = Array.isArray(entries) ? entries : [];
+  for (const entry of list) {
+    const appId = String(entry?.appId || "").trim();
+    if (!VALID_APP_ID_PATTERN.test(appId)) {
+      continue;
+    }
+    const tsSec = Number(entry?.publishedAt || 0);
+    if (!Number.isFinite(tsSec) || tsSec <= 0) {
+      continue;
+    }
+    const tsMs = tsSec * 1000;
+    const prev = latestByApp.get(appId) || 0;
+    if (tsMs > prev) {
+      latestByApp.set(appId, tsMs);
+    }
+  }
+  return latestByApp;
+}
+
+function applyQueueTimersForTransition(previousItem, nextItem, now) {
+  const previous = normalizeItemRecord(String(previousItem?.appId || ""), previousItem || {});
+  const next = normalizeItemRecord(previous.appId, nextItem || {});
+  const ts = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+
+  const inMaybeQueue = next.buy === 1 || next.buyIntent === "MAYBE";
+  if (inMaybeQueue) {
+    next.maybeQueuedAt = previous.maybeQueuedAt > 0 ? previous.maybeQueuedAt : ts;
+  } else {
+    next.maybeQueuedAt = 0;
+  }
+
+  const inArchiveQueue = String(next.bucket || "").toUpperCase() === "ARCHIVE";
+  if (inArchiveQueue) {
+    next.archiveQueuedAt = previous.archiveQueuedAt > 0 ? previous.archiveQueuedAt : ts;
+    next.archiveLastActivityAt = previous.archiveLastActivityAt > 0
+      ? previous.archiveLastActivityAt
+      : next.archiveQueuedAt;
+  } else {
+    next.archiveQueuedAt = 0;
+    next.archiveLastActivityAt = 0;
+  }
+
+  return next;
+}
+
+async function performQueueAutomationSweep(force = false) {
+  const state = await getState();
+  const policy = await getQueuePolicy();
+  const now = Date.now();
+  const maybeMs = policy.maybeDays * 24 * 60 * 60 * 1000;
+  const archiveMs = policy.archiveDays * 24 * 60 * 60 * 1000;
+
+  const storage = await browser.storage.local.get([META_CACHE_KEY, "steamWishlistTrackFeedV1"]);
+  const metaCache = storage?.[META_CACHE_KEY] || {};
+  const feedEntries = storage?.["steamWishlistTrackFeedV1"] || [];
+  const feedLatestByApp = getTrackFeedLatestMap(feedEntries);
+
+  let changed = false;
+  let maybeProcessed = 0;
+  let archiveProcessed = 0;
+  const errors = [];
+
+  for (const appId of Object.keys(state.items || {})) {
+    const current = normalizeItemRecord(appId, state.items[appId] || {});
+    const next = { ...current };
+
+    if (next.buy === 1 || next.buyIntent === "MAYBE") {
+      if (!(next.maybeQueuedAt > 0)) {
+        next.maybeQueuedAt = next.triagedAt > 0 ? next.triagedAt : now;
+        changed = true;
+      }
+      const due = (now - Number(next.maybeQueuedAt || 0)) >= maybeMs;
+      if (due || force) {
+        try {
+          await setSteamWishlist(appId, false);
+          await setSteamFollow(appId, false);
+          next.buy = 0;
+          next.track = 0;
+          next.buyIntent = "NONE";
+          next.trackIntent = "OFF";
+          next.bucket = "INBOX";
+          next.maybeQueuedAt = 0;
+          next.triagedAt = now;
+          maybeProcessed += 1;
+          changed = true;
+        } catch (error) {
+          errors.push(`maybe:${appId}:${String(error?.message || error || "failed")}`);
+        }
+      }
+    } else if (next.maybeQueuedAt > 0) {
+      next.maybeQueuedAt = 0;
+      changed = true;
+    }
+
+    if (String(next.bucket || "").toUpperCase() === "ARCHIVE") {
+      if (!(next.archiveQueuedAt > 0)) {
+        next.archiveQueuedAt = next.triagedAt > 0 ? next.triagedAt : now;
+        changed = true;
+      }
+      let lastActivityAt = Number(next.archiveLastActivityAt || next.archiveQueuedAt || now);
+      const discountPercent = Number(metaCache?.[appId]?.discountPercent || 0);
+      const hasPromotion = Number.isFinite(discountPercent) && discountPercent > 0;
+      const latestFeedAt = Number(feedLatestByApp.get(appId) || 0);
+      if (hasPromotion || latestFeedAt > lastActivityAt) {
+        lastActivityAt = now;
+      }
+      if (lastActivityAt !== Number(next.archiveLastActivityAt || 0)) {
+        next.archiveLastActivityAt = lastActivityAt;
+        changed = true;
+      }
+      const due = (now - lastActivityAt) >= archiveMs;
+      if ((due || force) && !hasPromotion && latestFeedAt <= lastActivityAt) {
+        try {
+          await setSteamWishlist(appId, false);
+          await setSteamFollow(appId, false);
+          next.buy = 0;
+          next.track = 0;
+          next.buyIntent = "NONE";
+          next.trackIntent = "OFF";
+          next.bucket = "INBOX";
+          next.archiveQueuedAt = 0;
+          next.archiveLastActivityAt = 0;
+          next.triagedAt = now;
+          archiveProcessed += 1;
+          changed = true;
+        } catch (error) {
+          errors.push(`archive:${appId}:${String(error?.message || error || "failed")}`);
+        }
+      }
+    } else if (next.archiveQueuedAt > 0 || next.archiveLastActivityAt > 0) {
+      next.archiveQueuedAt = 0;
+      next.archiveLastActivityAt = 0;
+      changed = true;
+    }
+
+    state.items[appId] = normalizeItemRecord(appId, next);
+  }
+
+  if (changed) {
+    await setState(state);
+  }
+
+  return {
+    ok: true,
+    changed,
+    maybeProcessed,
+    archiveProcessed,
+    errors
   };
 }
 
@@ -1703,7 +1908,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
         }
 
         const previousItem = current;
-        upsertStateItem(state, appId, {
+        const nextWithQueueTimers = applyQueueTimersForTransition(previousItem, {
+          appId,
           title: String(message.title || current.title || "").slice(0, 200),
           track: nextTrack,
           buy: nextBuy,
@@ -1715,7 +1921,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
           muted: nextMuted,
           labels: nextLabels,
           triagedAt: Date.now()
-        });
+        }, Date.now());
+        upsertStateItem(state, appId, nextWithQueueTimers);
 
         await setState(state);
         let steamWrite = null;
@@ -1797,7 +2004,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
             : current.labels;
 
           const previousItem = current;
-          upsertStateItem(state, appId, {
+          const nextWithQueueTimers = applyQueueTimersForTransition(previousItem, {
+            appId,
             title: String(message.title || current.title || "").slice(0, 200),
             track: nextTrack,
             buy: nextBuy,
@@ -1809,7 +2017,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
             muted: nextMuted,
             labels: nextLabels,
             triagedAt: ts
-          });
+          }, ts);
+          upsertStateItem(state, appId, nextWithQueueTimers);
 
           if (message.syncSteam !== false && message.owned === undefined) {
             const steamWrite = await syncSteamSignalsForIntentChange(appId, previousItem, state.items[appId]);
@@ -1907,6 +2116,22 @@ browser.runtime.onMessage.addListener((message, sender) => {
         return { ok: true, settings };
       }
 
+      case "get-queue-policy": {
+        const policy = await getQueuePolicy();
+        return { ok: true, policy };
+      }
+
+      case "set-queue-policy": {
+        const policy = await setQueuePolicy(message.policy || {});
+        scheduleNativeBridgePublish("set-queue-policy");
+        return { ok: true, policy };
+      }
+
+      case "run-queue-automation-now": {
+        const result = await performQueueAutomationSweep(Boolean(message.force));
+        return { ok: true, ...result };
+      }
+
       case "apply-backup-settings": {
         const settings = await getBackupSettings();
         await scheduleBackupAlarm(settings);
@@ -2000,10 +2225,16 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
 if (browser?.alarms?.onAlarm) {
   browser.alarms.onAlarm.addListener((alarm) => {
-    if (!alarm || alarm.name !== BACKUP_ALARM_NAME) {
+    if (!alarm) {
       return;
     }
-    createBackupSnapshot("auto").catch(() => {});
+    if (alarm.name === BACKUP_ALARM_NAME) {
+      createBackupSnapshot("auto").catch(() => {});
+      return;
+    }
+    if (alarm.name === QUEUE_AUTOMATION_ALARM_NAME) {
+      performQueueAutomationSweep(false).catch(() => {});
+    }
   });
 }
 
@@ -2016,15 +2247,27 @@ async function initializeBackupScheduler() {
   }
 }
 
+async function initializeQueueAutomationScheduler() {
+  try {
+    await getQueuePolicy();
+    await scheduleQueueAutomationAlarm();
+  } catch {
+    // ignore
+  }
+}
+
 browser.runtime.onInstalled?.addListener(() => {
   initializeBackupScheduler().catch(() => {});
+  initializeQueueAutomationScheduler().catch(() => {});
   scheduleNativeBridgePublish("on-installed", 1500);
 });
 
 browser.runtime.onStartup?.addListener(() => {
   initializeBackupScheduler().catch(() => {});
+  initializeQueueAutomationScheduler().catch(() => {});
   scheduleNativeBridgePublish("on-startup", 1500);
 });
 
 initializeBackupScheduler().catch(() => {});
+initializeQueueAutomationScheduler().catch(() => {});
 scheduleNativeBridgePublish("background-init", 3000);
