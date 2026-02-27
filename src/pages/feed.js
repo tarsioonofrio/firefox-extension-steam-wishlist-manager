@@ -232,7 +232,7 @@ function render() {
     buyBtn.type = "button";
     buyBtn.textContent = "Buy";
     buyBtn.addEventListener("click", async () => {
-      await setIntent(entry.appId, { buy: 2 });
+      await setIntent(entry.appId, { buy: intent.buy === 2 ? 0 : 2 });
       render();
     });
 
@@ -240,15 +240,7 @@ function render() {
     maybeBtn.type = "button";
     maybeBtn.textContent = "Maybe";
     maybeBtn.addEventListener("click", async () => {
-      await setIntent(entry.appId, { buy: 1 });
-      render();
-    });
-
-    const clearBuyBtn = document.createElement("button");
-    clearBuyBtn.type = "button";
-    clearBuyBtn.textContent = "Clear buy";
-    clearBuyBtn.addEventListener("click", async () => {
-      await setIntent(entry.appId, { buy: 0 });
+      await setIntent(entry.appId, { buy: intent.buy === 1 ? 0 : 1 });
       render();
     });
 
@@ -257,7 +249,6 @@ function render() {
     actions.appendChild(muteBtn);
     actions.appendChild(buyBtn);
     actions.appendChild(maybeBtn);
-    actions.appendChild(clearBuyBtn);
 
     row.appendChild(head);
     row.appendChild(summary);

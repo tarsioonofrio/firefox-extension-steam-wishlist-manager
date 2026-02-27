@@ -11,12 +11,12 @@
     <main class="content">
       <header class="content-header">
         <h1>Collections</h1>
+        <div class="content-header-right">
+          <input id="search-input" type="search" placeholder="Search by title or appid">
+          <button id="refresh-page-btn" type="button" class="header-btn">Refresh</button>
+        </div>
       </header>
       <div class="top-controls">
-        <div class="top-row-collection">
-          <button id="collection-select-btn" type="button">Collection</button>
-          <select id="collection-select" class="native-select-hidden"></select>
-        </div>
         <div class="top-row-actions">
           <button id="collection-menu-btn" type="button">Menu</button>
           <button id="batch-menu-btn" type="button">Batch</button>
@@ -41,7 +41,6 @@
             <option value="30">Track: last 30d</option>
             <option value="0">Track: all time</option>
           </select>
-          <input id="search-input" type="search" placeholder="Search by title or appid">
           <button id="sort-menu-btn" type="button">Sort</button>
           <select id="sort-select" class="native-select-hidden">
             <option value="position">Your rank</option>
@@ -58,7 +57,8 @@
             <option value="card">Card</option>
             <option value="line">Line</option>
           </select>
-          <button id="refresh-page-btn" type="button" class="header-btn">Refresh</button>
+          <button id="collection-select-btn" type="button">Collection</button>
+          <select id="collection-select" class="native-select-hidden"></select>
         </div>
       </div>
       <p id="radar-stats" class="radar-stats"></p>

@@ -74,10 +74,8 @@
       triageBucketEl: fragment.querySelector(".triage-bucket"),
       triageBuyBtn: fragment.querySelector(".triage-buy-btn"),
       triageMaybeBtn: fragment.querySelector(".triage-maybe-btn"),
-      triageClearBuyBtn: fragment.querySelector(".triage-clear-buy-btn"),
       triageTrackBtn: fragment.querySelector(".triage-track-btn"),
       triageArchiveBtn: fragment.querySelector(".triage-archive-btn"),
-      wfClearBuyBtn: fragment.querySelector(".wf-clear-buy-btn"),
       wfMuteBtn: fragment.querySelector(".wf-mute-btn"),
       targetPriceInput: fragment.querySelector(".target-price-input"),
       targetSaveBtn: fragment.querySelector(".target-save-btn"),
@@ -153,9 +151,18 @@
     }
 
     const triageActions = [
-      { key: "buy", btn: card.triageBuyBtn, patch: { buy: 2 }, isActive: (intent) => intent.buy === 2 },
-      { key: "maybe", btn: card.triageMaybeBtn, patch: { buy: 1 }, isActive: (intent) => intent.buy === 1 },
-      { key: "clear-buy", btn: card.triageClearBuyBtn, patch: { buy: 0 }, isActive: (intent) => intent.buy === 0 },
+      {
+        key: "buy",
+        btn: card.triageBuyBtn,
+        patch: { buy: itemIntent.buy === 2 ? 0 : 2 },
+        isActive: (intent) => intent.buy === 2
+      },
+      {
+        key: "maybe",
+        btn: card.triageMaybeBtn,
+        patch: { buy: itemIntent.buy === 1 ? 0 : 1 },
+        isActive: (intent) => intent.buy === 1
+      },
       {
         key: "track",
         btn: card.triageTrackBtn,
@@ -178,9 +185,7 @@
       });
     }
 
-    const workflowActions = [
-      { btn: card.wfClearBuyBtn, patch: { buy: 0 }, ok: "Buy priority cleared." }
-    ];
+    const workflowActions = [];
     for (const entry of workflowActions) {
       if (!entry.btn) {
         continue;

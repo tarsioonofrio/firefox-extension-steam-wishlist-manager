@@ -1819,8 +1819,8 @@ async function handleKeyboardTriageIntent(actionKey) {
   const currentIntent = getItemIntentState(appId);
   const intentByKey = {
     "1": { track: currentIntent.track > 0 ? 0 : 1 },
-    "2": { buy: 1 },
-    "3": { buy: 2 },
+    "2": { buy: currentIntent.buy === 1 ? 0 : 1 },
+    "3": { buy: currentIntent.buy === 2 ? 0 : 2 },
     "4": { track: 0, buy: 0, owned: true }
   };
   const patch = intentByKey[actionKey];
@@ -1846,15 +1846,15 @@ async function handleKeyboardBatchIntent(actionCode) {
   }
   if (actionCode === "Digit2") {
     await applyBatchIntent(
-      { track: 1 },
-      "Selected games set to Track."
+      { buy: 1 },
+      "Selected games set to Maybe."
     );
     return;
   }
   if (actionCode === "Digit3") {
     await applyBatchIntent(
-      { buy: 0 },
-      "Selected games cleared from buy priority."
+      { track: 1 },
+      "Selected games set to Track."
     );
     return;
   }
@@ -3465,8 +3465,8 @@ function createLineRow(options) {
   buyBtn.className = "line-btn";
   buyBtn.textContent = "Buy";
   buyBtn.addEventListener("click", () => {
-    onSetIntent(appId, { buy: 2 })
-      .then(() => setStatus("Set to Buy."))
+    onSetIntent(appId, { buy: itemIntent.buy === 2 ? 0 : 2 })
+      .then(() => setStatus(itemIntent.buy === 2 ? "Buy unset." : "Set to Buy."))
       .catch(() => setStatus("Failed to set Buy.", true));
   });
 
@@ -3475,19 +3475,9 @@ function createLineRow(options) {
   maybeBtn.className = "line-btn";
   maybeBtn.textContent = "Maybe";
   maybeBtn.addEventListener("click", () => {
-    onSetIntent(appId, { buy: 1 })
-      .then(() => setStatus("Set to Maybe."))
+    onSetIntent(appId, { buy: itemIntent.buy === 1 ? 0 : 1 })
+      .then(() => setStatus(itemIntent.buy === 1 ? "Maybe unset." : "Set to Maybe."))
       .catch(() => setStatus("Failed to set Maybe.", true));
-  });
-
-  const clearBuyBtn = document.createElement("button");
-  clearBuyBtn.type = "button";
-  clearBuyBtn.className = "line-btn";
-  clearBuyBtn.textContent = "Clear buy";
-  clearBuyBtn.addEventListener("click", () => {
-    onSetIntent(appId, { buy: 0 })
-      .then(() => setStatus("Buy priority cleared."))
-      .catch(() => setStatus("Failed to clear buy.", true));
   });
 
   const trackBtn = document.createElement("button");
@@ -3502,7 +3492,6 @@ function createLineRow(options) {
 
   wfWrap.appendChild(buyBtn);
   wfWrap.appendChild(maybeBtn);
-  wfWrap.appendChild(clearBuyBtn);
   wfWrap.appendChild(trackBtn);
 
   const muteBtn = document.createElement("button");
@@ -3629,8 +3618,8 @@ function renderBatchMenuState() {
   if (batchHint) {
     const count = batchSelectedIds.size;
     batchHint.textContent = count > 0
-      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Buy, Shift+2 Track, Shift+3 Clear buy, Shift+4 Mute, Shift+5 Unmute`
-      : "Batch mode active | Select cards to use shortcuts: Shift+1 Buy, Shift+2 Track, Shift+3 Clear buy, Shift+4 Mute, Shift+5 Unmute";
+      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Track, Shift+4 Mute, Shift+5 Unmute`
+      : "Batch mode active | Select cards to use shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Track, Shift+4 Mute, Shift+5 Unmute";
     batchHint.classList.toggle("hidden", !batchMode);
   }
   if (collectionSelect) {
@@ -4161,6 +4150,7 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
 
     const actions = document.createElement("div");
     actions.className = "feed-actions";
+    const intent = getItemIntentState(appId);
     const openBtn = document.createElement("button");
     openBtn.type = "button";
     openBtn.textContent = "Open post";
@@ -4169,19 +4159,13 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     buyBtn.type = "button";
     buyBtn.textContent = "Buy";
     buyBtn.addEventListener("click", () => {
-      setItemIntent(appId, { buy: 2 }).catch(() => setStatus("Failed to set Buy.", true));
+      setItemIntent(appId, { buy: intent.buy === 2 ? 0 : 2 }).catch(() => setStatus("Failed to set Buy.", true));
     });
     const maybeBtn = document.createElement("button");
     maybeBtn.type = "button";
     maybeBtn.textContent = "Maybe";
     maybeBtn.addEventListener("click", () => {
-      setItemIntent(appId, { buy: 1 }).catch(() => setStatus("Failed to set Maybe.", true));
-    });
-    const clearBuyBtn = document.createElement("button");
-    clearBuyBtn.type = "button";
-    clearBuyBtn.textContent = "Clear buy";
-    clearBuyBtn.addEventListener("click", () => {
-      setItemIntent(appId, { buy: 0 }).catch(() => setStatus("Failed to clear buy.", true));
+      setItemIntent(appId, { buy: intent.buy === 1 ? 0 : 1 }).catch(() => setStatus("Failed to set Maybe.", true));
     });
     const archiveBtn = document.createElement("button");
     archiveBtn.type = "button";
@@ -4189,7 +4173,6 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     archiveBtn.addEventListener("click", () => {
       setItemIntent(appId, { track: 0, buy: 0, owned: true }).catch(() => setStatus("Failed to archive item.", true));
     });
-    const intent = getItemIntentState(appId);
     const muteBtn = document.createElement("button");
     muteBtn.type = "button";
     muteBtn.textContent = intent.muted ? "Unmute" : "Mute";
@@ -4212,7 +4195,6 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     actions.appendChild(openBtn);
     actions.appendChild(buyBtn);
     actions.appendChild(maybeBtn);
-    actions.appendChild(clearBuyBtn);
     actions.appendChild(archiveBtn);
     actions.appendChild(muteBtn);
     actions.appendChild(dismissBtn);
@@ -4631,7 +4613,6 @@ function bindBatchControls() {
   const removeActionBtn = document.getElementById("batch-action-remove");
   const buyActionBtn = document.getElementById("batch-action-buy");
   const maybeActionBtn = document.getElementById("batch-action-maybe");
-  const clearBuyActionBtn = document.getElementById("batch-action-clear-buy");
   const trackActionBtn = document.getElementById("batch-action-track");
   const muteActionBtn = document.getElementById("batch-action-mute");
   const unmuteActionBtn = document.getElementById("batch-action-unmute");
@@ -4688,13 +4669,6 @@ function bindBatchControls() {
       { buy: 1 },
       "Selected games set to Maybe."
     ).catch(() => setStatus("Failed to apply batch maybe.", true));
-  });
-
-  clearBuyActionBtn?.addEventListener("click", () => {
-    applyBatchIntent(
-      { buy: 0 },
-      "Selected games cleared from buy priority."
-    ).catch(() => setStatus("Failed to apply batch clear buy.", true));
   });
 
   trackActionBtn?.addEventListener("click", () => {

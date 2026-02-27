@@ -20,14 +20,14 @@ Main goal: make prioritization practical without changing your Steam account dat
 - Reads your wishlist rank from Steam API (`Your rank`), and enriches game metadata locally.
 - Lets you add/remove a game to/from static collections from card and line views.
 - Supports batch add/remove for multiple visible games.
-- Supports batch triage actions (`Buy`, `Maybe`, `Track`, `Clear buy`, `Mute`, `Unmute`).
+- Supports batch triage actions (`Buy`, `Maybe`, `Track`, `Mute`, `Unmute`).
 - Keyboard shortcuts:
   - Navigation: `j` / `k`
   - Triage focused item: `1` Track toggle, `2` Maybe, `3` Buy, `4` Archive
-  - Batch triage on selected items: `Shift+1` Buy, `Shift+2` Track, `Shift+3` Clear buy, `Shift+4` Mute, `Shift+5` Unmute
+  - Batch triage on selected items: `Shift+1` Buy, `Shift+2` Maybe, `Shift+3` Track, `Shift+4` Mute, `Shift+5` Unmute
 - When Batch mode is active, a top hint shows available batch shortcuts and selected count.
 - Supports saved dynamic collections based on current filters/sort.
-- Includes independent intent workflow (`Buy`, `Maybe`, `Track`, `Clear buy`, `Archive`) with local mute/unmute.
+- Includes independent intent workflow (`Buy`, `Maybe`, `Track`, `Archive`) with local mute/unmute.
 - Adds virtual views (`Inbox`, `Track`, `Buy radar`, `Archive`, `Owned`) in Collections.
 - Track feed is available in a dedicated page (`Feed / Acompanhar`) focused on tracked games.
 - Supports per-game target price and filter for games at/under target.

@@ -18,7 +18,6 @@ Required action semantics:
 - `Buy`: `buy=2`, `bucket=BUY`.
 - `Maybe`: `buy=1`, `bucket=MAYBE`.
 - `Track`: toggle `track` independently (`track=1/0`), without changing `buy`.
-- `Clear buy`: explicit action to set `buy=0`.
 - `Mute`: toggle local mute only (no Steam-side mutation).
 - `Archive`: `owned=true`, `track=0`, `buy=0`, `bucket=ARCHIVE`.
 
