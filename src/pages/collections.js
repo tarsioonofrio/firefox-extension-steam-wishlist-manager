@@ -191,6 +191,17 @@ async function fetchSteamText(url, options = {}) {
   return steamFetchUtils.fetchText(url, options);
 }
 
+function getNetworkTelemetryHint() {
+  if (!steamFetchUtils || typeof steamFetchUtils.getTelemetrySummary !== "function") {
+    return "";
+  }
+  try {
+    const summary = String(steamFetchUtils.getTelemetrySummary(2) || "").trim();
+    return summary ? ` | ${summary}` : "";
+  } catch {
+    return "";
+  }
+}
 
 async function fetchWishlistSnapshotFromApi(steamId) {
   const sid = String(steamId || "").trim();
@@ -217,12 +228,14 @@ async function fetchWishlistSnapshotFromApi(steamId) {
   return snapshot;
 }
 
-function setStatus(text, isError = false) {
+function setStatus(text, isError = false, options = {}) {
   const el = document.getElementById("status");
   if (!el) {
     return;
   }
-  el.textContent = text;
+  const withNetworkHint = Boolean(options?.withNetworkHint || isError);
+  const suffix = withNetworkHint ? getNetworkTelemetryHint() : "";
+  el.textContent = `${text}${suffix}`;
   el.style.color = isError ? "#ff9696" : "";
 }
 
@@ -515,6 +528,126 @@ function buildDynamicDefinitionFromCurrentView() {
     sortMode,
     filters: exportCurrentFilterSnapshot()
   };
+}
+
+function normalizeFilterSnapshotForCompare(snapshot) {
+  const src = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const out = { ...src };
+  const arrayKeys = [
+    "selectedTags",
+    "selectedTypes",
+    "selectedPlayers",
+    "selectedFeatures",
+    "selectedHardware",
+    "selectedAccessibility",
+    "selectedPlatforms",
+    "selectedLanguages",
+    "selectedFullAudioLanguages",
+    "selectedSubtitleLanguages",
+    "selectedTechnologies",
+    "selectedDevelopers",
+    "selectedPublishers"
+  ];
+  for (const key of arrayKeys) {
+    const arr = Array.isArray(out[key]) ? out[key] : [];
+    out[key] = Array.from(new Set(arr.map((v) => String(v || "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  }
+  return out;
+}
+
+function normalizeDynamicDefinitionForCompare(definition) {
+  const def = definition && typeof definition === "object" ? definition : {};
+  return {
+    baseSource: String(def.baseSource || "wishlist"),
+    baseCollection: String(def.baseCollection || ""),
+    sortMode: String(def.sortMode || "title"),
+    filters: normalizeFilterSnapshotForCompare(def.filters || {})
+  };
+}
+
+function countActiveFiltersInSnapshot(snapshot) {
+  const data = snapshot && typeof snapshot === "object" ? snapshot : {};
+  let count = 0;
+  const arrayKeys = [
+    "selectedTags",
+    "selectedTypes",
+    "selectedPlayers",
+    "selectedFeatures",
+    "selectedHardware",
+    "selectedAccessibility",
+    "selectedPlatforms",
+    "selectedLanguages",
+    "selectedFullAudioLanguages",
+    "selectedSubtitleLanguages",
+    "selectedTechnologies",
+    "selectedDevelopers",
+    "selectedPublishers"
+  ];
+  for (const key of arrayKeys) {
+    const arr = Array.isArray(data[key]) ? data[key] : [];
+    count += arr.length;
+  }
+  if (Number(data.ratingMin || 0) > 0 || Number(data.ratingMax || 100) < 100) {
+    count += 1;
+  }
+  if (Number(data.reviewsMin || 0) > 0 || Number(data.reviewsMax || 999999999) < 999999999) {
+    count += 1;
+  }
+  if (Number(data.discountMin || 0) > 0 || Number(data.discountMax || 100) < 100) {
+    count += 1;
+  }
+  if (Number(data.priceMin || 0) > 0 || Number(data.priceMax || 9999999) < 9999999) {
+    count += 1;
+  }
+  if (Boolean(data.releaseTextEnabled) !== true) {
+    count += 1;
+  }
+  if (Boolean(data.releaseYearRangeEnabled) !== true
+    || Number(data.releaseYearMin || RELEASE_YEAR_DEFAULT_MIN) !== RELEASE_YEAR_DEFAULT_MIN
+    || Number(data.releaseYearMax || getReleaseYearMaxBound()) !== getReleaseYearMaxBound()
+  ) {
+    count += 1;
+  }
+  if (Boolean(data.hideMuted)) {
+    count += 1;
+  }
+  if (Boolean(data.onlyUnderTarget)) {
+    count += 1;
+  }
+  const trackWindow = parseTrackWindowDays(data.trackWindowDays);
+  if (trackWindow !== 30) {
+    count += 1;
+  }
+  return count;
+}
+
+function describeDynamicBase(definition) {
+  const def = definition && typeof definition === "object" ? definition : {};
+  const baseSource = String(def.baseSource || "wishlist");
+  if (baseSource === "wishlist") {
+    return "Steam wishlist";
+  }
+  if (baseSource === "all-static") {
+    return "All static collections";
+  }
+  if (baseSource === "static-collection") {
+    return `Static: ${String(def.baseCollection || "-")}`;
+  }
+  return baseSource;
+}
+
+function renderDynamicCollectionFormHint() {
+  const hintEl = document.getElementById("dynamic-collection-hint");
+  if (!hintEl) {
+    return;
+  }
+  const definition = buildDynamicDefinitionFromCurrentView();
+  const filtersCount = countActiveFiltersInSnapshot(definition.filters || {});
+  const baseLabel = describeDynamicBase(definition);
+  const sortLabel = String(sortMode || "title");
+  const currentIsDynamic = sourceMode === "collections" && isDynamicCollectionName(activeCollection);
+  const currentLabel = currentIsDynamic ? ` | editing: ${activeCollection}` : "";
+  hintEl.textContent = `Base: ${baseLabel} | sort: ${sortLabel} | active filters: ${filtersCount}${currentLabel}`;
 }
 
 function getDynamicBaseIds(definition, stack = new Set()) {
@@ -4084,19 +4217,34 @@ async function createOrUpdateDynamicCollectionByName(rawName) {
     setStatus("Type a dynamic collection name.", true);
     return;
   }
+  const definition = buildDynamicDefinitionFromCurrentView();
   const existing = getExistingCollectionNames().includes(name);
   if (existing) {
     if (!isDynamicCollectionName(name)) {
       setStatus(`"${name}" is a static collection. Choose another name for dynamic collection.`, true);
       return;
     }
-    const confirmed = window.confirm(`Collection "${name}" already exists. Update it as dynamic with current filters and sort?`);
+    const currentDef = normalizeDynamicDefinitionForCompare(state?.dynamicCollections?.[name] || {});
+    const nextDef = normalizeDynamicDefinitionForCompare(definition);
+    const currentSig = JSON.stringify(currentDef);
+    const nextSig = JSON.stringify(nextDef);
+    if (currentSig === nextSig) {
+      setStatus(`Dynamic collection "${name}" is already up to date.`);
+      return;
+    }
+    const oldFilters = countActiveFiltersInSnapshot(currentDef.filters || {});
+    const newFilters = countActiveFiltersInSnapshot(nextDef.filters || {});
+    const confirmed = window.confirm(
+      `Collection "${name}" exists. Update dynamic definition?\n\n`
+      + `base: ${describeDynamicBase(currentDef)} -> ${describeDynamicBase(nextDef)}\n`
+      + `sort: ${String(currentDef.sortMode || "-")} -> ${String(nextDef.sortMode || "-")}\n`
+      + `active filters: ${oldFilters} -> ${newFilters}`
+    );
     if (!confirmed) {
       return;
     }
   }
 
-  const definition = buildDynamicDefinitionFromCurrentView();
   await browser.runtime.sendMessage({
     type: "create-or-update-dynamic-collection",
     collectionName: name,
@@ -4162,6 +4310,7 @@ async function render() {
   const underTargetCheckbox = document.getElementById("under-target-checkbox");
   const trackWindowSelect = document.getElementById("track-window-select");
   const refreshTrackFeedBtn = document.getElementById("refresh-track-feed-btn");
+  const resetTrackFeedDismissedBtn = document.getElementById("reset-track-feed-dismissed-btn");
   const renameActionBtn = document.getElementById("menu-action-rename");
   const deleteActionBtn = document.getElementById("menu-action-delete");
   const deleteSelect = document.getElementById("delete-collection-select");
@@ -4204,6 +4353,7 @@ async function render() {
   renderSortMenu();
   renderViewMenu();
   renderCollectionSelect();
+  renderDynamicCollectionFormHint();
   renderBatchMenuState();
   renderRadarStats();
   const canRenameCurrent = sourceMode !== "wishlist"
@@ -4274,6 +4424,14 @@ function hideCollectionMenuForms() {
   document.getElementById("create-collection-form")?.classList.add("hidden");
   document.getElementById("dynamic-collection-form")?.classList.add("hidden");
   document.getElementById("delete-collection-form")?.classList.add("hidden");
+}
+
+function openDynamicCollectionForm() {
+  const input = document.getElementById("dynamic-collection-input");
+  if (input && sourceMode === "collections" && !isVirtualCollectionSelection(activeCollection) && activeCollection !== "__all__") {
+    input.value = String(activeCollection || "");
+  }
+  renderDynamicCollectionFormHint();
 }
 
 function toggleCollectionMenu(forceOpen = null) {
@@ -4424,6 +4582,7 @@ function bindCollectionMenuControls() {
     renameHandler: renameActiveCollectionByName,
     createHandler: createCollectionByName,
     dynamicHandler: createOrUpdateDynamicCollectionByName,
+    onDynamicOpen: openDynamicCollectionForm,
     deleteHandler: deleteCollectionByName,
     onError: (message) => setStatus(message, true)
   });
@@ -4740,4 +4899,7 @@ initUtils.run({
   render,
   refreshFilterOptionsInBackground,
   refreshWholeDatabase
-}).catch(() => setStatus("Failed to load collections page.", true));
+}).catch((error) => {
+  const message = String(error?.message || error || "unknown init error");
+  setStatus(`Failed to load collections page: ${message}`, true, { withNetworkHint: true });
+});

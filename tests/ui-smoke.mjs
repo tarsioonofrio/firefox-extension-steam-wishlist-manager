@@ -55,15 +55,19 @@ function setupBindingsDom() {
     <button id="collection-menu-btn"></button>
     <button id="menu-action-rename"></button>
     <button id="menu-action-create"></button>
+    <button id="menu-action-dynamic"></button>
     <button id="menu-action-delete"></button>
     <div id="rename-collection-form"></div>
     <div id="create-collection-form"></div>
+    <div id="dynamic-collection-form"></div>
     <div id="delete-collection-form"></div>
     <input id="rename-collection-input" value="new name">
     <input id="create-collection-input" value="created name">
+    <input id="dynamic-collection-input" value="dynamic name">
     <select id="delete-collection-select"><option value="to-delete" selected>to-delete</option></select>
     <button id="rename-collection-ok"></button>
     <button id="create-collection-ok"></button>
+    <button id="dynamic-collection-ok"></button>
     <button id="delete-collection-ok"></button>
     <span id="rating-min-label"></span>
     <span id="rating-max-label"></span>
@@ -176,6 +180,7 @@ async function testGeneralBindingsAndMenuAndRange() {
     hideForms: () => {
       doc.getElementById("rename-collection-form").classList.add("hidden");
       doc.getElementById("create-collection-form").classList.add("hidden");
+      doc.getElementById("dynamic-collection-form").classList.add("hidden");
       doc.getElementById("delete-collection-form").classList.add("hidden");
     },
     toggleCollectionSelectMenu: () => calls.push(["toggle-collection-select-menu"]),
@@ -183,12 +188,16 @@ async function testGeneralBindingsAndMenuAndRange() {
     toggleCollectionMenu: () => calls.push(["toggle-collection-menu"]),
     renameHandler: async (value) => calls.push(["rename", value]),
     createHandler: async (value) => calls.push(["create", value]),
+    dynamicHandler: async (value) => calls.push(["dynamic", value]),
+    onDynamicOpen: () => calls.push(["dynamic-open"]),
     deleteHandler: async (value) => calls.push(["delete", value]),
     onError: (message) => calls.push(["error", message])
   });
 
   doc.getElementById("menu-action-create").click();
   doc.getElementById("create-collection-ok").click();
+  doc.getElementById("menu-action-dynamic").click();
+  doc.getElementById("dynamic-collection-ok").click();
 
   range.renderRangeControls({
     ratingMin: 10,
@@ -220,6 +229,8 @@ async function testGeneralBindingsAndMenuAndRange() {
   assert.ok(calls.some((e) => e[0] === "refresh-track-feed"));
   assert.ok(calls.some((e) => e[0] === "reset-track-feed-dismissed"));
   assert.ok(calls.some((e) => e[0] === "create" && e[1] === "created name"));
+  assert.ok(calls.some((e) => e[0] === "dynamic-open"));
+  assert.ok(calls.some((e) => e[0] === "dynamic" && e[1] === "dynamic name"));
   assert.equal(doc.getElementById("create-collection-input").value, "");
   assert.equal(doc.getElementById("rating-min-label").textContent, "10%");
   assert.ok(rangeCalls.some((e) => e[0] === "rating-min" && e[1] === "12"));

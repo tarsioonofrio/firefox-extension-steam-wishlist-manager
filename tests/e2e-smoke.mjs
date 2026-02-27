@@ -59,6 +59,35 @@ function createRuntime(state) {
         state.activeCollection = String(message?.activeCollection || "__all__");
         return { ok: true };
       }
+      if (type === "set-collection-items-order") {
+        const collectionName = String(message?.collectionName || "");
+        const appIds = Array.isArray(message?.appIds) ? message.appIds.map((id) => String(id)) : [];
+        if (!collectionName || !Array.isArray(state.collections?.[collectionName])) {
+          return { ok: false, error: "Collection not found." };
+        }
+        state.collections[collectionName] = appIds;
+        return { ok: true };
+      }
+      if (type === "batch-update-collection") {
+        const mode = String(message?.mode || "add") === "remove" ? "remove" : "add";
+        const collectionName = String(message?.collectionName || "");
+        const appIds = Array.isArray(message?.appIds) ? message.appIds.map((id) => String(id)) : [];
+        if (!collectionName || !Array.isArray(state.collections?.[collectionName])) {
+          return { ok: false, error: "Collection not found." };
+        }
+        const set = new Set(state.collections[collectionName] || []);
+        if (mode === "add") {
+          for (const appId of appIds) {
+            set.add(appId);
+          }
+        } else {
+          for (const appId of appIds) {
+            set.delete(appId);
+          }
+        }
+        state.collections[collectionName] = Array.from(set);
+        return { ok: true };
+      }
       if (type === "remove-item-from-collection") {
         const collectionName = String(message?.collectionName || "");
         const appId = String(message?.appId || "");
@@ -110,6 +139,30 @@ function createRuntime(state) {
           state.activeCollection = "__all__";
         }
         return { ok: true };
+      }
+      if (type === "create-or-update-dynamic-collection") {
+        const collectionName = String(message?.collectionName || "").trim();
+        const definition = message?.definition && typeof message.definition === "object" ? message.definition : {};
+        if (!collectionName) {
+          return { ok: false, error: "Collection name is required." };
+        }
+        if (!state.dynamicCollections || typeof state.dynamicCollections !== "object") {
+          state.dynamicCollections = {};
+        }
+        state.dynamicCollections[collectionName] = {
+          baseSource: String(definition.baseSource || "wishlist"),
+          baseCollection: String(definition.baseCollection || ""),
+          sortMode: String(definition.sortMode || "title"),
+          filters: definition.filters && typeof definition.filters === "object" ? definition.filters : {},
+          capturedAt: Date.now()
+        };
+        if (!Array.isArray(state.collectionOrder)) {
+          state.collectionOrder = [];
+        }
+        if (!state.collectionOrder.includes(collectionName)) {
+          state.collectionOrder.push(collectionName);
+        }
+        return { ok: true, collectionName };
       }
       return { ok: true };
     }
@@ -299,11 +352,22 @@ async function main() {
     pretendToBeVisual: true
   });
 
+  const now = Date.now();
   const initialState = {
     activeCollection: "favorites",
-    collectionOrder: ["favorites"],
+    collectionOrder: ["favorites", "hype"],
     collections: {
-      favorites: ["730", "570"]
+      favorites: ["730", "570"],
+      hype: []
+    },
+    dynamicCollections: {
+      ranked: {
+        baseSource: "wishlist",
+        baseCollection: "",
+        sortMode: "position",
+        filters: {},
+        capturedAt: now
+      }
     },
     items: {
       "730": { title: "Counter-Strike 2" },
@@ -311,7 +375,6 @@ async function main() {
     }
   };
 
-  const now = Date.now();
   const storage = createStorage({
     steamWishlistCollectionsMetaCacheV4: {
       "730": {
@@ -417,11 +480,6 @@ async function main() {
   const firstTitle = dom.window.document.querySelector("#cards .card .title")?.textContent || "";
   assert.equal(firstTitle, "Counter-Strike 2");
 
-  const firstRemoveBtn = dom.window.document.querySelector("#cards .card .remove-btn");
-  firstRemoveBtn?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-
-  await waitFor(() => dom.window.document.querySelectorAll("#cards .card").length === 1);
-
   collectionSelect.value = "__wishlist__";
   collectionSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 
@@ -432,6 +490,68 @@ async function main() {
 
   const cardsAfterWishlist = dom.window.document.querySelectorAll("#cards .card");
   assert.equal(cardsAfterWishlist.length, 2);
+
+  collectionSelect.value = "favorites";
+  collectionSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await waitFor(() => dom.window.document.querySelectorAll("#cards .card").length === 2);
+  const sortSelectReorder = dom.window.document.getElementById("sort-select");
+  sortSelectReorder.value = "position";
+  sortSelectReorder.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await waitFor(() => {
+    const firstDownBtn = dom.window.document.querySelector("#cards .card .order-down-btn");
+    return firstDownBtn && !firstDownBtn.disabled;
+  });
+
+  const firstDown = dom.window.document.querySelector("#cards .card .order-down-btn");
+  firstDown?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  await waitFor(() => initialState.collections.favorites[0] === "570");
+  assert.deepEqual(Array.from(initialState.collections.favorites || []), ["570", "730"]);
+
+  const batchBtn = dom.window.document.getElementById("batch-menu-btn");
+  batchBtn?.click();
+  await waitFor(() => !dom.window.document.getElementById("batch-menu-panel")?.classList.contains("hidden"));
+  const firstBatchCheckbox = dom.window.document.querySelector("#cards .card .card-batch-checkbox");
+  firstBatchCheckbox.checked = true;
+  firstBatchCheckbox.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  dom.window.document.getElementById("batch-action-add")?.click();
+  const batchCollectionSelect = dom.window.document.getElementById("batch-collection-select");
+  batchCollectionSelect.value = "hype";
+  batchCollectionSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  dom.window.document.getElementById("batch-add-apply-btn")?.click();
+  await waitFor(() => Array.isArray(initialState.collections.hype) && initialState.collections.hype.length === 1);
+  assert.equal(Array.from(initialState.collections.hype || []).length, 1);
+
+  collectionSelect.value = "hype";
+  collectionSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await waitFor(() => dom.window.document.querySelectorAll("#cards .card").length === 1);
+  const hypeBatchCheckbox = dom.window.document.querySelector("#cards .card .card-batch-checkbox");
+  hypeBatchCheckbox.checked = true;
+  hypeBatchCheckbox.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  dom.window.document.getElementById("batch-action-remove")?.click();
+  await waitFor(() => (initialState.collections.hype || []).length === 0);
+  assert.deepEqual(Array.from(initialState.collections.hype || []), []);
+
+  collectionSelect.value = "__wishlist__";
+  collectionSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await waitFor(() => dom.window.document.querySelectorAll("#cards .card").length === 2);
+  const discountMin = dom.window.document.getElementById("discount-min-range");
+  discountMin.value = "5";
+  discountMin.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  await waitFor(() => dom.window.document.querySelectorAll("#cards .card").length === 1);
+  const discountedTitle = dom.window.document.querySelector("#cards .card .title")?.textContent || "";
+  assert.equal(discountedTitle, "Dota 2");
+  const sortSelect = dom.window.document.getElementById("sort-select");
+  sortSelect.value = "discount";
+  sortSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+
+  dom.window.document.getElementById("collection-menu-btn")?.click();
+  dom.window.document.getElementById("menu-action-dynamic")?.click();
+  const dynamicInput = dom.window.document.getElementById("dynamic-collection-input");
+  dynamicInput.value = "ranked";
+  dynamicInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  dom.window.document.getElementById("dynamic-collection-ok")?.click();
+  await waitFor(() => Boolean(initialState.dynamicCollections?.ranked));
+  assert.equal(initialState.dynamicCollections.ranked.sortMode, "discount");
 
   console.log("e2e smoke ok");
 }

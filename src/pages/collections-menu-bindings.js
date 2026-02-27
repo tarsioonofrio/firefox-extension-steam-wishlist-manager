@@ -7,6 +7,7 @@
     const renameHandler = options?.renameHandler || (async () => {});
     const createHandler = options?.createHandler || (async () => {});
     const dynamicHandler = options?.dynamicHandler || (async () => {});
+    const onDynamicOpen = options?.onDynamicOpen || (() => {});
     const deleteHandler = options?.deleteHandler || (async () => {});
     const onError = options?.onError || (() => {});
 
@@ -41,6 +42,7 @@
     });
     document.getElementById("menu-action-dynamic")?.addEventListener("click", () => {
       showOnlyForm("dynamic-collection-form");
+      onDynamicOpen();
     });
     document.getElementById("menu-action-delete")?.addEventListener("click", () => {
       showOnlyForm("delete-collection-form");

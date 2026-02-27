@@ -15,8 +15,11 @@ function makeContext() {
   const context = vm.createContext({
     window: {},
     console,
+    URL,
+    location: { href: "https://store.steampowered.com/" },
     setTimeout,
-    clearTimeout
+    clearTimeout,
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => "" })
   });
   return context;
 }
@@ -307,8 +310,40 @@ function testCollectionsActionsSelection(context) {
   assert.equal(feed.activeCollection, "__track_feed__");
 }
 
-function main() {
+async function testSteamFetchTelemetry(context) {
+  let calls = 0;
+  context.fetch = async () => {
+    calls += 1;
+    return {
+      ok: false,
+      status: 429,
+      async json() {
+        return {};
+      },
+      async text() {
+        return "";
+      }
+    };
+  };
+  const fetchUtils = context.window.SWMSteamFetch;
+  assert.ok(fetchUtils, "SWMSteamFetch should be available");
+  let threw = false;
+  try {
+    await fetchUtils.fetchJson("https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid=1");
+  } catch {
+    threw = true;
+  }
+  assert.equal(threw, true);
+  const telemetry = fetchUtils.getTelemetry();
+  assert.ok(telemetry.cooldownMsRemaining >= 0);
+  assert.ok(Array.isArray(telemetry.endpoints));
+  assert.ok(telemetry.endpoints.some((entry) => entry.endpoint === "api:GetWishlist/v1" && entry.fail > 0));
+  assert.ok(calls > 1, "fetch should retry on 429");
+}
+
+async function main() {
   const context = makeContext();
+  loadModule("src/pages/steam-fetch.js", context);
   loadModule("src/pages/wishlist-rank.js", context);
   loadModule("src/pages/wishlist-sort.js", context);
   loadModule("src/pages/collections-filters.js", context);
@@ -320,7 +355,11 @@ function main() {
   testCollectionsFiltersSearchByNote(context);
   testLanguageAllMatchFilters(context);
   testCollectionsActionsSelection(context);
+  await testSteamFetchTelemetry(context);
   console.log("module smoke ok");
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -83,6 +83,9 @@ Notes:
     - The manifest also restricts which extension ID can talk to the host (`allowed_extensions`).
 - Validate manifest: `npm run check:manifest`
 - Logic smoke test: `npm run test:logic`
+- UI binding smoke test: `npm run test:ui`
+- End-to-end smoke test (collections page jsdom): `npm run test:e2e`
+- Full test suite: `npm test`
 
 Manual load alternative:
 - `about:debugging` -> **This Firefox** -> **Load Temporary Add-on...** -> `manifest.json`
@@ -107,6 +110,26 @@ Manual load alternative:
 - `collections-general-bindings.js`: search, pagination, textual filter, refresh bindings.
 - `collections-menu-bindings.js`: collection menu and form submit bindings.
 - `collections-card-render.js`: card node creation, static render, card actions, async hydration.
+
+## Dynamic Collections UX
+
+- `Menu -> New/Update dynamic` now shows a live preview before saving:
+  - base source,
+  - current sort mode,
+  - number of active filters.
+- If saving over an existing dynamic collection:
+  - no-op if definition is unchanged,
+  - otherwise explicit confirmation with old vs new base/sort/filter count.
+- If a static collection uses the same name, save is blocked with a clear message.
+
+## Sync Hardening
+
+- Steam fetch wrapper now tracks endpoint telemetry locally:
+  - requests/success/fail/retries,
+  - throttling events (`403/429`),
+  - cooldown remaining.
+- Adaptive cooldown is applied on repeated throttling to reduce burst retries.
+- Error status line includes a short network summary (`net ...`) to explain request state quickly.
 
 Script load order is declared at the bottom of `src/pages/collections.html`.
 
@@ -198,3 +221,8 @@ Expected output:
 4. Exercise filters: tags, rating/reviews, price/discount, release year.
 5. Create, rename, and delete a collection from menu actions.
 6. Refresh one card and refresh page data.
+
+Automated smoke coverage:
+- `test:logic`: rank/sort/filter/actions + fetch telemetry sanity.
+- `test:ui`: selector/menu/range/general bindings.
+- `test:e2e`: collection load, source switch, reorder, batch add/remove, wishlist discount filter, dynamic update flow.
