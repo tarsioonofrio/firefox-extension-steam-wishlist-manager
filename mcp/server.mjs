@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -17,7 +18,7 @@ const DB_PATH = process.env.SWM_MCP_DB_PATH
   : path.join(__dirname, "data", "state.json");
 const NATIVE_BRIDGE_SNAPSHOT_PATH = process.env.SWM_NATIVE_BRIDGE_SNAPSHOT_PATH
   ? path.resolve(process.env.SWM_NATIVE_BRIDGE_SNAPSHOT_PATH)
-  : path.join(__dirname, "data", "extension-bridge-snapshot.json");
+  : path.join(os.tmpdir(), "steam-wishlist-manager-extension-bridge-snapshot.json");
 
 const APP_ID_RE = /^\d{1,10}$/;
 const STEAM_ID_RE = /^\d{5,20}$/;

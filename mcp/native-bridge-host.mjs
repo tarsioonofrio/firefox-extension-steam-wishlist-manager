@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import os from "node:os";
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -8,7 +9,7 @@ const __dirname = path.dirname(__filename);
 
 const SNAPSHOT_PATH = process.env.SWM_NATIVE_BRIDGE_SNAPSHOT_PATH
   ? path.resolve(process.env.SWM_NATIVE_BRIDGE_SNAPSHOT_PATH)
-  : path.join(__dirname, 'data', 'extension-bridge-snapshot.json');
+  : path.join(os.tmpdir(), 'steam-wishlist-manager-extension-bridge-snapshot.json');
 
 function sendMessage(obj) {
   const json = Buffer.from(JSON.stringify(obj), 'utf8');

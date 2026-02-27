@@ -137,7 +137,9 @@ Notes:
 - It currently uses its own local DB and supports bridge import from extension backup JSON.
 - Refresh tools prioritize extension-exported caches (`steamWishlistAddedMapV3`, meta/filter caches) before any direct Steam request.
 - Native bridge mode:
-  - Extension can publish local storage snapshot to `mcp/data/extension-bridge-snapshot.json` via Native Messaging.
+  - Extension publishes local storage snapshot via Native Messaging.
+  - Default path: `/tmp/steam-wishlist-manager-extension-bridge-snapshot.json`
+    (override with `SWM_NATIVE_BRIDGE_SNAPSHOT_PATH`).
   - MCP auto-hydrates from this snapshot before tool execution.
 - For best results:
   - Export backup from Configurations page.
