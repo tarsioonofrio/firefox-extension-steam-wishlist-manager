@@ -5,6 +5,8 @@
     const activeCollection = String(options?.activeCollection || "__all__");
     const wishlistCount = Number(options?.wishlistCount || 0);
     const wishlistSelectValue = String(options?.wishlistSelectValue || "__wishlist__");
+    const inboxSelectValue = String(options?.inboxSelectValue || "__inbox__");
+    const inboxCount = Number(options?.inboxCount || 0);
     const collectionSizes = options?.collectionSizes || {};
     const dynamicNames = new Set(Array.isArray(options?.dynamicNames) ? options.dynamicNames : []);
 
@@ -22,6 +24,11 @@
     wishlistOption.value = wishlistSelectValue;
     wishlistOption.textContent = `Steam wishlist (${wishlistCount})`;
     select.appendChild(wishlistOption);
+
+    const inboxOption = document.createElement("option");
+    inboxOption.value = inboxSelectValue;
+    inboxOption.textContent = `Inbox (${inboxCount})`;
+    select.appendChild(inboxOption);
 
     const allOption = document.createElement("option");
     allOption.value = "__all__";

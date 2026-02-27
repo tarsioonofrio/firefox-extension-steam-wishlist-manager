@@ -31,6 +31,7 @@ const SAFE_FETCH_CONCURRENCY_FORCE = 1;
 const SAFE_FETCH_FORCE_BASE_DELAY_MS = 700;
 const SAFE_FETCH_FORCE_JITTER_MS = 500;
 const WISHLIST_SELECT_VALUE = "__wishlist__";
+const INBOX_SELECT_VALUE = "__inbox__";
 const RELEASE_YEAR_DEFAULT_MIN = 2010;
 const steamFetchUtils = window.SWMSteamFetch;
 // Source baseline: SteamDB tags taxonomy (static seed for fast first render).
@@ -455,6 +456,17 @@ function getCurrentSourceAppIds() {
 
   if (!state) {
     return [];
+  }
+
+  if (activeCollection === INBOX_SELECT_VALUE) {
+    const out = [];
+    for (const appId of Object.keys(state.items || {})) {
+      const intent = getItemIntentState(appId);
+      if (String(intent.bucket || "INBOX").toUpperCase() === "INBOX") {
+        out.push(appId);
+      }
+    }
+    return out;
   }
 
   if (activeCollection === "__all__") {
@@ -2592,6 +2604,11 @@ function renderCollectionSelect() {
     activeCollection,
     wishlistCount: Object.keys(wishlistAddedMap || {}).length,
     wishlistSelectValue: WISHLIST_SELECT_VALUE,
+    inboxSelectValue: INBOX_SELECT_VALUE,
+    inboxCount: Object.keys(state?.items || {}).filter((appId) => {
+      const intent = getItemIntentState(appId);
+      return String(intent.bucket || "INBOX").toUpperCase() === "INBOX";
+    }).length,
     collectionSizes: dynamicCollectionSizes,
     dynamicNames: Object.keys(state?.dynamicCollections || {})
   });
@@ -3301,7 +3318,7 @@ async function render() {
   renderViewMenu();
   renderCollectionSelect();
   renderBatchMenuState();
-  const canRenameCurrent = sourceMode !== "wishlist" && activeCollection !== "__all__";
+  const canRenameCurrent = sourceMode !== "wishlist" && activeCollection !== "__all__" && activeCollection !== INBOX_SELECT_VALUE;
   if (renameActionBtn) {
     renameActionBtn.disabled = !canRenameCurrent;
   }
@@ -3419,7 +3436,7 @@ function resetAllFiltersState() {
 }
 
 async function handleCollectionChange(value) {
-  const resolved = actionsUtils.resolveCollectionSelection(value, WISHLIST_SELECT_VALUE);
+  const resolved = actionsUtils.resolveCollectionSelection(value, WISHLIST_SELECT_VALUE, INBOX_SELECT_VALUE);
   sourceMode = resolved.sourceMode;
   activeCollection = resolved.activeCollection;
   page = resolved.page;

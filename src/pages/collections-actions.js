@@ -10,12 +10,14 @@
     "review-score"
   ]);
 
-  function resolveCollectionSelection(value, wishlistSelectValue) {
+  function resolveCollectionSelection(value, wishlistSelectValue, inboxSelectValue) {
     const raw = String(value || "__all__");
-    const sourceMode = raw === String(wishlistSelectValue || "__wishlist__") ? "wishlist" : "collections";
+    const isWishlist = raw === String(wishlistSelectValue || "__wishlist__");
+    const isInbox = raw === String(inboxSelectValue || "__inbox__");
+    const sourceMode = isWishlist ? "wishlist" : "collections";
     return {
       sourceMode,
-      activeCollection: sourceMode === "wishlist" ? "__all__" : raw,
+      activeCollection: sourceMode === "wishlist" ? "__all__" : (isInbox ? String(inboxSelectValue || "__inbox__") : raw),
       page: 1
     };
   }
