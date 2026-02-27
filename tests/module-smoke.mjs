@@ -98,6 +98,7 @@ function testCollectionsFilters(context) {
     sortUtils: sort,
     sortByWishlistPriority: (list) => list,
     getTitle: (id) => meta[id].titleText,
+    getNote: () => "",
     getMeta: (id) => meta[id],
     getMetaTags: (id) => meta[id].tags,
     getMetaType: (id) => meta[id].appType,
@@ -142,6 +143,74 @@ function testCollectionsFilters(context) {
   assert.deepEqual(Array.from(result), ["101"]);
 }
 
+function testCollectionsFiltersSearchByNote(context) {
+  const filters = context.window.SWMCollectionsFilters;
+  const sort = context.window.SWMWishlistSort;
+  assert.ok(filters, "SWMCollectionsFilters should be available");
+
+  const ids = ["10", "20"];
+  const meta = {
+    "10": { titleText: "Game A", tags: [], appType: "Game" },
+    "20": { titleText: "Game B", tags: [], appType: "Game" }
+  };
+  const notes = {
+    "10": "coop dystopian combat",
+    "20": ""
+  };
+
+  const result = filters.getFilteredAndSorted(ids, {
+    searchQuery: "dystopian",
+    sourceMode: "collections",
+    sortMode: "title",
+    wishlistSortOrders: {},
+    isWishlistRankReady: () => false,
+    getSortContext: () => ({
+      getTitle: (id) => meta[id].titleText,
+      getMeta: (id) => meta[id],
+      getMetaNumber: () => 0,
+      wishlistAddedMap: {},
+      wishlistPriorityMap: {}
+    }),
+    sortUtils: sort,
+    sortByWishlistPriority: (list) => list,
+    getTitle: (id) => meta[id].titleText,
+    getNote: (id) => notes[id] || "",
+    getMeta: (id) => meta[id],
+    getMetaTags: () => [],
+    getMetaType: () => "Game",
+    getMetaNumber: () => 0,
+    getMetaArray: () => [],
+    selectedTags: new Set(),
+    selectedTypes: new Set(),
+    selectedPlayers: new Set(),
+    selectedFeatures: new Set(),
+    selectedHardware: new Set(),
+    selectedAccessibility: new Set(),
+    selectedPlatforms: new Set(),
+    selectedLanguages: new Set(),
+    selectedFullAudioLanguages: new Set(),
+    selectedSubtitleLanguages: new Set(),
+    selectedTechnologies: new Set(),
+    selectedDevelopers: new Set(),
+    selectedPublishers: new Set(),
+    getReleaseFilterData: () => ({ year: 2024, textLabel: "" }),
+    releaseTextEnabled: false,
+    releaseYearRangeEnabled: true,
+    releaseYearMin: 2010,
+    releaseYearMax: 2030,
+    ratingMin: 0,
+    ratingMax: 100,
+    reviewsMin: 0,
+    reviewsMax: 999999999,
+    discountMin: 0,
+    discountMax: 100,
+    priceMin: 0,
+    priceMax: 9999999
+  });
+
+  assert.deepEqual(Array.from(result), ["10"]);
+}
+
 function testLanguageAllMatchFilters(context) {
   const filters = context.window.SWMCollectionsFilters;
   const sort = context.window.SWMWishlistSort;
@@ -170,6 +239,7 @@ function testLanguageAllMatchFilters(context) {
     sortUtils: sort,
     sortByWishlistPriority: (list) => list,
     getTitle: (id) => meta[id].titleText,
+    getNote: () => "",
     getMeta: (id) => meta[id],
     getMetaTags: () => [],
     getMetaType: () => "Game",
@@ -206,16 +276,50 @@ function testLanguageAllMatchFilters(context) {
   assert.deepEqual(Array.from(result), ["1"]);
 }
 
+function testCollectionsActionsSelection(context) {
+  const actions = context.window.SWMCollectionsActions;
+  assert.ok(actions, "SWMCollectionsActions should be available");
+
+  const wishlist = actions.resolveCollectionSelection(
+    "__wishlist__",
+    "__wishlist__",
+    "__inbox__",
+    "__track__",
+    "__buy__",
+    "__archive__",
+    "__owned__",
+    "__track_feed__"
+  );
+  assert.equal(wishlist.sourceMode, "wishlist");
+  assert.equal(wishlist.activeCollection, "__all__");
+
+  const feed = actions.resolveCollectionSelection(
+    "__track_feed__",
+    "__wishlist__",
+    "__inbox__",
+    "__track__",
+    "__buy__",
+    "__archive__",
+    "__owned__",
+    "__track_feed__"
+  );
+  assert.equal(feed.sourceMode, "collections");
+  assert.equal(feed.activeCollection, "__track_feed__");
+}
+
 function main() {
   const context = makeContext();
   loadModule("src/pages/wishlist-rank.js", context);
   loadModule("src/pages/wishlist-sort.js", context);
   loadModule("src/pages/collections-filters.js", context);
+  loadModule("src/pages/collections-actions.js", context);
 
   testWishlistRank(context);
   testWishlistSort(context);
   testCollectionsFilters(context);
+  testCollectionsFiltersSearchByNote(context);
   testLanguageAllMatchFilters(context);
+  testCollectionsActionsSelection(context);
   console.log("module smoke ok");
 }
 

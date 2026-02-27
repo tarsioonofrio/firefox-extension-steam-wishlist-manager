@@ -46,6 +46,12 @@ function setupBindingsDom() {
     <input id="developers-search-input">
     <input id="publishers-search-input">
     <button id="refresh-page-btn"></button>
+    <button id="refresh-track-feed-btn"></button>
+    <button id="reset-track-feed-dismissed-btn"></button>
+    <select id="triage-filter-select"><option value="all">All</option></select>
+    <input id="hide-muted-checkbox" type="checkbox">
+    <input id="under-target-checkbox" type="checkbox">
+    <select id="track-window-select"><option value="30">30</option></select>
     <button id="collection-menu-btn"></button>
     <button id="menu-action-rename"></button>
     <button id="menu-action-create"></button>
@@ -135,7 +141,13 @@ async function testGeneralBindingsAndMenuAndRange() {
     onTagSearchInput: (value) => calls.push(["tag-search", value]),
     onTagShowMore: () => calls.push(["tag-more"]),
     onTextFilterInput: (id, value) => calls.push(["text-filter", id, value]),
-    onRefreshPage: () => calls.push(["refresh-page"])
+    onRefreshPage: () => calls.push(["refresh-page"]),
+    onRefreshTrackFeed: () => calls.push(["refresh-track-feed"]),
+    onResetTrackFeedDismissed: () => calls.push(["reset-track-feed-dismissed"]),
+    onTriageFilterChange: async (value) => calls.push(["triage-filter", value]),
+    onHideMutedChange: async (value) => calls.push(["hide-muted", value]),
+    onUnderTargetChange: async (value) => calls.push(["under-target", value]),
+    onTrackWindowChange: async (value) => calls.push(["track-window", value])
   });
 
   const doc = dom.window.document;
@@ -149,6 +161,16 @@ async function testGeneralBindingsAndMenuAndRange() {
   doc.getElementById("languages-search-input").value = "english";
   doc.getElementById("languages-search-input").dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   doc.getElementById("refresh-page-btn").click();
+  doc.getElementById("refresh-track-feed-btn").click();
+  doc.getElementById("reset-track-feed-dismissed-btn").click();
+  doc.getElementById("triage-filter-select").value = "all";
+  doc.getElementById("triage-filter-select").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  doc.getElementById("hide-muted-checkbox").checked = true;
+  doc.getElementById("hide-muted-checkbox").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  doc.getElementById("under-target-checkbox").checked = true;
+  doc.getElementById("under-target-checkbox").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  doc.getElementById("track-window-select").value = "30";
+  doc.getElementById("track-window-select").dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 
   menu.bindCollectionMenuControls({
     hideForms: () => {
@@ -195,6 +217,8 @@ async function testGeneralBindingsAndMenuAndRange() {
 
   await new Promise((r) => setTimeout(r, 0));
   assert.ok(calls.some((e) => e[0] === "search" && e[1] === "arc"));
+  assert.ok(calls.some((e) => e[0] === "refresh-track-feed"));
+  assert.ok(calls.some((e) => e[0] === "reset-track-feed-dismissed"));
   assert.ok(calls.some((e) => e[0] === "create" && e[1] === "created name"));
   assert.equal(doc.getElementById("create-collection-input").value, "");
   assert.equal(doc.getElementById("rating-min-label").textContent, "10%");
