@@ -44,6 +44,7 @@ const VALID_BUY_INTENTS = new Set(["UNSET", "NONE", "MAYBE", "BUY"]);
 const VALID_TRACK_INTENTS = new Set(["UNSET", "OFF", "ON"]);
 const STEAM_WRITE_MIN_INTERVAL_MS = 250;
 const DEFAULT_QUEUE_DAYS = 30;
+const DEFAULT_INBOX_DAYS = 7;
 const MIN_QUEUE_DAYS = 1;
 const MAX_QUEUE_DAYS = 365;
 const QUEUE_AUTOMATION_PERIOD_MINUTES = 360;
@@ -70,15 +71,20 @@ function normalizeQueuePolicy(rawPolicy) {
   const raw = rawPolicy && typeof rawPolicy === "object" ? rawPolicy : {};
   const maybeDaysRaw = Number(raw.maybeDays);
   const archiveDaysRaw = Number(raw.archiveDays);
+  const inboxDaysRaw = Number(raw.inboxDays);
   const maybeDays = Number.isFinite(maybeDaysRaw)
     ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(maybeDaysRaw)))
     : DEFAULT_QUEUE_DAYS;
   const archiveDays = Number.isFinite(archiveDaysRaw)
     ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(archiveDaysRaw)))
     : DEFAULT_QUEUE_DAYS;
+  const inboxDays = Number.isFinite(inboxDaysRaw)
+    ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(inboxDaysRaw)))
+    : DEFAULT_INBOX_DAYS;
   return {
     maybeDays,
-    archiveDays
+    archiveDays,
+    inboxDays
   };
 }
 
@@ -331,9 +337,12 @@ function normalizeItemRecord(appId, rawItem) {
     muted: Boolean(src.muted),
     labels: sanitizeLabels(src.labels || []),
     triagedAt: Number.isFinite(Number(src.triagedAt)) ? Number(src.triagedAt) : 0,
+    inboxQueuedAt: Number.isFinite(Number(src.inboxQueuedAt)) ? Number(src.inboxQueuedAt) : 0,
     maybeQueuedAt: Number.isFinite(Number(src.maybeQueuedAt)) ? Number(src.maybeQueuedAt) : 0,
     archiveQueuedAt: Number.isFinite(Number(src.archiveQueuedAt)) ? Number(src.archiveQueuedAt) : 0,
-    archiveLastActivityAt: Number.isFinite(Number(src.archiveLastActivityAt)) ? Number(src.archiveLastActivityAt) : 0
+    archiveLastActivityAt: Number.isFinite(Number(src.archiveLastActivityAt)) ? Number(src.archiveLastActivityAt) : 0,
+    steamWishlistedObserved: Boolean(src.steamWishlistedObserved),
+    steamFollowedObserved: Boolean(src.steamFollowedObserved)
   };
 }
 
@@ -347,6 +356,9 @@ function hasItemTriageState(item) {
     || normalized.buyIntent !== "UNSET"
     || normalized.trackIntent !== "UNSET"
     || normalized.bucket === "ARCHIVE"
+    || normalized.steamWishlistedObserved
+    || normalized.steamFollowedObserved
+    || normalized.inboxQueuedAt > 0
     || Boolean(normalized.note)
     || Number.isFinite(Number(normalized.targetPriceCents))
     || normalized.muted
@@ -687,6 +699,116 @@ function sanitizeFollowedAppIds(values) {
   return out;
 }
 
+function sanitizeSteamObservedAppIds(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const out = [];
+  const seen = new Set();
+  for (const raw of values) {
+    const appId = String(raw || "").trim();
+    if (!VALID_APP_ID_PATTERN.test(appId) || seen.has(appId)) {
+      continue;
+    }
+    seen.add(appId);
+    out.push(appId);
+  }
+  return out;
+}
+
+async function readSteamObservedSignals() {
+  try {
+    const params = new URLSearchParams();
+    params.set("_", String(Date.now()));
+    const userDataResponse = await fetch(`https://store.steampowered.com/dynamicstore/userdata/?${params.toString()}`, {
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        Accept: "text/html"
+      }
+    });
+    if (!userDataResponse.ok) {
+      throw new Error(`Could not read Steam userdata (${userDataResponse.status}).`);
+    }
+    const userData = await userDataResponse.json();
+    return {
+      wishlistIds: sanitizeSteamObservedAppIds(userData?.rgWishlist),
+      followedIds: sanitizeSteamObservedAppIds(userData?.rgFollowedApps)
+    };
+  } catch {
+    const proxied = await sendMessageToStoreTabWithFallback({
+      type: "steam-proxy-read-userdata"
+    });
+    return {
+      wishlistIds: sanitizeSteamObservedAppIds(proxied?.rgWishlist),
+      followedIds: sanitizeSteamObservedAppIds(proxied?.rgFollowedApps)
+    };
+  }
+}
+
+function applySteamObservedSignalsToState(state, wishlistIds, followedIds, nowTs) {
+  const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
+  const wishlistSet = new Set(sanitizeSteamObservedAppIds(wishlistIds));
+  const followedSet = new Set(sanitizeSteamObservedAppIds(followedIds));
+  const allIds = new Set([
+    ...Object.keys(state.items || {}),
+    ...wishlistSet,
+    ...followedSet
+  ]);
+
+  let changed = false;
+  let inboxMapped = 0;
+  let buyFollowMapped = 0;
+  for (const appId of allIds) {
+    const current = normalizeItemRecord(appId, state.items?.[appId] || {});
+    const next = { ...current };
+    const isWishlisted = wishlistSet.has(appId);
+    const isFollowed = followedSet.has(appId);
+
+    next.steamWishlistedObserved = isWishlisted;
+    next.steamFollowedObserved = isFollowed;
+
+    if (isWishlisted && isFollowed) {
+      next.buy = 2;
+      next.buyIntent = "BUY";
+      next.track = 1;
+      next.trackIntent = "ON";
+      next.bucket = "BUY";
+      next.inboxQueuedAt = 0;
+      buyFollowMapped += 1;
+    } else if (isWishlisted && !isFollowed) {
+      next.buy = 0;
+      next.buyIntent = "UNSET";
+      next.track = 0;
+      next.trackIntent = "UNSET";
+      next.bucket = "INBOX";
+      if (!(next.inboxQueuedAt > 0)) {
+        next.inboxQueuedAt = now;
+      }
+      inboxMapped += 1;
+    } else if (!isWishlisted && isFollowed) {
+      next.track = 1;
+      next.trackIntent = "ON";
+      next.bucket = normalizeBucket(next.bucket, next.track, next.buy);
+      next.inboxQueuedAt = 0;
+    } else {
+      next.inboxQueuedAt = 0;
+    }
+
+    const normalizedNext = normalizeItemRecord(appId, next);
+    const changedForItem = JSON.stringify(current) !== JSON.stringify(normalizedNext);
+    if (changedForItem) {
+      state.items[appId] = normalizedNext;
+      changed = true;
+    }
+  }
+  return {
+    changed,
+    inboxMapped,
+    buyFollowMapped
+  };
+}
+
 async function syncFollowedAppsFromSteam(state, force = false) {
   const now = Date.now();
   const storedMeta = await browser.storage.local.get(FOLLOWED_SYNC_META_KEY);
@@ -789,7 +911,10 @@ function getTrackFeedLatestMap(entries) {
 
 function applyQueueTimersForTransition(previousItem, nextItem, now) {
   const previous = normalizeItemRecord(String(previousItem?.appId || ""), previousItem || {});
-  const next = normalizeItemRecord(previous.appId, nextItem || {});
+  const next = normalizeItemRecord(previous.appId, {
+    ...previous,
+    ...(nextItem || {})
+  });
   const ts = Number.isFinite(Number(now)) ? Number(now) : Date.now();
 
   const inMaybeQueue = next.buy === 1 || next.buyIntent === "MAYBE";
@@ -817,15 +942,26 @@ async function performQueueAutomationSweep(force = false) {
   const state = await getState();
   const policy = await getQueuePolicy();
   const now = Date.now();
+  const inboxMs = policy.inboxDays * 24 * 60 * 60 * 1000;
   const maybeMs = policy.maybeDays * 24 * 60 * 60 * 1000;
   const archiveMs = policy.archiveDays * 24 * 60 * 60 * 1000;
+  let changed = false;
+  try {
+    const observed = await readSteamObservedSignals();
+    const observedResult = applySteamObservedSignalsToState(state, observed.wishlistIds, observed.followedIds, now);
+    if (observedResult.changed) {
+      changed = true;
+    }
+  } catch {
+    // keep queue sweep running using cached/local state
+  }
 
   const storage = await browser.storage.local.get([META_CACHE_KEY, "steamWishlistTrackFeedV1"]);
   const metaCache = storage?.[META_CACHE_KEY] || {};
   const feedEntries = storage?.["steamWishlistTrackFeedV1"] || [];
   const feedLatestByApp = getTrackFeedLatestMap(feedEntries);
 
-  let changed = false;
+  let inboxProcessed = 0;
   let maybeProcessed = 0;
   let archiveProcessed = 0;
   const errors = [];
@@ -833,6 +969,40 @@ async function performQueueAutomationSweep(force = false) {
   for (const appId of Object.keys(state.items || {})) {
     const current = normalizeItemRecord(appId, state.items[appId] || {});
     const next = { ...current };
+
+    const isInboxSteamOnly = next.steamWishlistedObserved
+      && !next.steamFollowedObserved
+      && String(next.bucket || "").toUpperCase() === "INBOX"
+      && next.buy <= 0;
+    if (isInboxSteamOnly) {
+      if (!(next.inboxQueuedAt > 0)) {
+        next.inboxQueuedAt = next.triagedAt > 0 ? next.triagedAt : now;
+        changed = true;
+      }
+      const due = (now - Number(next.inboxQueuedAt || 0)) >= inboxMs;
+      if (due || force) {
+        try {
+          await setSteamWishlist(appId, false);
+          await setSteamFollow(appId, true);
+          next.buy = 0;
+          next.track = 1;
+          next.buyIntent = "NONE";
+          next.trackIntent = "ON";
+          next.bucket = "TRACK";
+          next.inboxQueuedAt = 0;
+          next.steamWishlistedObserved = false;
+          next.steamFollowedObserved = true;
+          next.triagedAt = now;
+          inboxProcessed += 1;
+          changed = true;
+        } catch (error) {
+          errors.push(`inbox:${appId}:${String(error?.message || error || "failed")}`);
+        }
+      }
+    } else if (next.inboxQueuedAt > 0) {
+      next.inboxQueuedAt = 0;
+      changed = true;
+    }
 
     if (next.buy === 1 || next.buyIntent === "MAYBE") {
       if (!(next.maybeQueuedAt > 0)) {
@@ -913,6 +1083,7 @@ async function performQueueAutomationSweep(force = false) {
   return {
     ok: true,
     changed,
+    inboxProcessed,
     maybeProcessed,
     archiveProcessed,
     errors

@@ -7,6 +7,7 @@ const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV2";
 const BACKUP_SETTINGS_KEY = "steamWishlistBackupSettingsV1";
 const BACKUP_SCHEMA_VERSION = 1;
 const DEFAULT_QUEUE_DAYS = 30;
+const DEFAULT_INBOX_DAYS = 7;
 const MIN_QUEUE_DAYS = 1;
 const MAX_QUEUE_DAYS = 365;
 const BACKUP_DATA_KEYS = [
@@ -60,13 +61,20 @@ function normalizeQueuePolicy(rawPolicy) {
   const archiveDays = Number.isFinite(Number(raw.archiveDays))
     ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(Number(raw.archiveDays))))
     : DEFAULT_QUEUE_DAYS;
-  return { maybeDays, archiveDays };
+  const inboxDays = Number.isFinite(Number(raw.inboxDays))
+    ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(Number(raw.inboxDays))))
+    : DEFAULT_INBOX_DAYS;
+  return { maybeDays, archiveDays, inboxDays };
 }
 
 function applyQueuePolicyToUI(policy) {
   const safe = normalizeQueuePolicy(policy);
+  const inboxEl = document.getElementById("queue-inbox-days");
   const maybeEl = document.getElementById("queue-maybe-days");
   const archiveEl = document.getElementById("queue-archive-days");
+  if (inboxEl) {
+    inboxEl.value = String(safe.inboxDays);
+  }
   if (maybeEl) {
     maybeEl.value = String(safe.maybeDays);
   }
@@ -76,9 +84,11 @@ function applyQueuePolicyToUI(policy) {
 }
 
 function getQueuePolicyFromUI() {
+  const inboxEl = document.getElementById("queue-inbox-days");
   const maybeEl = document.getElementById("queue-maybe-days");
   const archiveEl = document.getElementById("queue-archive-days");
   return normalizeQueuePolicy({
+    inboxDays: Number(inboxEl?.value || DEFAULT_INBOX_DAYS),
     maybeDays: Number(maybeEl?.value || DEFAULT_QUEUE_DAYS),
     archiveDays: Number(archiveEl?.value || DEFAULT_QUEUE_DAYS)
   });
