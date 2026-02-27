@@ -1,117 +1,92 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-- `manifest.json`: Firefox WebExtension manifest (MV3) with permissions and content script mappings.
-- `src/background.js`: central state management (`browser.storage.local`) and message handlers.
-- `src/content/app-page.js`: UI/actions on Steam app pages (`/app/...`) for collection assignment.
-- `src/content/wishlist-page.js`: filtering and visual ordering logic on wishlist pages (`/wishlist/...`).
-- `src/pages/collections.html|css|js`: dedicated collections management page and Steam-like card list.
-- `src/pages/steam-fetch.js`: shared Steam fetch with retry/cooldown behavior.
-- `src/pages/wishlist-rank.js`: wishlist rank normalization/readiness (`GetWishlist/v1`).
-- `src/pages/wishlist-sort.js`: deterministic sort strategies for wishlist/collections.
-- `src/pages/meta-parsers.js`: app metadata normalization/parsers.
-- `src/pages/collections-filters.js`: filter engine and filtered/sorted list output.
-- `src/pages/collections-ui-controls.js`: collection select/sort menu/pager rendering.
-- `src/pages/collections-panels.js`: panel toggles and outside-click close behavior.
-- `src/pages/collections-range-controls.js`: rating/review/discount/price range UI bindings.
-- `src/pages/collections-filter-state.js`: filter reset and search input clear helpers.
-- `src/pages/collections-actions.js`: source/sort transition rules.
-- `src/pages/collections-crud.js`: create/rename/delete collection flows.
-- `src/pages/collections-init.js`: bootstrap initializer for collections page.
-- `src/pages/collections-selection-bindings.js`: collection and sort selector bindings.
-- `src/pages/collections-general-bindings.js`: search/pagination/text-filter/refresh bindings.
-- `src/pages/collections-menu-bindings.js`: collection menu/form bindings.
-- `src/pages/collections-card-render.js`: card rendering/actions/hydration helpers.
-- `src/popup/popup.html|css|js`: browser action popup that opens the collections page.
-- `src/styles/content.css`: shared styles for injected UI.
-- `README.md`: MVP usage notes and current limitations.
-- `logs/`: local runtime logs; ignored in git.
+## Product Direction (Current)
+Steam Wishlist Manager exists to turn very large wishlists into an actionable workflow.
 
-### Collections Page Layering
-- `collections.js` should stay as orchestrator/composition layer.
-- Prefer placing new business logic in one of the focused modules above.
-- When adding a new page module, register it in `collections.html` script order and document it in `README.md`.
+Core goal:
+- Keep discovery and support signals without forcing a binary decision.
 
-## Build, Test, and Development Commands
-This repository uses `web-ext` via npm scripts.
+Non-negotiable UX:
+- Two independent axes per game: `Track` and `Buy`.
+- Fast triage with minimal clicks.
+- Graceful degradation: if a Steam action is unreliable, open the correct Steam page and keep local state consistent.
 
-- `npm install`
-- `npm run dev`
-  - Runs extension in Firefox desktop with auto-reload.
-- `npm run build`
-  - Builds extension artifact in `web-ext-artifacts/`.
-- `npm run check:manifest`
-  - Validates `manifest.json` JSON syntax.
-- `npm run test:logic`
-  - Runs smoke checks for rank/sort/filter logic modules.
-- `about:debugging` -> **This Firefox** -> **Load Temporary Add-on...** -> select `manifest.json`.
+## Steam Feature Strategy
+Use Steam resources as separate signals:
+- Wishlist: purchase intent and discount signal.
+- Follow: update/news intent.
+- News Hub / My Games feed: tracking stream.
+- Ignore and Store Preferences: noise reduction.
+- Mute in feed: local mute is acceptable if remote mute is unstable.
 
-## Coding Style & Naming Conventions
-- JavaScript/CSS only; use 2-space indentation and semicolons.
-- Prefer small, single-purpose functions and explicit guard clauses.
-- Naming:
-  - `camelCase` for variables/functions.
-  - `UPPER_SNAKE_CASE` for constants (e.g., `STORAGE_KEY`).
-  - Kebab-case filenames for content scripts (e.g., `wishlist-page.js`).
-- Keep selectors and Steam DOM assumptions centralized and easy to update.
+Integration posture:
+- Best effort for unstable/internal endpoints.
+- Cache first, backoff on failures, avoid burst traffic.
+- No credential storage; rely on browser session.
 
-## Testing Guidelines
-- Automated tests are not set up yet; rely on manual integration checks.
-- Minimum manual checklist for each change:
-  1. On a Steam app page, save game to an existing/new collection.
-  2. Validate insertion at beginning/end.
-  3. Confirm optional native wishlist click still works.
-  4. On wishlist page, filter by collection and verify visual ordering.
-  5. On collections page, verify source switch, sort, filters, CRUD menu, and refresh actions.
-- If adding test infrastructure later, place tests under `tests/` with `*.test.js` naming.
+## Canonical Model
+Primary unit: Game Entry (`appid` + local state).
 
-## Commit & Pull Request Guidelines
-- Follow Conventional Commits (`feat:`, `fix:`, `chore:`), consistent with existing history.
-- Keep commits focused and atomic.
-- PRs should include:
-  - clear summary of behavior changes,
-  - manual test evidence (steps + result),
-  - screenshots/GIFs for UI changes,
-  - linked issue when applicable.
+Required fields:
+- Identity: `appid`.
+- Metadata cache: title, capsule/header, tags, release status.
+- Steam-observed relations where available: wishlisted, followed, ignored.
+- Local user state: bucket, track, buy, notes, target price, labels.
+- Local signals: last seen news, last known discount, last review snapshot.
 
-## Security & Configuration Notes
-- Do not expand `host_permissions` beyond required Steam routes.
-- Do not commit personal Steam data or browser profile artifacts.
-- Treat stored wishlist metadata as local user data; avoid unnecessary collection of fields.
-- API/compliance posture:
-  - Prefer official Steam Web API/documented endpoints whenever possible.
-  - Keep request volume low (cache aggressively; avoid polling bursts and mass parallel requests).
-  - Do not implement abusive automation (bulk account actions, bot-like behavior, bypassing auth flows).
-  - Treat risk primarily as access throttling/integration breakage; still avoid patterns that could violate Steam terms.
+## MVP Delivery Plan
+### Milestone 1: Base + Persistence + Wishlist Import
+- Robust import and local persistence.
+- Searchable list view.
 
-## Wishlist Rank Strategy
-- Source of truth for wishlist rank is `IWishlistService/GetWishlist/v1`.
-- Use `priority` for ranking and `date_added` for wishlist-added date display.
-- Persist rank snapshot in `steamWishlistAddedMapV3`.
-- Refresh rank snapshot:
-  - once per day, or
-  - when wishlist membership changes.
-- Metadata enrichment (`wishlistdata`, `appdetails`, `appreviews`) must not block or override rank ordering.
+### Milestone 2: Inbox/Triage + Classification
+- Fast state transitions: Buy / Maybe / Track / Archive.
+- Add high-impact actions:
+  - Convert to Track (without losing item).
+  - Promote to Buy.
 
-## External Reference Baseline (SteamDB)
-- Primary implementation reference for upcoming work is the local clone at `../BrowserExtension`
-  (upstream: `https://github.com/SteamDatabase/BrowserExtension`).
-- Use this baseline for:
-  - content script organization and route segmentation,
-  - background message patterns and caching approach,
-  - UI injection conventions and DOM resilience patterns,
-  - build/test conventions (`web-ext`, lint/type-check flow).
-- Before introducing a new pattern in this repository, check whether an equivalent pattern already exists in
-  `../BrowserExtension/scripts`, `../BrowserExtension/styles`, or `../BrowserExtension/manifest.json`.
-- Keep this project scoped to Steam wishlist collections, but prefer SteamDB extension architecture/style decisions
-  whenever there is no strong reason to diverge.
+### Milestone 3: Track Feed
+- Feed/news sync with dedupe and cache.
+- Last 7/30 day filters.
+- Local mute and hide-muted filter.
 
-## MCP + Codex Guidance
-- MCP server entrypoint: `mcp/server.mjs` (run with `npm run mcp:server`).
-- Local MCP state file: `mcp/data/state.json` (or `SWM_MCP_DB_PATH` override).
-- Codex-powered query tool:
-  - `swm_query_games_with_codex`
-  - Requires `OPENAI_API_KEY`.
-  - Optional model override: `SWM_CODEX_MODEL` (default `gpt-5.1-codex-mini`).
-- Codex queries must only return `appIds` that exist in local MCP catalog (no external app insertion).
-- Keep prompts strict JSON-oriented and fail closed on invalid/non-JSON model output.
+### Milestone 4: Buy Radar
+- Target price per game.
+- "Reached target" and discount-aware ordering.
+- "Bought/Owned" flow to archive.
+
+## Architecture Rules
+- Keep `src/pages/collections.js` as orchestrator.
+- Put business logic into focused modules under `src/pages/`.
+- Separate concerns:
+  - Sync/parsing
+  - Local state
+  - Rendering/UI actions
+- Prefer resilient adapters around Steam endpoints.
+
+## Performance and Reliability
+- Must handle ~2000 items smoothly.
+- Use virtualization/pagination or equivalent rendering strategy.
+- Network failures must not corrupt local state.
+- Sync operations must be resumable and status-visible.
+
+## Commit and PR Standards
+- Conventional commits (`feat:`, `fix:`, `refactor:`, `chore:`).
+- Small, focused commits.
+- PR must include:
+  - behavior summary,
+  - test evidence,
+  - screenshots/videos for UI changes,
+  - noted risks/fallback behavior.
+
+## External Baseline
+Reference architecture and patterns from local SteamDB extension clone:
+- `../BrowserExtension`
+
+Use it for structure and resilience patterns when there is no strong reason to diverge.
+
+## MCP and Native Bridge Notes
+- MCP state DB default: `/tmp/steam-wishlist-manager-mcp-state.json`.
+- Native bridge snapshot default: `/tmp/steam-wishlist-manager-extension-bridge-snapshot.json`.
+- MCP should prioritize extension-origin local data.
+- Non-update MCP queries should read local cache/DB, not call Steam directly.
