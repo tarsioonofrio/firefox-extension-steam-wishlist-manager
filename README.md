@@ -57,6 +57,9 @@ Notes:
 - Dev (auto-reload): `npm run dev`
 - Build package: `npm run build`
 - Start MCP server (local JSON DB): `npm run mcp:server`
+- MCP direct CLI (debug/easier local use):
+  - `node mcp/server.mjs --list-tools`
+  - `node mcp/server.mjs --run-tool swm_get_sync_status '{}'`
 - Validate manifest: `npm run check:manifest`
 - Logic smoke test: `npm run test:logic`
 

@@ -1036,7 +1036,16 @@ const mcp = new McpServer({
   version: "0.2.0"
 });
 
-mcp.registerTool(
+const toolHandlers = new Map();
+const toolSchemas = new Map();
+
+function registerTool(name, config, handler) {
+  toolHandlers.set(name, handler);
+  toolSchemas.set(name, config?.inputSchema || {});
+  return mcp.registerTool(name, config, handler);
+}
+
+registerTool(
   "swm_list_collections",
   {
     description: "List static and/or dynamic collections.",
@@ -1077,7 +1086,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_create_static_collection",
   {
     description: "Create a static collection.",
@@ -1105,7 +1114,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_create_or_update_dynamic_collection",
   {
     description: "Create or update a dynamic collection definition.",
@@ -1142,7 +1151,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_add_item_to_collection",
   {
     description: "Add one app to a static collection without removing from others.",
@@ -1180,7 +1189,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_remove_item_from_collection",
   {
     description: "Remove one app from a static collection.",
@@ -1209,7 +1218,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_get_collection_items",
   {
     description: "Get items from a static collection.",
@@ -1238,7 +1247,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_import_extension_backup_json",
   {
     description: "Import extension backup JSON payload into MCP DB. Use mode=replace to fully replace or mode=merge to merge incrementally.",
@@ -1271,7 +1280,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_import_extension_backup_file",
   {
     description: "Import extension backup JSON file from disk into MCP DB.",
@@ -1305,7 +1314,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_sync_extension_state_incremental",
   {
     description: "Incrementally sync extension state JSON object (steamWishlistCollectionsState) into MCP DB.",
@@ -1332,7 +1341,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_query_games_with_codex",
   {
     description: "Use Codex to answer a natural-language query over local game catalog and return matching appIds.",
@@ -1358,7 +1367,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_refresh_wishlist_rank",
   {
     description: "Refresh wishlist rank (priority/date_added) from IWishlistService/GetWishlist/v1.",
@@ -1448,7 +1457,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_refresh_wishlist_data",
   {
     description: "Refresh wishlist page metadata from /wishlistdata endpoint.",
@@ -1532,7 +1541,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_refresh_appdetails",
   {
     description: "Refresh appdetails metadata for selected app ids.",
@@ -1670,7 +1679,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_refresh_frequencies",
   {
     description: "Recompute local frequency indexes from cached item metadata.",
@@ -1728,7 +1737,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_get_sync_status",
   {
     description: "Get latest sync status and high-level cache timestamps.",
@@ -1749,7 +1758,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_get_wishlist_snapshot",
   {
     description: "Get consolidated snapshot for UI consumption (rank + items + frequencies).",
@@ -2096,7 +2105,7 @@ async function runRefreshAllPipeline({
   };
 }
 
-mcp.registerTool(
+registerTool(
   "swm_refresh_all",
   {
     description: "Run full refresh pipeline: wishlist rank -> wishlist data -> appdetails -> frequencies.",
@@ -2134,7 +2143,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_refresh_all_resume",
   {
     description: "Resume last refresh pipeline using saved parameters from previous run.",
@@ -2155,7 +2164,7 @@ mcp.registerTool(
   }
 );
 
-mcp.registerTool(
+registerTool(
   "swm_refresh_all_status_verbose",
   {
     description: "Get verbose refresh-all status for UI dashboards.",
@@ -2219,8 +2228,53 @@ async function main() {
   await mcp.connect(transport);
 }
 
+async function runCliMode(argv) {
+  const args = Array.isArray(argv) ? argv.slice() : [];
+  if (args.includes("--list-tools")) {
+    const tools = Array.from(toolHandlers.keys()).sort();
+    console.log(JSON.stringify({ tools }, null, 2));
+    return;
+  }
+
+  const runIdx = args.indexOf("--run-tool");
+  if (runIdx >= 0) {
+    const name = String(args[runIdx + 1] || "").trim();
+    const rawArgs = String(args[runIdx + 2] || "{}");
+    if (!name) {
+      throw new Error("Missing tool name after --run-tool.");
+    }
+    const handler = toolHandlers.get(name);
+    if (!handler) {
+      throw new Error(`Tool not found: ${name}`);
+    }
+    let parsedArgs = {};
+    try {
+      parsedArgs = JSON.parse(rawArgs);
+    } catch {
+      throw new Error("Invalid JSON args for --run-tool.");
+    }
+    const schema = z.object(toolSchemas.get(name) || {}).passthrough();
+    const validatedArgs = schema.parse(parsedArgs || {});
+    const result = await handler(validatedArgs);
+    console.log(JSON.stringify(result?.structuredContent ?? result ?? {}, null, 2));
+    return;
+  }
+
+  console.log(
+    [
+      "Steam Wishlist Manager MCP",
+      "Usage:",
+      "  node mcp/server.mjs --list-tools",
+      "  node mcp/server.mjs --run-tool <tool-name> '{\"arg\":\"value\"}'"
+    ].join("\n")
+  );
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
-  main().catch((error) => {
+  const argv = process.argv.slice(2);
+  const isCliMode = argv.includes("--list-tools") || argv.includes("--run-tool");
+  const runner = isCliMode ? runCliMode(argv) : main();
+  runner.catch((error) => {
     console.error("MCP server error:", error);
     process.exit(1);
   });
