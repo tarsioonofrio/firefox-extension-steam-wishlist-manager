@@ -112,6 +112,7 @@ Available tools (v0.1):
 - `swm_import_extension_backup_json`
 - `swm_import_extension_backup_file`
 - `swm_sync_extension_state_incremental`
+- `swm_query_games_with_codex`
 
 Notes:
 - This is an initial MCP layer to start external automation/workflows.
@@ -120,6 +121,20 @@ Notes:
   - Export backup from Configurations page.
   - Import with `swm_import_extension_backup_file` (`mode=replace` first sync).
   - Use `swm_sync_extension_state_incremental` for upsert/incremental updates.
+
+Codex query setup:
+- Set API key before starting MCP server:
+  - `export OPENAI_API_KEY=...`
+- Optional model override:
+  - `export SWM_CODEX_MODEL=gpt-5.1-codex-mini`
+- Then use `swm_query_games_with_codex` with:
+  - `query`: natural-language request (for example: `jogos coop com desconto e boa review`)
+  - `limit`: max results
+
+Expected output:
+- `appIds`: selected games from local catalog only.
+- `suggestedCollectionName`: short suggested collection name.
+- `reason`: short explanation.
 
 ## Security / Compliance
 

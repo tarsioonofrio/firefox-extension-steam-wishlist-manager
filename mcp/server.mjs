@@ -16,6 +16,8 @@ const APP_ID_RE = /^\d{1,10}$/;
 const MAX_COLLECTION_NAME_LENGTH = 64;
 const MAX_ITEMS_PER_COLLECTION = 5000;
 const EXTENSION_STATE_KEY = "steamWishlistCollectionsState";
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const CODEX_MODEL = process.env.SWM_CODEX_MODEL || "gpt-5.1-codex-mini";
 
 const DEFAULT_STATE = {
   version: 1,
@@ -161,6 +163,108 @@ function parseBackupJsonToExtensionState(inputJson) {
     throw new Error(`Backup payload missing ${EXTENSION_STATE_KEY}.`);
   }
   return extensionState;
+}
+
+function buildGamesCatalog(state) {
+  const ids = new Set();
+  for (const appIds of Object.values(state.collections || {})) {
+    for (const appId of appIds || []) {
+      ids.add(String(appId));
+    }
+  }
+  for (const appId of Object.keys(state.items || {})) {
+    ids.add(String(appId));
+  }
+  const out = [];
+  for (const appId of ids) {
+    out.push({
+      appId,
+      title: String(state.items?.[appId]?.title || "")
+    });
+  }
+  return out.sort((a, b) => a.title.localeCompare(b.title, "pt-BR", { sensitivity: "base" }));
+}
+
+function parseJsonFromText(text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    throw new Error("Empty model response.");
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(raw.slice(start, end + 1));
+    }
+    throw new Error("Model response is not valid JSON.");
+  }
+}
+
+async function queryCodexForGames({ query, limit, catalog }) {
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not set.");
+  }
+
+  const safeLimit = Math.max(1, Math.min(100, Number(limit || 20)));
+  const compactCatalog = (Array.isArray(catalog) ? catalog : []).map((item) => ({
+    appId: String(item.appId || ""),
+    title: String(item.title || "")
+  }));
+
+  const systemPrompt = [
+    "You are a game-list assistant for a Steam wishlist manager.",
+    "Given a user query and a catalog of games, select the most relevant appIds.",
+    "Return STRICT JSON only with this shape:",
+    "{\"appIds\":[\"123\"],\"suggestedCollectionName\":\"name\",\"reason\":\"short\"}",
+    "Rules:",
+    "- appIds must come only from provided catalog.",
+    "- limit number of appIds to requested limit.",
+    "- keep reason concise (<= 200 chars)."
+  ].join("\n");
+
+  const userPrompt = JSON.stringify({
+    query: String(query || ""),
+    limit: safeLimit,
+    catalog: compactCatalog
+  });
+
+  const response = await fetch(OPENAI_RESPONSES_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      model: CODEX_MODEL,
+      input: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`OpenAI error (${response.status}): ${errText.slice(0, 300)}`);
+  }
+
+  const payload = await response.json();
+  const outputText = String(payload?.output_text || "").trim();
+  const parsed = parseJsonFromText(outputText);
+  const catalogSet = new Set(compactCatalog.map((item) => item.appId));
+  const appIds = Array.isArray(parsed?.appIds)
+    ? Array.from(new Set(parsed.appIds.map((id) => String(id || "").trim()).filter((id) => catalogSet.has(id))))
+    : [];
+
+  return {
+    appIds: appIds.slice(0, safeLimit),
+    suggestedCollectionName: String(parsed?.suggestedCollectionName || "Codex Results").trim().slice(0, 64),
+    reason: String(parsed?.reason || "").trim().slice(0, 200),
+    model: CODEX_MODEL
+  };
 }
 
 async function ensureDbDir() {
@@ -488,6 +592,32 @@ mcp.registerTool(
         collections: Object.keys(nextState.collections || {}).length,
         dynamicCollections: Object.keys(nextState.dynamicCollections || {}).length,
         items: Object.keys(nextState.items || {}).length
+      }
+    };
+  }
+);
+
+mcp.registerTool(
+  "swm_query_games_with_codex",
+  {
+    description: "Use Codex to answer a natural-language query over local game catalog and return matching appIds.",
+    inputSchema: {
+      query: z.string().min(2),
+      limit: z.number().int().min(1).max(100).default(20)
+    }
+  },
+  async ({ query, limit }) => {
+    const state = await readState();
+    const catalog = buildGamesCatalog(state);
+    if (catalog.length === 0) {
+      throw new Error("Catalog is empty. Import extension backup first.");
+    }
+    const result = await queryCodexForGames({ query, limit, catalog });
+    return {
+      content: [{ type: "text", text: `Codex selected ${result.appIds.length} games.` }],
+      structuredContent: {
+        query: String(query),
+        ...result
       }
     };
   }

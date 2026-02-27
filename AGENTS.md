@@ -105,3 +105,13 @@ This repository uses `web-ext` via npm scripts.
   `../BrowserExtension/scripts`, `../BrowserExtension/styles`, or `../BrowserExtension/manifest.json`.
 - Keep this project scoped to Steam wishlist collections, but prefer SteamDB extension architecture/style decisions
   whenever there is no strong reason to diverge.
+
+## MCP + Codex Guidance
+- MCP server entrypoint: `mcp/server.mjs` (run with `npm run mcp:server`).
+- Local MCP state file: `mcp/data/state.json` (or `SWM_MCP_DB_PATH` override).
+- Codex-powered query tool:
+  - `swm_query_games_with_codex`
+  - Requires `OPENAI_API_KEY`.
+  - Optional model override: `SWM_CODEX_MODEL` (default `gpt-5.1-codex-mini`).
+- Codex queries must only return `appIds` that exist in local MCP catalog (no external app insertion).
+- Keep prompts strict JSON-oriented and fail closed on invalid/non-JSON model output.
