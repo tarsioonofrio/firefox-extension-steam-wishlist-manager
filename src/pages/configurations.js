@@ -188,6 +188,23 @@ document.getElementById("refresh-db")?.addEventListener("click", async () => {
   }
 });
 
+document.getElementById("publish-bridge")?.addEventListener("click", async () => {
+  try {
+    setStatus("Publishing native bridge snapshot...");
+    const response = await browser.runtime.sendMessage({
+      type: "publish-native-bridge-snapshot",
+      reason: "configurations-page-manual"
+    });
+    if (!response?.ok) {
+      throw new Error(response?.error || "native bridge publish failed");
+    }
+    setStatus("Native bridge snapshot published.");
+  } catch (error) {
+    const message = String(error?.message || error || "native bridge publish failed");
+    setStatus(`Failed to publish native bridge snapshot: ${message}`, true);
+  }
+});
+
 document.getElementById("clear-db")?.addEventListener("click", async () => {
   const confirmed = window.confirm("This will remove all extension data (collections and cache). Continue?");
   if (!confirmed) {
