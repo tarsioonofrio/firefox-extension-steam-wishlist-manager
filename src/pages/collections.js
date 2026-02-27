@@ -57,6 +57,7 @@ let activeCollection = "__all__";
 let sourceMode = "collections";
 let page = 1;
 let searchQuery = "";
+let triageFilter = "all";
 let sortMode = "position";
 let viewMode = "card";
 
@@ -221,6 +222,45 @@ function formatUnixDate(timestamp) {
     return "-";
   }
   return new Date(n * 1000).toLocaleDateString("pt-BR");
+}
+
+function getItemIntentState(appId) {
+  const item = state?.items?.[appId] || {};
+  const track = Number(item.track || 0) > 0 ? 1 : 0;
+  const buyRaw = Number(item.buy || 0);
+  const buy = buyRaw >= 2 ? 2 : (buyRaw > 0 ? 1 : 0);
+  const bucketRaw = String(item.bucket || "").trim().toUpperCase();
+  const bucket = bucketRaw || (buy > 0 ? (buy >= 2 ? "BUY" : "MAYBE") : (track > 0 ? "TRACK" : "INBOX"));
+  return {
+    track,
+    buy,
+    bucket
+  };
+}
+
+function matchesTriageFilter(appId) {
+  const filter = String(triageFilter || "all").toLowerCase();
+  if (filter === "all") {
+    return true;
+  }
+  const intent = getItemIntentState(appId);
+  const bucket = String(intent.bucket || "INBOX").toLowerCase();
+  if (filter === "track") {
+    return bucket === "track";
+  }
+  if (filter === "buy") {
+    return bucket === "buy";
+  }
+  if (filter === "maybe") {
+    return bucket === "maybe";
+  }
+  if (filter === "archive") {
+    return bucket === "archive";
+  }
+  if (filter === "inbox") {
+    return bucket === "inbox";
+  }
+  return true;
 }
 
 function isWishlistRankReady(appIds = null) {
@@ -2944,7 +2984,7 @@ async function renderCards() {
     }
   }
 
-  const appIds = getFilteredAndSorted(sourceIds);
+  const appIds = getFilteredAndSorted(sourceIds).filter((appId) => matchesTriageFilter(appId));
   const manualReorderEnabled = canManualReorder();
   const activeOrder = getActiveCollectionOrder();
   const orderIndex = new Map();
@@ -3060,6 +3100,7 @@ async function renderCards() {
       appId,
       sourceMode,
       activeCollection,
+      itemIntent: getItemIntentState(appId),
       allCollectionNames: getStaticCollectionNames(),
       selectedCollectionNames: getCollectionsContainingApp(appId),
       setStatus,
@@ -3116,6 +3157,20 @@ async function renderCards() {
         await refreshState();
         quickPopulateFiltersFromCache();
         refreshFilterOptionsInBackground();
+        await render();
+      },
+      onSetIntent: async (id, intentPatch) => {
+        const titleForPatch = state?.items?.[id]?.title || metaCache?.[id]?.titleText || `App ${id}`;
+        const response = await browser.runtime.sendMessage({
+          type: "set-item-intent",
+          appId: id,
+          title: titleForPatch,
+          ...intentPatch
+        });
+        if (!response?.ok) {
+          throw new Error(String(response?.error || "Failed to update triage intent."));
+        }
+        await refreshState();
         await render();
       }
     });
@@ -3538,6 +3593,11 @@ function bindFilterControls() {
     },
     onRefreshPage: () => {
       refreshCurrentPageItems().catch(() => setStatus("Failed to refresh visible items.", true));
+    },
+    onTriageFilterChange: async (value) => {
+      triageFilter = String(value || "all");
+      page = 1;
+      await renderCards();
     }
   });
 

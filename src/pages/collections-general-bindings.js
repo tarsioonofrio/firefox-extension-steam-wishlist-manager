@@ -7,6 +7,7 @@
     const onTagShowMore = options?.onTagShowMore || (() => {});
     const onTextFilterInput = options?.onTextFilterInput || (() => {});
     const onRefreshPage = options?.onRefreshPage || (() => {});
+    const onTriageFilterChange = options?.onTriageFilterChange || (async () => {});
 
     document.getElementById("search-input")?.addEventListener("input", async (event) => {
       await onSearchInput(String(event.target.value || ""));
@@ -44,6 +45,10 @@
 
     document.getElementById("refresh-page-btn")?.addEventListener("click", () => {
       onRefreshPage();
+    });
+
+    document.getElementById("triage-filter-select")?.addEventListener("change", async (event) => {
+      await onTriageFilterChange(String(event.target.value || "all"));
     });
   }
 

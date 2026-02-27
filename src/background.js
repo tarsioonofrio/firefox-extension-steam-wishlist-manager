@@ -35,6 +35,7 @@ const MAX_COLLECTION_NAME_LENGTH = 64;
 const MAX_COLLECTIONS = 100;
 const MAX_ITEMS_PER_COLLECTION = 5000;
 const VALID_APP_ID_PATTERN = /^\d{1,10}$/;
+const VALID_BUCKETS = new Set(["INBOX", "TRACK", "MAYBE", "BUY", "ARCHIVE"]);
 let backgroundWishlistDomSyncInFlight = false;
 let nativeBridgePublishTimer = null;
 
@@ -185,10 +186,98 @@ function cleanupOrphanItems(state) {
   const referenced = getReferencedAppIds(state);
 
   for (const appId of Object.keys(state.items)) {
-    if (!referenced.has(appId)) {
+    if (!referenced.has(appId) && !hasItemTriageState(state.items[appId])) {
       delete state.items[appId];
     }
   }
+}
+
+function clamp01to2(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return fallback;
+  }
+  if (n <= 0) {
+    return 0;
+  }
+  if (n >= 2) {
+    return 2;
+  }
+  return 1;
+}
+
+function normalizeBucket(value, track = 0, buy = 0) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (VALID_BUCKETS.has(raw)) {
+    return raw;
+  }
+  if (buy > 0) {
+    return buy >= 2 ? "BUY" : "MAYBE";
+  }
+  if (track > 0) {
+    return "TRACK";
+  }
+  return "INBOX";
+}
+
+function sanitizeLabels(labels) {
+  if (!Array.isArray(labels)) {
+    return [];
+  }
+
+  const out = [];
+  const seen = new Set();
+  for (const raw of labels) {
+    const text = String(raw || "").replace(/\s+/g, " ").trim().slice(0, 32);
+    if (!text || seen.has(text)) {
+      continue;
+    }
+    seen.add(text);
+    out.push(text);
+  }
+  return out.slice(0, 12);
+}
+
+function normalizeItemRecord(appId, rawItem) {
+  const src = rawItem && typeof rawItem === "object" ? rawItem : {};
+  const track = clamp01to2(src.track, 0);
+  const buy = clamp01to2(src.buy, 0);
+  return {
+    appId,
+    title: String(src.title || "").slice(0, 200),
+    track,
+    buy,
+    bucket: normalizeBucket(src.bucket, track, buy),
+    note: String(src.note || "").slice(0, 600),
+    targetPriceCents: Number.isFinite(Number(src.targetPriceCents))
+      ? Math.max(0, Math.floor(Number(src.targetPriceCents)))
+      : null,
+    muted: Boolean(src.muted),
+    labels: sanitizeLabels(src.labels || []),
+    triagedAt: Number.isFinite(Number(src.triagedAt)) ? Number(src.triagedAt) : 0
+  };
+}
+
+function hasItemTriageState(item) {
+  if (!item || typeof item !== "object") {
+    return false;
+  }
+  const normalized = normalizeItemRecord(String(item.appId || ""), item);
+  return normalized.track > 0
+    || normalized.buy > 0
+    || normalized.bucket === "ARCHIVE"
+    || Boolean(normalized.note)
+    || Number.isFinite(Number(normalized.targetPriceCents))
+    || normalized.muted
+    || normalized.labels.length > 0;
+}
+
+function upsertStateItem(state, appId, patch = {}) {
+  const current = state.items?.[appId] || { appId };
+  state.items[appId] = normalizeItemRecord(appId, {
+    ...current,
+    ...patch
+  });
 }
 
 function sanitizeAppIdList(appIds) {
@@ -300,10 +389,18 @@ function normalizeState(rawState) {
   const normalizedItems = {};
   for (const appId of referencedAppIds) {
     const existing = state.items[appId] || {};
-    normalizedItems[appId] = {
-      appId,
-      title: String(existing.title || "")
-    };
+    normalizedItems[appId] = normalizeItemRecord(appId, existing);
+  }
+
+  for (const [rawAppId, rawItem] of Object.entries(state.items || {})) {
+    const appId = String(rawAppId || "").trim();
+    if (!VALID_APP_ID_PATTERN.test(appId) || normalizedItems[appId]) {
+      continue;
+    }
+    const normalized = normalizeItemRecord(appId, rawItem);
+    if (hasItemTriageState(normalized)) {
+      normalizedItems[appId] = normalized;
+    }
   }
 
   return {
@@ -1089,10 +1186,9 @@ browser.runtime.onMessage.addListener((message, sender) => {
           state.collections[collectionName] = state.collections[collectionName].slice(0, MAX_ITEMS_PER_COLLECTION);
         }
 
-        state.items[appId] = {
-          appId,
+        upsertStateItem(state, appId, {
           title: String(item.title || state.items[appId]?.title || "").slice(0, 200)
-        };
+        });
 
         await setState(state);
         return { ok: true, state };
@@ -1118,10 +1214,9 @@ browser.runtime.onMessage.addListener((message, sender) => {
           state.collections[collectionName] = list;
         }
 
-        state.items[appId] = {
-          appId,
+        upsertStateItem(state, appId, {
           title: String(item.title || state.items[appId]?.title || "").slice(0, 200)
-        };
+        });
 
         await setState(state);
         return { ok: true, state };
@@ -1201,16 +1296,55 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
         if (selectedCollectionNames.length > 0) {
           const item = message.item || {};
-          state.items[appId] = {
-            appId,
+          upsertStateItem(state, appId, {
             title: String(item.title || state.items[appId]?.title || "").slice(0, 200)
-          };
+          });
         } else {
           cleanupOrphanItems(state);
         }
 
         await setState(state);
         return { ok: true, state, selectedCollectionNames };
+      }
+
+      case "set-item-intent": {
+        const appId = String(message.appId || "").trim();
+        if (!appId) {
+          throw new Error("appId is required.");
+        }
+        validateAppId(appId);
+
+        const current = normalizeItemRecord(appId, state.items?.[appId] || {});
+        const nextTrack = message.track === undefined ? current.track : clamp01to2(message.track, current.track);
+        const nextBuy = message.buy === undefined ? current.buy : clamp01to2(message.buy, current.buy);
+        const nextBucket = normalizeBucket(
+          message.bucket === undefined ? current.bucket : message.bucket,
+          nextTrack,
+          nextBuy
+        );
+        const nextNote = message.note === undefined ? current.note : String(message.note || "").slice(0, 600);
+        const nextTargetPrice = message.targetPriceCents === undefined
+          ? current.targetPriceCents
+          : (Number.isFinite(Number(message.targetPriceCents))
+            ? Math.max(0, Math.floor(Number(message.targetPriceCents)))
+            : null);
+        const nextMuted = message.muted === undefined ? current.muted : Boolean(message.muted);
+        const nextLabels = message.labels === undefined ? current.labels : sanitizeLabels(message.labels);
+
+        upsertStateItem(state, appId, {
+          title: String(message.title || current.title || "").slice(0, 200),
+          track: nextTrack,
+          buy: nextBuy,
+          bucket: nextBucket,
+          note: nextNote,
+          targetPriceCents: nextTargetPrice,
+          muted: nextMuted,
+          labels: nextLabels,
+          triagedAt: Date.now()
+        });
+
+        await setState(state);
+        return { ok: true, item: state.items[appId], state };
       }
 
       case "batch-update-collection": {
@@ -1229,10 +1363,9 @@ browser.runtime.onMessage.addListener((message, sender) => {
         if (mode === "add") {
           for (const appId of appIds) {
             set.add(appId);
-            state.items[appId] = {
-              appId,
+            upsertStateItem(state, appId, {
               title: String(state.items[appId]?.title || "").slice(0, 200)
-            };
+            });
           }
         } else {
           for (const appId of appIds) {

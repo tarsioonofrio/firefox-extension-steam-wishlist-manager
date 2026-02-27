@@ -19,6 +19,14 @@
           <button id="collection-select-btn" type="button">Collection</button>
           <select id="collection-select" class="native-select-hidden"></select>
         </div>
+        <select id="triage-filter-select">
+          <option value="all">All states</option>
+          <option value="inbox">Inbox</option>
+          <option value="track">Track</option>
+          <option value="maybe">Maybe</option>
+          <option value="buy">Buy</option>
+          <option value="archive">Archive</option>
+        </select>
         <input id="search-input" type="search" placeholder="Search by title or appid">
         <button id="sort-menu-btn" type="button">Sort</button>
         <select id="sort-select" class="native-select-hidden">
@@ -280,6 +288,13 @@
           <p class="meta release">Release: -</p>
         </div>
         <div class="right-col">
+          <p class="meta triage-bucket">Bucket: INBOX</p>
+          <div class="triage-actions">
+            <button class="triage-buy-btn" type="button">Buy</button>
+            <button class="triage-maybe-btn" type="button">Maybe</button>
+            <button class="triage-track-btn" type="button">Track</button>
+            <button class="triage-archive-btn" type="button">Archive</button>
+          </div>
           <p class="meta wishlist-added">Wishlisted: -</p>
           <p class="meta pricing">Price: -</p>
           <p class="meta discount">Discount: -</p>

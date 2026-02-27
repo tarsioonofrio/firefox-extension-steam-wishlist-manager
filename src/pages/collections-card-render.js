@@ -70,6 +70,11 @@
       reviewEl: fragment.querySelector(".review"),
       releaseEl: fragment.querySelector(".release"),
       wishlistAddedEl: fragment.querySelector(".wishlist-added"),
+      triageBucketEl: fragment.querySelector(".triage-bucket"),
+      triageBuyBtn: fragment.querySelector(".triage-buy-btn"),
+      triageMaybeBtn: fragment.querySelector(".triage-maybe-btn"),
+      triageTrackBtn: fragment.querySelector(".triage-track-btn"),
+      triageArchiveBtn: fragment.querySelector(".triage-archive-btn"),
       refreshItemBtn: fragment.querySelector(".refresh-item-btn"),
       collectionsToggleBtn: fragment.querySelector(".collections-toggle-btn"),
       collectionsDropdown: fragment.querySelector(".collections-dropdown"),
@@ -113,8 +118,11 @@
     const activeCollection = String(options?.activeCollection || "__all__");
     const onRefreshItem = options?.onRefreshItem || (() => Promise.resolve());
     const onRemoveItem = options?.onRemoveItem || (() => Promise.resolve());
+    const onSetIntent = options?.onSetIntent || (() => Promise.resolve());
     const setStatus = options?.setStatus || (() => {});
     const confirmFn = options?.confirmFn || ((message) => window.confirm(message));
+    const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
+    const currentBucket = String(itemIntent.bucket || "INBOX").toUpperCase();
     if (!card) {
       return;
     }
@@ -122,6 +130,40 @@
     if (card.refreshItemBtn) {
       card.refreshItemBtn.addEventListener("click", () => {
         onRefreshItem(appId).catch(() => setStatus("Failed to refresh item.", true));
+      });
+    }
+
+    if (card.triageBucketEl) {
+      card.triageBucketEl.textContent = `Bucket: ${currentBucket}`;
+    }
+
+    const bucketByAction = {
+      buy: "BUY",
+      maybe: "MAYBE",
+      track: "TRACK",
+      archive: "ARCHIVE"
+    };
+    const triageActions = [
+      { key: "buy", btn: card.triageBuyBtn, track: 0, buy: 2 },
+      { key: "maybe", btn: card.triageMaybeBtn, track: 0, buy: 1 },
+      { key: "track", btn: card.triageTrackBtn, track: 1, buy: 0 },
+      { key: "archive", btn: card.triageArchiveBtn, track: 0, buy: 0 }
+    ];
+    for (const action of triageActions) {
+      if (!action.btn) {
+        continue;
+      }
+      action.btn.classList.toggle("active", currentBucket === bucketByAction[action.key]);
+      action.btn.addEventListener("click", async () => {
+        try {
+          await onSetIntent(appId, {
+            track: action.track,
+            buy: action.buy,
+            bucket: bucketByAction[action.key]
+          });
+        } catch (error) {
+          setStatus(String(error?.message || "Failed to update intent."), true);
+        }
       });
     }
 

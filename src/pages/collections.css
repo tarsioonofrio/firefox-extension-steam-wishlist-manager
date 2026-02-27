@@ -49,7 +49,7 @@ body {
 
 .top-controls {
   display: grid;
-  grid-template-columns: minmax(300px, auto) minmax(220px, 1fr) minmax(150px, auto) auto auto auto;
+  grid-template-columns: minmax(300px, auto) minmax(120px, auto) minmax(220px, 1fr) minmax(150px, auto) auto auto auto;
   gap: 8px;
   align-items: center;
   width: 100%;
@@ -616,6 +616,29 @@ main {
 
 .right-col .meta {
   margin: 1px 0;
+}
+
+.triage-bucket {
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.triage-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.triage-actions button {
+  height: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.triage-actions .active {
+  border-color: #6ca6ca;
+  background: #447196;
 }
 
 .right-col .remove-btn {
