@@ -23,6 +23,7 @@ Main goal: make prioritization practical without changing your Steam account dat
 - Includes triage workflow (`Promote`, `Track`, `Owned`) with local mute/unmute.
 - Adds virtual views (`Inbox`, `Track`, `Buy radar`, `Archive`) and Track time window (`7d`, `30d`, `all`).
 - Supports per-game target price and filter for games at/under target.
+- Highlights cards/rows when current price hits target.
 - Keeps all collection data local in your browser profile.
 
 ## What It Does Not Do

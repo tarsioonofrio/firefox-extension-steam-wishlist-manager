@@ -832,6 +832,17 @@ main {
   font-size: 11px;
 }
 
+.target-status.target-hit,
+.line-target.target-hit {
+  color: #a8e6b0;
+  font-weight: 600;
+}
+
+.card.target-hit,
+.line-row.target-hit {
+  box-shadow: inset 0 0 0 1px rgba(115, 190, 120, 0.65);
+}
+
 .line-btn {
   height: 22px;
   padding: 0 4px;

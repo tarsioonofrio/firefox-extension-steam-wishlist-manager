@@ -66,6 +66,7 @@
       appidEl: fragment.querySelector(".appid"),
       pricingEl: fragment.querySelector(".pricing"),
       discountEl: fragment.querySelector(".discount"),
+      targetStatusEl: fragment.querySelector(".target-status"),
       tagsRowEl: fragment.querySelector(".tags-row"),
       reviewEl: fragment.querySelector(".review"),
       releaseEl: fragment.querySelector(".release"),
@@ -206,6 +207,12 @@
           setStatus(String(error?.message || "Failed to toggle mute."), true);
         }
       });
+    }
+
+    if (card.targetStatusEl) {
+      card.targetStatusEl.textContent = targetPriceCents > 0
+        ? `Target: ${(targetPriceCents / 100).toFixed(2)}`
+        : "Target: -";
     }
 
     const parseTargetValueToCents = (raw) => {
@@ -402,6 +409,10 @@
     const appId = String(options?.appId || "");
     const hasStateTitle = Boolean(options?.hasStateTitle);
     const fetchMeta = options?.fetchMeta || (() => Promise.resolve({}));
+    const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
+    const targetPriceCents = Number.isFinite(Number(itemIntent.targetPriceCents))
+      ? Math.max(0, Math.floor(Number(itemIntent.targetPriceCents)))
+      : null;
     if (!card) {
       return;
     }
@@ -415,6 +426,24 @@
       }
       if (card.discountEl) {
         card.discountEl.textContent = `Discount: ${meta.discountText || "-"}`;
+      }
+      if (card.targetStatusEl) {
+        const priceLabel = String(meta?.priceText || "").trim().toLowerCase();
+        const priceKnown = priceLabel && priceLabel !== "-" && priceLabel !== "not announced";
+        const priceCents = Number(meta?.priceFinal || 0);
+        const hasTarget = Number.isFinite(targetPriceCents) && targetPriceCents > 0;
+        const hit = hasTarget && priceKnown && Number.isFinite(priceCents) && priceCents <= targetPriceCents;
+        if (hasTarget) {
+          card.targetStatusEl.textContent = hit
+            ? `Target: ${(targetPriceCents / 100).toFixed(2)} (hit)`
+            : `Target: ${(targetPriceCents / 100).toFixed(2)}`;
+        } else {
+          card.targetStatusEl.textContent = "Target: -";
+        }
+        card.targetStatusEl.classList.toggle("target-hit", hit);
+        if (card.cardEl) {
+          card.cardEl.classList.toggle("target-hit", hit);
+        }
       }
       if (card.reviewEl) {
         card.reviewEl.textContent = `Reviews: ${meta.reviewText || "-"}`;

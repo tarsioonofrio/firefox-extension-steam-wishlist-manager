@@ -269,6 +269,17 @@ function parseTrackWindowDays(value) {
   return 30;
 }
 
+function isPriceAtOrUnderTarget(meta, targetPriceCents) {
+  const targetCents = Number(targetPriceCents || 0);
+  if (!(targetCents > 0)) {
+    return false;
+  }
+  const priceLabel = String(meta?.priceText || "").trim().toLowerCase();
+  const priceKnown = priceLabel && priceLabel !== "-" && priceLabel !== "not announced";
+  const priceCents = Number(meta?.priceFinal || 0);
+  return Boolean(priceKnown && Number.isFinite(priceCents) && priceCents <= targetCents);
+}
+
 function matchesTriageFilter(appId) {
   const intent = getItemIntentState(appId);
   if (hideMuted && intent.muted) {
@@ -277,10 +288,7 @@ function matchesTriageFilter(appId) {
   if (onlyUnderTarget) {
     const targetCents = Number(intent.targetPriceCents || 0);
     const meta = metaCache?.[appId] || {};
-    const priceLabel = String(meta?.priceText || "").trim().toLowerCase();
-    const priceKnown = priceLabel && priceLabel !== "-" && priceLabel !== "not announced";
-    const priceCents = Number(meta?.priceFinal || 0);
-    if (!(targetCents > 0 && priceKnown && Number.isFinite(priceCents) && priceCents <= targetCents)) {
+    if (!isPriceAtOrUnderTarget(meta, targetCents)) {
       return false;
     }
   }
@@ -3428,6 +3436,22 @@ async function renderCards() {
         line.reviewEl.textContent = Number.isFinite(pct) && pct >= 0 ? `${pct}%` : "-";
         line.priceEl.textContent = meta?.priceText || "-";
         line.discountEl.textContent = meta?.discountText || "-";
+        const intent = getItemIntentState(appId);
+        const targetCents = Number(intent.targetPriceCents || 0);
+        const hit = isPriceAtOrUnderTarget(meta, targetCents);
+        if (line.targetEl) {
+          if (targetCents > 0) {
+            line.targetEl.textContent = hit
+              ? `Target: ${(targetCents / 100).toFixed(2)} (hit)`
+              : `Target: ${(targetCents / 100).toFixed(2)}`;
+          } else {
+            line.targetEl.textContent = "Target: -";
+          }
+          line.targetEl.classList.toggle("target-hit", hit);
+        }
+        if (line.row) {
+          line.row.classList.toggle("target-hit", hit);
+        }
       }).catch(() => {});
     }
     bindKeyboardFocusClickTargets();
