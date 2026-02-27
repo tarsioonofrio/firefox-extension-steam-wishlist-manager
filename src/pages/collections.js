@@ -3201,10 +3201,18 @@ function createLineRow(options) {
 function renderBatchMenuState() {
   const btn = document.getElementById("batch-menu-btn");
   const collectionSelect = document.getElementById("batch-collection-select");
+  const batchHint = document.getElementById("batch-shortcuts-hint");
   if (btn) {
     const count = batchSelectedIds.size;
     btn.textContent = count > 0 ? `Batch (${count})` : "Batch";
     btn.classList.toggle("active", batchMode);
+  }
+  if (batchHint) {
+    const count = batchSelectedIds.size;
+    batchHint.textContent = count > 0
+      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Promote, Shift+2 Track, Shift+3 Owned, Shift+4 Mute, Shift+5 Unmute`
+      : "Batch mode active | Select cards to use shortcuts: Shift+1 Promote, Shift+2 Track, Shift+3 Owned, Shift+4 Mute, Shift+5 Unmute";
+    batchHint.classList.toggle("hidden", !batchMode);
   }
   if (collectionSelect) {
     const names = getStaticCollectionNames();
