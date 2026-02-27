@@ -1379,6 +1379,41 @@ browser.runtime.onMessage.addListener((message, sender) => {
         return { ok: true, updated: appIds.length, state };
       }
 
+      case "batch-set-item-intent": {
+        const appIds = sanitizeAppIdList(message.appIds);
+        if (appIds.length === 0) {
+          return { ok: true, updated: 0, state };
+        }
+
+        const ts = Date.now();
+        for (const appId of appIds) {
+          const current = normalizeItemRecord(appId, state.items?.[appId] || {});
+          const nextTrack = message.track === undefined ? current.track : clamp01to2(message.track, current.track);
+          const nextBuy = message.buy === undefined ? current.buy : clamp01to2(message.buy, current.buy);
+          const nextBucket = normalizeBucket(
+            message.bucket === undefined ? current.bucket : message.bucket,
+            nextTrack,
+            nextBuy
+          );
+          const nextMuted = message.muted === undefined ? current.muted : Boolean(message.muted);
+
+          upsertStateItem(state, appId, {
+            title: String(message.title || current.title || "").slice(0, 200),
+            track: nextTrack,
+            buy: nextBuy,
+            bucket: nextBucket,
+            note: current.note,
+            targetPriceCents: current.targetPriceCents,
+            muted: nextMuted,
+            labels: current.labels,
+            triagedAt: ts
+          });
+        }
+
+        await setState(state);
+        return { ok: true, updated: appIds.length, state };
+      }
+
       case "set-collection-items-order": {
         const collectionName = normalizeCollectionName(message.collectionName || "");
         if (!collectionName || !state.collections[collectionName]) {

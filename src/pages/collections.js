@@ -3243,6 +3243,37 @@ async function applyBatchRemoveFromCurrentCollection() {
   setStatus("Selected games removed from current collection.");
 }
 
+async function applyBatchIntent(intentPatch, successMessage, requireConfirm = false, confirmMessage = "") {
+  if (!batchMode) {
+    toggleBatchMode(true);
+  }
+  if (batchSelectedIds.size === 0) {
+    setStatus("Select one or more cards for batch action.", true);
+    return;
+  }
+  if (requireConfirm) {
+    const confirmed = window.confirm(confirmMessage || "Apply batch action to selected games?");
+    if (!confirmed) {
+      return;
+    }
+  }
+
+  const payload = {
+    type: "batch-set-item-intent",
+    appIds: Array.from(batchSelectedIds),
+    ...intentPatch
+  };
+  const response = await browser.runtime.sendMessage(payload);
+  if (!response?.ok) {
+    throw new Error(String(response?.error || "Failed to apply batch intent action."));
+  }
+
+  batchSelectedIds.clear();
+  await refreshState();
+  await render();
+  setStatus(successMessage || "Batch action applied.");
+}
+
 function getCollectionsContainingApp(appId) {
   const out = [];
   for (const collectionName of Object.keys(state?.collections || {})) {
@@ -3915,6 +3946,11 @@ function bindBatchControls() {
   const batchBtn = document.getElementById("batch-menu-btn");
   const addActionBtn = document.getElementById("batch-action-add");
   const removeActionBtn = document.getElementById("batch-action-remove");
+  const promoteActionBtn = document.getElementById("batch-action-promote");
+  const trackActionBtn = document.getElementById("batch-action-track");
+  const ownedActionBtn = document.getElementById("batch-action-owned");
+  const muteActionBtn = document.getElementById("batch-action-mute");
+  const unmuteActionBtn = document.getElementById("batch-action-unmute");
   const addForm = document.getElementById("batch-add-form");
   const collectionSelect = document.getElementById("batch-collection-select");
   const addApplyBtn = document.getElementById("batch-add-apply-btn");
@@ -3954,6 +3990,43 @@ function bindBatchControls() {
 
   removeActionBtn?.addEventListener("click", () => {
     applyBatchRemoveFromCurrentCollection().catch(() => setStatus("Failed to apply batch remove.", true));
+  });
+
+  promoteActionBtn?.addEventListener("click", () => {
+    applyBatchIntent(
+      { track: 0, buy: 2, bucket: "BUY" },
+      "Selected games promoted to Buy radar."
+    ).catch(() => setStatus("Failed to apply batch promote.", true));
+  });
+
+  trackActionBtn?.addEventListener("click", () => {
+    applyBatchIntent(
+      { track: 1, buy: 0, bucket: "TRACK" },
+      "Selected games converted to Track."
+    ).catch(() => setStatus("Failed to apply batch track.", true));
+  });
+
+  ownedActionBtn?.addEventListener("click", () => {
+    applyBatchIntent(
+      { track: 0, buy: 0, bucket: "ARCHIVE" },
+      "Selected games archived as owned.",
+      true,
+      `Archive ${batchSelectedIds.size} selected game(s) as owned?`
+    ).catch(() => setStatus("Failed to apply batch owned action.", true));
+  });
+
+  muteActionBtn?.addEventListener("click", () => {
+    applyBatchIntent(
+      { muted: true },
+      "Selected games muted."
+    ).catch(() => setStatus("Failed to apply batch mute.", true));
+  });
+
+  unmuteActionBtn?.addEventListener("click", () => {
+    applyBatchIntent(
+      { muted: false },
+      "Selected games unmuted."
+    ).catch(() => setStatus("Failed to apply batch unmute.", true));
   });
 }
 

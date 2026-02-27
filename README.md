@@ -19,6 +19,7 @@ Main goal: make prioritization practical without changing your Steam account dat
 - Reads your wishlist rank from Steam API (`Your rank`), and enriches game metadata locally.
 - Lets you add/remove a game to/from static collections from card and line views.
 - Supports batch add/remove for multiple visible games.
+- Supports batch triage actions (`Promote`, `Track`, `Owned`, `Mute`, `Unmute`).
 - Supports saved dynamic collections based on current filters/sort.
 - Includes triage workflow (`Promote`, `Track`, `Owned`) with local mute/unmute.
 - Adds virtual views (`Inbox`, `Track`, `Buy radar`, `Archive`) and Track time window (`7d`, `30d`, `all`).
