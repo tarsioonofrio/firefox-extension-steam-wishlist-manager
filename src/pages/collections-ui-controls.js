@@ -6,7 +6,13 @@
     const wishlistCount = Number(options?.wishlistCount || 0);
     const wishlistSelectValue = String(options?.wishlistSelectValue || "__wishlist__");
     const inboxSelectValue = String(options?.inboxSelectValue || "__inbox__");
+    const trackSelectValue = String(options?.trackSelectValue || "__track__");
+    const buySelectValue = String(options?.buySelectValue || "__buy__");
+    const archiveSelectValue = String(options?.archiveSelectValue || "__archive__");
     const inboxCount = Number(options?.inboxCount || 0);
+    const trackCount = Number(options?.trackCount || 0);
+    const buyCount = Number(options?.buyCount || 0);
+    const archiveCount = Number(options?.archiveCount || 0);
     const collectionSizes = options?.collectionSizes || {};
     const dynamicNames = new Set(Array.isArray(options?.dynamicNames) ? options.dynamicNames : []);
 
@@ -29,6 +35,21 @@
     inboxOption.value = inboxSelectValue;
     inboxOption.textContent = `Inbox (${inboxCount})`;
     select.appendChild(inboxOption);
+
+    const trackOption = document.createElement("option");
+    trackOption.value = trackSelectValue;
+    trackOption.textContent = `Track (${trackCount})`;
+    select.appendChild(trackOption);
+
+    const buyOption = document.createElement("option");
+    buyOption.value = buySelectValue;
+    buyOption.textContent = `Buy radar (${buyCount})`;
+    select.appendChild(buyOption);
+
+    const archiveOption = document.createElement("option");
+    archiveOption.value = archiveSelectValue;
+    archiveOption.textContent = `Archive (${archiveCount})`;
+    select.appendChild(archiveOption);
 
     const allOption = document.createElement("option");
     allOption.value = "__all__";

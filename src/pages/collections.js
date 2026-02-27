@@ -32,6 +32,9 @@ const SAFE_FETCH_FORCE_BASE_DELAY_MS = 700;
 const SAFE_FETCH_FORCE_JITTER_MS = 500;
 const WISHLIST_SELECT_VALUE = "__wishlist__";
 const INBOX_SELECT_VALUE = "__inbox__";
+const TRACK_SELECT_VALUE = "__track__";
+const BUY_SELECT_VALUE = "__buy__";
+const ARCHIVE_SELECT_VALUE = "__archive__";
 const RELEASE_YEAR_DEFAULT_MIN = 2010;
 const steamFetchUtils = window.SWMSteamFetch;
 // Source baseline: SteamDB tags taxonomy (static seed for fast first render).
@@ -290,6 +293,14 @@ function isDynamicCollectionName(name) {
   return Boolean(state?.dynamicCollections?.[key]);
 }
 
+function isVirtualCollectionSelection(name) {
+  const key = String(name || "").trim();
+  return key === INBOX_SELECT_VALUE
+    || key === TRACK_SELECT_VALUE
+    || key === BUY_SELECT_VALUE
+    || key === ARCHIVE_SELECT_VALUE;
+}
+
 function getStaticCollectionNames() {
   return (state?.collectionOrder || []).filter((name) => {
     if (isDynamicCollectionName(name)) {
@@ -464,6 +475,40 @@ function getCurrentSourceAppIds() {
     for (const appId of Object.keys(state.items || {})) {
       const intent = getItemIntentState(appId);
       if (String(intent.bucket || "INBOX").toUpperCase() === "INBOX") {
+        out.push(appId);
+      }
+    }
+    return out;
+  }
+
+  if (activeCollection === TRACK_SELECT_VALUE) {
+    const out = [];
+    for (const appId of Object.keys(state.items || {})) {
+      const intent = getItemIntentState(appId);
+      if (String(intent.bucket || "INBOX").toUpperCase() === "TRACK") {
+        out.push(appId);
+      }
+    }
+    return out;
+  }
+
+  if (activeCollection === BUY_SELECT_VALUE) {
+    const out = [];
+    for (const appId of Object.keys(state.items || {})) {
+      const intent = getItemIntentState(appId);
+      const bucket = String(intent.bucket || "INBOX").toUpperCase();
+      if (bucket === "BUY" || bucket === "MAYBE") {
+        out.push(appId);
+      }
+    }
+    return out;
+  }
+
+  if (activeCollection === ARCHIVE_SELECT_VALUE) {
+    const out = [];
+    for (const appId of Object.keys(state.items || {})) {
+      const intent = getItemIntentState(appId);
+      if (String(intent.bucket || "INBOX").toUpperCase() === "ARCHIVE") {
         out.push(appId);
       }
     }
@@ -2733,9 +2778,25 @@ function renderCollectionSelect() {
     wishlistCount: Object.keys(wishlistAddedMap || {}).length,
     wishlistSelectValue: WISHLIST_SELECT_VALUE,
     inboxSelectValue: INBOX_SELECT_VALUE,
+    trackSelectValue: TRACK_SELECT_VALUE,
+    buySelectValue: BUY_SELECT_VALUE,
+    archiveSelectValue: ARCHIVE_SELECT_VALUE,
     inboxCount: Object.keys(state?.items || {}).filter((appId) => {
       const intent = getItemIntentState(appId);
       return String(intent.bucket || "INBOX").toUpperCase() === "INBOX";
+    }).length,
+    trackCount: Object.keys(state?.items || {}).filter((appId) => {
+      const intent = getItemIntentState(appId);
+      return String(intent.bucket || "INBOX").toUpperCase() === "TRACK";
+    }).length,
+    buyCount: Object.keys(state?.items || {}).filter((appId) => {
+      const intent = getItemIntentState(appId);
+      const bucket = String(intent.bucket || "INBOX").toUpperCase();
+      return bucket === "BUY" || bucket === "MAYBE";
+    }).length,
+    archiveCount: Object.keys(state?.items || {}).filter((appId) => {
+      const intent = getItemIntentState(appId);
+      return String(intent.bucket || "INBOX").toUpperCase() === "ARCHIVE";
     }).length,
     collectionSizes: dynamicCollectionSizes,
     dynamicNames: Object.keys(state?.dynamicCollections || {})
@@ -3444,7 +3505,9 @@ async function render() {
   renderViewMenu();
   renderCollectionSelect();
   renderBatchMenuState();
-  const canRenameCurrent = sourceMode !== "wishlist" && activeCollection !== "__all__" && activeCollection !== INBOX_SELECT_VALUE;
+  const canRenameCurrent = sourceMode !== "wishlist"
+    && activeCollection !== "__all__"
+    && !isVirtualCollectionSelection(activeCollection);
   if (renameActionBtn) {
     renameActionBtn.disabled = !canRenameCurrent;
   }
@@ -3562,7 +3625,14 @@ function resetAllFiltersState() {
 }
 
 async function handleCollectionChange(value) {
-  const resolved = actionsUtils.resolveCollectionSelection(value, WISHLIST_SELECT_VALUE, INBOX_SELECT_VALUE);
+  const resolved = actionsUtils.resolveCollectionSelection(
+    value,
+    WISHLIST_SELECT_VALUE,
+    INBOX_SELECT_VALUE,
+    TRACK_SELECT_VALUE,
+    BUY_SELECT_VALUE,
+    ARCHIVE_SELECT_VALUE
+  );
   sourceMode = resolved.sourceMode;
   activeCollection = resolved.activeCollection;
   page = resolved.page;
