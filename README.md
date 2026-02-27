@@ -20,6 +20,10 @@ Main goal: make prioritization practical without changing your Steam account dat
 - Lets you add/remove a game to/from static collections from card and line views.
 - Supports batch add/remove for multiple visible games.
 - Supports batch triage actions (`Promote`, `Track`, `Owned`, `Mute`, `Unmute`).
+- Keyboard shortcuts:
+  - Navigation: `j` / `k`
+  - Triage focused item: `1` Track, `2` Maybe, `3` Buy, `4` Archive
+  - Batch triage on selected items: `Shift+1` Promote, `Shift+2` Track, `Shift+3` Owned, `Shift+4` Mute, `Shift+5` Unmute
 - Supports saved dynamic collections based on current filters/sort.
 - Includes triage workflow (`Promote`, `Track`, `Owned`) with local mute/unmute.
 - Adds virtual views (`Inbox`, `Track`, `Buy radar`, `Archive`) and Track time window (`7d`, `30d`, `all`).

@@ -1490,6 +1490,49 @@ async function handleKeyboardTriageIntent(actionKey) {
   setStatus(`Updated ${appId} -> ${patch.bucket}`);
 }
 
+async function handleKeyboardBatchIntent(actionCode) {
+  if (!batchMode || batchSelectedIds.size === 0) {
+    setStatus("Batch shortcut needs active batch mode with selected items.", true);
+    return;
+  }
+  if (actionCode === "Digit1") {
+    await applyBatchIntent(
+      { track: 0, buy: 2, bucket: "BUY" },
+      "Selected games promoted to Buy radar."
+    );
+    return;
+  }
+  if (actionCode === "Digit2") {
+    await applyBatchIntent(
+      { track: 1, buy: 0, bucket: "TRACK" },
+      "Selected games converted to Track."
+    );
+    return;
+  }
+  if (actionCode === "Digit3") {
+    await applyBatchIntent(
+      { track: 0, buy: 0, bucket: "ARCHIVE" },
+      "Selected games archived as owned.",
+      true,
+      `Archive ${batchSelectedIds.size} selected game(s) as owned?`
+    );
+    return;
+  }
+  if (actionCode === "Digit4") {
+    await applyBatchIntent(
+      { muted: true },
+      "Selected games muted."
+    );
+    return;
+  }
+  if (actionCode === "Digit5") {
+    await applyBatchIntent(
+      { muted: false },
+      "Selected games unmuted."
+    );
+  }
+}
+
 function bindKeyboardShortcuts() {
   document.addEventListener("keydown", (event) => {
     if (!currentRenderedPageIds.length) {
@@ -1503,6 +1546,12 @@ function bindKeyboardShortcuts() {
     }
 
     const key = String(event.key || "").toLowerCase();
+    const code = String(event.code || "");
+    if (event.shiftKey && (code === "Digit1" || code === "Digit2" || code === "Digit3" || code === "Digit4" || code === "Digit5")) {
+      event.preventDefault();
+      handleKeyboardBatchIntent(code).catch(() => setStatus("Failed to apply batch shortcut.", true));
+      return;
+    }
     if (key === "j") {
       event.preventDefault();
       keyboardFocusIndex = clampFocusIndex(keyboardFocusIndex + 1, currentRenderedPageIds.length);
