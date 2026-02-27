@@ -647,6 +647,19 @@ main {
   background: #447196;
 }
 
+.workflow-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.workflow-actions button {
+  height: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
 .right-col .remove-btn {
   display: block;
   margin-left: auto;
@@ -772,11 +785,18 @@ main {
 
 .line-left {
   display: inline-grid;
-  grid-template-columns: 28px 28px auto auto;
+  grid-template-columns: 28px 28px auto auto auto;
   gap: 4px;
   align-items: center;
   width: fit-content;
   position: relative;
+}
+
+.line-workflow-actions {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 4px;
+  align-items: center;
 }
 
 .line-btn {

@@ -75,6 +75,9 @@
       triageMaybeBtn: fragment.querySelector(".triage-maybe-btn"),
       triageTrackBtn: fragment.querySelector(".triage-track-btn"),
       triageArchiveBtn: fragment.querySelector(".triage-archive-btn"),
+      wfPromoteBtn: fragment.querySelector(".wf-promote-btn"),
+      wfConvertTrackBtn: fragment.querySelector(".wf-convert-track-btn"),
+      wfOwnedBtn: fragment.querySelector(".wf-owned-btn"),
       refreshItemBtn: fragment.querySelector(".refresh-item-btn"),
       collectionsToggleBtn: fragment.querySelector(".collections-toggle-btn"),
       collectionsDropdown: fragment.querySelector(".collections-dropdown"),
@@ -163,6 +166,25 @@
           });
         } catch (error) {
           setStatus(String(error?.message || "Failed to update intent."), true);
+        }
+      });
+    }
+
+    const workflowActions = [
+      { btn: card.wfPromoteBtn, patch: { track: 0, buy: 2, bucket: "BUY" }, ok: "Promoted to Buy radar." },
+      { btn: card.wfConvertTrackBtn, patch: { track: 1, buy: 0, bucket: "TRACK" }, ok: "Converted to Track." },
+      { btn: card.wfOwnedBtn, patch: { track: 0, buy: 0, bucket: "ARCHIVE" }, ok: "Archived as owned." }
+    ];
+    for (const entry of workflowActions) {
+      if (!entry.btn) {
+        continue;
+      }
+      entry.btn.addEventListener("click", async () => {
+        try {
+          await onSetIntent(appId, entry.patch);
+          setStatus(entry.ok);
+        } catch (error) {
+          setStatus(String(error?.message || "Failed to apply workflow action."), true);
         }
       });
     }

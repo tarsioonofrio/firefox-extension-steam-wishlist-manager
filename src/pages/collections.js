@@ -2836,6 +2836,7 @@ function createLineRow(options) {
   const allCollectionNames = Array.isArray(options?.allCollectionNames) ? options.allCollectionNames : [];
   const selectedCollectionNames = new Set(Array.isArray(options?.selectedCollectionNames) ? options.selectedCollectionNames : []);
   const onToggleCollection = options?.onToggleCollection || (() => Promise.resolve());
+  const onSetIntent = options?.onSetIntent || (() => Promise.resolve());
 
   const row = document.createElement("article");
   row.className = "line-row";
@@ -2946,6 +2947,44 @@ function createLineRow(options) {
   collectionsDropdown.addEventListener("click", (event) => event.stopPropagation());
   row.addEventListener("click", () => collectionsDropdown.classList.add("hidden"));
   left.appendChild(collectionsDropdown);
+
+  const wfWrap = document.createElement("div");
+  wfWrap.className = "line-workflow-actions";
+
+  const promoteBtn = document.createElement("button");
+  promoteBtn.type = "button";
+  promoteBtn.className = "line-btn";
+  promoteBtn.textContent = "Promote";
+  promoteBtn.addEventListener("click", () => {
+    onSetIntent(appId, { track: 0, buy: 2, bucket: "BUY" })
+      .then(() => setStatus("Promoted to Buy radar."))
+      .catch(() => setStatus("Failed to promote item.", true));
+  });
+
+  const trackBtn = document.createElement("button");
+  trackBtn.type = "button";
+  trackBtn.className = "line-btn";
+  trackBtn.textContent = "Track";
+  trackBtn.addEventListener("click", () => {
+    onSetIntent(appId, { track: 1, buy: 0, bucket: "TRACK" })
+      .then(() => setStatus("Converted to Track."))
+      .catch(() => setStatus("Failed to convert item to track.", true));
+  });
+
+  const ownedBtn = document.createElement("button");
+  ownedBtn.type = "button";
+  ownedBtn.className = "line-btn";
+  ownedBtn.textContent = "Owned";
+  ownedBtn.addEventListener("click", () => {
+    onSetIntent(appId, { track: 0, buy: 0, bucket: "ARCHIVE" })
+      .then(() => setStatus("Archived as owned."))
+      .catch(() => setStatus("Failed to archive item.", true));
+  });
+
+  wfWrap.appendChild(promoteBtn);
+  wfWrap.appendChild(trackBtn);
+  wfWrap.appendChild(ownedBtn);
+  left.appendChild(wfWrap);
 
   const center = document.createElement("div");
   center.className = "line-center";
@@ -3271,6 +3310,7 @@ async function renderCards() {
           setStatus(`Collection ${checked ? "added" : "removed"}: ${collectionName}`);
         },
         maxPositionDigits,
+        onSetIntent: (id, intentPatch) => setItemIntent(id, intentPatch),
         setStatus
       });
       cardsEl.appendChild(line.row);
