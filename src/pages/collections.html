@@ -31,6 +31,10 @@
           <input id="hide-muted-checkbox" type="checkbox">
           <span>Hide muted</span>
         </label>
+        <label class="top-toggle">
+          <input id="under-target-checkbox" type="checkbox">
+          <span>At/under target</span>
+        </label>
         <select id="track-window-select" class="hidden">
           <option value="7">Track: last 7d</option>
           <option value="30">Track: last 30d</option>
@@ -313,6 +317,11 @@
           <p class="meta wishlist-added">Wishlisted: -</p>
           <p class="meta pricing">Price: -</p>
           <p class="meta discount">Discount: -</p>
+          <div class="target-price-row">
+            <input class="target-price-input" type="number" min="0" step="0.01" placeholder="Target">
+            <button class="target-save-btn" type="button">Save</button>
+            <button class="target-clear-btn" type="button">Clear</button>
+          </div>
           <button class="remove-btn" type="button">Remove</button>
         </div>
       </div>

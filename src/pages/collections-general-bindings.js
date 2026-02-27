@@ -9,6 +9,7 @@
     const onRefreshPage = options?.onRefreshPage || (() => {});
     const onTriageFilterChange = options?.onTriageFilterChange || (async () => {});
     const onHideMutedChange = options?.onHideMutedChange || (async () => {});
+    const onUnderTargetChange = options?.onUnderTargetChange || (async () => {});
     const onTrackWindowChange = options?.onTrackWindowChange || (async () => {});
 
     document.getElementById("search-input")?.addEventListener("input", async (event) => {
@@ -55,6 +56,10 @@
 
     document.getElementById("hide-muted-checkbox")?.addEventListener("change", async (event) => {
       await onHideMutedChange(Boolean(event.target.checked));
+    });
+
+    document.getElementById("under-target-checkbox")?.addEventListener("change", async (event) => {
+      await onUnderTargetChange(Boolean(event.target.checked));
     });
 
     document.getElementById("track-window-select")?.addEventListener("change", async (event) => {

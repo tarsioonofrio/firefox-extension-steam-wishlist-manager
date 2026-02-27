@@ -79,6 +79,9 @@
       wfConvertTrackBtn: fragment.querySelector(".wf-convert-track-btn"),
       wfOwnedBtn: fragment.querySelector(".wf-owned-btn"),
       wfMuteBtn: fragment.querySelector(".wf-mute-btn"),
+      targetPriceInput: fragment.querySelector(".target-price-input"),
+      targetSaveBtn: fragment.querySelector(".target-save-btn"),
+      targetClearBtn: fragment.querySelector(".target-clear-btn"),
       refreshItemBtn: fragment.querySelector(".refresh-item-btn"),
       collectionsToggleBtn: fragment.querySelector(".collections-toggle-btn"),
       collectionsDropdown: fragment.querySelector(".collections-dropdown"),
@@ -128,6 +131,9 @@
     const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
     const currentBucket = String(itemIntent.bucket || "INBOX").toUpperCase();
     const isMuted = Boolean(itemIntent.muted);
+    const targetPriceCents = Number.isFinite(Number(itemIntent.targetPriceCents))
+      ? Math.max(0, Math.floor(Number(itemIntent.targetPriceCents)))
+      : null;
     if (!card) {
       return;
     }
@@ -198,6 +204,65 @@
           setStatus(isMuted ? "Unmuted." : "Muted.");
         } catch (error) {
           setStatus(String(error?.message || "Failed to toggle mute."), true);
+        }
+      });
+    }
+
+    const parseTargetValueToCents = (raw) => {
+      const normalized = String(raw || "").trim().replace(",", ".");
+      if (!normalized) {
+        return null;
+      }
+      const amount = Number(normalized);
+      if (!Number.isFinite(amount) || amount < 0) {
+        return null;
+      }
+      return Math.round(amount * 100);
+    };
+    if (card.targetPriceInput) {
+      card.targetPriceInput.value = Number.isFinite(targetPriceCents) && targetPriceCents > 0
+        ? String((targetPriceCents / 100).toFixed(2))
+        : "";
+      card.targetPriceInput.addEventListener("keydown", async (event) => {
+        if (event.key !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        const nextTarget = parseTargetValueToCents(card.targetPriceInput.value);
+        if (nextTarget === null) {
+          setStatus("Enter a valid target price (for example: 59.90).", true);
+          return;
+        }
+        try {
+          await onSetIntent(appId, { targetPriceCents: nextTarget });
+          setStatus("Target price saved.");
+        } catch (error) {
+          setStatus(String(error?.message || "Failed to save target price."), true);
+        }
+      });
+    }
+    if (card.targetSaveBtn) {
+      card.targetSaveBtn.addEventListener("click", async () => {
+        const nextTarget = parseTargetValueToCents(card.targetPriceInput?.value || "");
+        if (nextTarget === null) {
+          setStatus("Enter a valid target price (for example: 59.90).", true);
+          return;
+        }
+        try {
+          await onSetIntent(appId, { targetPriceCents: nextTarget });
+          setStatus("Target price saved.");
+        } catch (error) {
+          setStatus(String(error?.message || "Failed to save target price."), true);
+        }
+      });
+    }
+    if (card.targetClearBtn) {
+      card.targetClearBtn.addEventListener("click", async () => {
+        try {
+          await onSetIntent(appId, { targetPriceCents: null });
+          setStatus("Target price cleared.");
+        } catch (error) {
+          setStatus(String(error?.message || "Failed to clear target price."), true);
         }
       });
     }

@@ -63,6 +63,7 @@ let page = 1;
 let searchQuery = "";
 let triageFilter = "all";
 let hideMuted = false;
+let onlyUnderTarget = false;
 let trackWindowDays = 30;
 let sortMode = "position";
 let viewMode = "card";
@@ -239,11 +240,15 @@ function getItemIntentState(appId) {
   const bucketRaw = String(item.bucket || "").trim().toUpperCase();
   const bucket = bucketRaw || (buy > 0 ? (buy >= 2 ? "BUY" : "MAYBE") : (track > 0 ? "TRACK" : "INBOX"));
   const muted = Boolean(item.muted);
+  const targetPriceCents = Number.isFinite(Number(item.targetPriceCents))
+    ? Math.max(0, Math.floor(Number(item.targetPriceCents)))
+    : null;
   return {
     track,
     buy,
     bucket,
-    muted
+    muted,
+    targetPriceCents
   };
 }
 
@@ -268,6 +273,16 @@ function matchesTriageFilter(appId) {
   const intent = getItemIntentState(appId);
   if (hideMuted && intent.muted) {
     return false;
+  }
+  if (onlyUnderTarget) {
+    const targetCents = Number(intent.targetPriceCents || 0);
+    const meta = metaCache?.[appId] || {};
+    const priceLabel = String(meta?.priceText || "").trim().toLowerCase();
+    const priceKnown = priceLabel && priceLabel !== "-" && priceLabel !== "not announced";
+    const priceCents = Number(meta?.priceFinal || 0);
+    if (!(targetCents > 0 && priceKnown && Number.isFinite(priceCents) && priceCents <= targetCents)) {
+      return false;
+    }
   }
   const filter = String(triageFilter || "all").toLowerCase();
   if (filter === "all") {
@@ -370,6 +385,7 @@ function exportCurrentFilterSnapshot() {
     releaseYearMin,
     releaseYearMax,
     hideMuted,
+    onlyUnderTarget,
     trackWindowDays
   };
 }
@@ -402,6 +418,7 @@ function applyFilterSnapshot(snapshot) {
   releaseYearMin = Number.isFinite(Number(data.releaseYearMin)) ? Number(data.releaseYearMin) : RELEASE_YEAR_DEFAULT_MIN;
   releaseYearMax = Number.isFinite(Number(data.releaseYearMax)) ? Number(data.releaseYearMax) : getReleaseYearMaxBound();
   hideMuted = Boolean(data.hideMuted);
+  onlyUnderTarget = Boolean(data.onlyUnderTarget);
   trackWindowDays = parseTrackWindowDays(data.trackWindowDays);
 }
 
@@ -2876,6 +2893,9 @@ function createLineRow(options) {
   const onSetIntent = options?.onSetIntent || (() => Promise.resolve());
   const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
   const isMuted = Boolean(itemIntent.muted);
+  const targetPriceCents = Number.isFinite(Number(itemIntent.targetPriceCents))
+    ? Math.max(0, Math.floor(Number(itemIntent.targetPriceCents)))
+    : null;
 
   const row = document.createElement("article");
   row.className = "line-row";
@@ -3034,6 +3054,35 @@ function createLineRow(options) {
       .catch(() => setStatus("Failed to toggle mute.", true));
   });
   wfWrap.appendChild(muteBtn);
+
+  const targetBtn = document.createElement("button");
+  targetBtn.type = "button";
+  targetBtn.className = "line-btn";
+  targetBtn.textContent = targetPriceCents > 0 ? "Target*" : "Target";
+  targetBtn.addEventListener("click", () => {
+    const defaultValue = targetPriceCents > 0 ? (targetPriceCents / 100).toFixed(2) : "";
+    const raw = window.prompt("Set target price (leave empty to clear):", defaultValue);
+    if (raw === null) {
+      return;
+    }
+    const normalized = String(raw || "").trim().replace(",", ".");
+    if (!normalized) {
+      onSetIntent(appId, { targetPriceCents: null })
+        .then(() => setStatus("Target price cleared."))
+        .catch(() => setStatus("Failed to clear target price.", true));
+      return;
+    }
+    const amount = Number(normalized);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setStatus("Enter a valid target price.", true);
+      return;
+    }
+    const cents = Math.round(amount * 100);
+    onSetIntent(appId, { targetPriceCents: cents })
+      .then(() => setStatus("Target price saved."))
+      .catch(() => setStatus("Failed to save target price.", true));
+  });
+  wfWrap.appendChild(targetBtn);
   left.appendChild(wfWrap);
 
   const center = document.createElement("div");
@@ -3070,6 +3119,10 @@ function createLineRow(options) {
   const discountEl = document.createElement("span");
   discountEl.className = "line-discount";
   discountEl.textContent = "-";
+  const targetEl = document.createElement("span");
+  targetEl.className = "line-target";
+  targetEl.textContent = targetPriceCents > 0 ? `Target: ${(targetPriceCents / 100).toFixed(2)}` : "Target: -";
+  right.appendChild(targetEl);
   right.appendChild(discountEl);
   right.appendChild(priceEl);
 
@@ -3082,6 +3135,7 @@ function createLineRow(options) {
     row,
     titleEl,
     reviewEl,
+    targetEl,
     priceEl,
     discountEl
   };
@@ -3584,6 +3638,7 @@ async function render() {
   const viewSelect = document.getElementById("view-select");
   const triageFilterSelect = document.getElementById("triage-filter-select");
   const hideMutedCheckbox = document.getElementById("hide-muted-checkbox");
+  const underTargetCheckbox = document.getElementById("under-target-checkbox");
   const trackWindowSelect = document.getElementById("track-window-select");
   const renameActionBtn = document.getElementById("menu-action-rename");
   const deleteActionBtn = document.getElementById("menu-action-delete");
@@ -3599,6 +3654,9 @@ async function render() {
   }
   if (hideMutedCheckbox) {
     hideMutedCheckbox.checked = hideMuted;
+  }
+  if (underTargetCheckbox) {
+    underTargetCheckbox.checked = onlyUnderTarget;
   }
   if (trackWindowSelect) {
     trackWindowSelect.value = String(parseTrackWindowDays(trackWindowDays));
@@ -3918,6 +3976,11 @@ function bindFilterControls() {
     },
     onHideMutedChange: async (checked) => {
       hideMuted = Boolean(checked);
+      page = 1;
+      await renderCards();
+    },
+    onUnderTargetChange: async (checked) => {
+      onlyUnderTarget = Boolean(checked);
       page = 1;
       await renderCards();
     },
