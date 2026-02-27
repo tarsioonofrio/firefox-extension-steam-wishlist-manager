@@ -69,7 +69,6 @@ let sourceMode = "wishlist";
 let page = 1;
 let searchQuery = "";
 let triageFilter = "all";
-let hideMuted = false;
 let onlyUnderTarget = false;
 let trackWindowDays = 30;
 let sortMode = "position";
@@ -385,9 +384,6 @@ function isPriceAtOrUnderTarget(meta, targetPriceCents) {
 
 function matchesTriageFilter(appId) {
   const intent = getItemIntentState(appId);
-  if (hideMuted && intent.muted) {
-    return false;
-  }
   if (onlyUnderTarget) {
     const targetCents = Number(intent.targetPriceCents || 0);
     const meta = metaCache?.[appId] || {};
@@ -497,7 +493,6 @@ function exportCurrentFilterSnapshot() {
     releaseYearRangeEnabled,
     releaseYearMin,
     releaseYearMax,
-    hideMuted,
     onlyUnderTarget,
     trackWindowDays
   };
@@ -530,7 +525,6 @@ function applyFilterSnapshot(snapshot) {
   releaseYearRangeEnabled = Boolean(data.releaseYearRangeEnabled);
   releaseYearMin = Number.isFinite(Number(data.releaseYearMin)) ? Number(data.releaseYearMin) : RELEASE_YEAR_DEFAULT_MIN;
   releaseYearMax = Number.isFinite(Number(data.releaseYearMax)) ? Number(data.releaseYearMax) : getReleaseYearMaxBound();
-  hideMuted = Boolean(data.hideMuted);
   onlyUnderTarget = Boolean(data.onlyUnderTarget);
   trackWindowDays = parseTrackWindowDays(data.trackWindowDays);
 }
@@ -634,9 +628,6 @@ function countActiveFiltersInSnapshot(snapshot) {
     || Number(data.releaseYearMin || RELEASE_YEAR_DEFAULT_MIN) !== RELEASE_YEAR_DEFAULT_MIN
     || Number(data.releaseYearMax || getReleaseYearMaxBound()) !== getReleaseYearMaxBound()
   ) {
-    count += 1;
-  }
-  if (Boolean(data.hideMuted)) {
     count += 1;
   }
   if (Boolean(data.onlyUnderTarget)) {
@@ -1712,12 +1703,10 @@ async function refreshWholeDatabase() {
 
   setStatus(`Refreshing metadata for ${allIds.length} items...`);
   await ensureMetaForAppIds(allIds, allIds.length, true, "Refreshing full database:");
-  await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY, EXTRA_FILTER_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
-  quickPopulateFiltersFromCache();
-  refreshFilterOptionsInBackground();
+  await refreshAllFrequencies({ force: true, silentWhenUpToDate: false });
   await render();
-  setStatus("Database refreshed. Finalizing filter frequencies in background...");
+  setStatus("Database refreshed.");
 }
 
 async function refreshCurrentPageItems() {
@@ -1732,12 +1721,11 @@ async function refreshCurrentPageItems() {
   await syncFollowedFromSteam();
   await refreshState();
   await ensureMetaForAppIds(ids, ids.length, true, "Refreshing visible items:");
-  await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY, EXTRA_FILTER_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
   quickPopulateFiltersFromCache();
   refreshFilterOptionsInBackground();
   await render();
-  setStatus("Visible items refreshed. Finalizing filter frequencies in background...");
+  setStatus("Visible items refreshed.");
 }
 
 async function refreshSingleItem(appId) {
@@ -1883,19 +1871,6 @@ async function handleKeyboardBatchIntent(actionCode) {
     );
     return;
   }
-  if (actionCode === "Digit4") {
-    await applyBatchIntent(
-      { muted: true },
-      "Selected games muted."
-    );
-    return;
-  }
-  if (actionCode === "Digit5") {
-    await applyBatchIntent(
-      { muted: false },
-      "Selected games unmuted."
-    );
-  }
 }
 
 function bindKeyboardShortcuts() {
@@ -1912,7 +1887,7 @@ function bindKeyboardShortcuts() {
 
     const key = String(event.key || "").toLowerCase();
     const code = String(event.code || "");
-    if (event.shiftKey && (code === "Digit1" || code === "Digit2" || code === "Digit3" || code === "Digit4" || code === "Digit5")) {
+    if (event.shiftKey && (code === "Digit1" || code === "Digit2" || code === "Digit3")) {
       event.preventDefault();
       handleKeyboardBatchIntent(code).catch(() => setStatus("Failed to apply batch shortcut.", true));
       return;
@@ -3131,7 +3106,7 @@ function quickPopulateFiltersFromCache() {
 
 function refreshFilterOptionsInBackground() {
   const runId = ++filterSyncRunId;
-  Promise.allSettled([ensureTagCounts(), ensureTypeCounts(), ensureExtraFilterCounts()]).then(() => {
+  Promise.allSettled([refreshAllFrequencies({ force: false, silentWhenUpToDate: true })]).then(() => {
     if (runId !== filterSyncRunId) {
       return;
     }
@@ -3139,6 +3114,161 @@ function refreshFilterOptionsInBackground() {
     renderTypeOptions();
     renderExtraFilterOptions();
   });
+}
+
+function getFrequencyCacheBucketCaches(storage, bucket) {
+  const tagCache = storage?.[TAG_COUNTS_CACHE_KEY] || {};
+  const typeCache = storage?.[TYPE_COUNTS_CACHE_KEY] || {};
+  const extraCache = storage?.[EXTRA_FILTER_COUNTS_CACHE_KEY] || {};
+  return {
+    tagCache,
+    typeCache,
+    extraCache,
+    tagBucket: tagCache?.[bucket] || null,
+    typeBucket: typeCache?.[bucket] || null,
+    extraBucket: extraCache?.[bucket] || null
+  };
+}
+
+function applyFrequencyBucketsToUi(tagBucket, typeBucket, extraBucket) {
+  if (tagBucket && Array.isArray(tagBucket.counts)) {
+    tagCounts = tagBucket.counts;
+    tagCountsSource = "wishlist-frequency";
+  }
+  if (typeBucket && Array.isArray(typeBucket.counts)) {
+    typeCounts = typeBucket.counts;
+  }
+  if (extraBucket && extraBucket.day) {
+    playerCounts = Array.isArray(extraBucket.playerCounts) ? extraBucket.playerCounts : [];
+    featureCounts = Array.isArray(extraBucket.featureCounts) ? extraBucket.featureCounts : [];
+    hardwareCounts = Array.isArray(extraBucket.hardwareCounts) ? extraBucket.hardwareCounts : [];
+    accessibilityCounts = Array.isArray(extraBucket.accessibilityCounts) ? extraBucket.accessibilityCounts : [];
+    platformCounts = Array.isArray(extraBucket.platformCounts) ? extraBucket.platformCounts : [];
+    languageCounts = normalizeLanguageCountObjects(extraBucket.languageCounts);
+    fullAudioLanguageCounts = normalizeLanguageCountObjects(extraBucket.fullAudioLanguageCounts);
+    subtitleLanguageCounts = normalizeLanguageCountObjects(extraBucket.subtitleLanguageCounts);
+    technologyCounts = Array.isArray(extraBucket.technologyCounts) ? extraBucket.technologyCounts : [];
+    developerCounts = Array.isArray(extraBucket.developerCounts) ? extraBucket.developerCounts : [];
+    publisherCounts = Array.isArray(extraBucket.publisherCounts) ? extraBucket.publisherCounts : [];
+    releaseYearCounts = mergeReleaseTextCountsWithSeed(
+      Array.isArray(extraBucket.releaseYearCounts) ? extraBucket.releaseYearCounts : []
+    );
+  }
+}
+
+async function refreshAllFrequencies(options = {}) {
+  const force = Boolean(options?.force);
+  const silentWhenUpToDate = Boolean(options?.silentWhenUpToDate);
+  const appIds = Object.keys(wishlistAddedMap || {});
+  if (appIds.length === 0) {
+    return { ok: true, skipped: true, reason: "no-wishlist-items" };
+  }
+
+  const bucket = buildTagCacheBucketKey();
+  const day = todayKey();
+  const storage = await browser.storage.local.get([
+    TAG_COUNTS_CACHE_KEY,
+    TYPE_COUNTS_CACHE_KEY,
+    EXTRA_FILTER_COUNTS_CACHE_KEY
+  ]);
+  const {
+    tagCache,
+    typeCache,
+    extraCache,
+    tagBucket,
+    typeBucket,
+    extraBucket
+  } = getFrequencyCacheBucketCaches(storage, bucket);
+
+  const upToDate = Boolean(
+    tagBucket?.day === day
+      && typeBucket?.day === day
+      && extraBucket?.day === day
+  );
+  if (!force && upToDate) {
+    applyFrequencyBucketsToUi(tagBucket, typeBucket, extraBucket);
+    if (!silentWhenUpToDate) {
+      setStatus("Frequencies are already up to date for today.");
+    }
+    return { ok: true, skipped: true, reason: "up-to-date" };
+  }
+
+  setStatus("Refreshing frequencies (daily pipeline)...");
+  await ensureMetaForAppIds(appIds, 2000, false, "Refreshing frequencies:", false);
+
+  const unknownTypeIds = getUnknownTypeAppIds(appIds);
+  if (unknownTypeIds.length > 0) {
+    setStatus("Refreshing unresolved app types...");
+    await ensureMetaForAppIds(unknownTypeIds, unknownTypeIds.length, true, "Refreshing unresolved types:", false);
+  }
+
+  const nextTagCounts = buildTagCountsFromAppIds(appIds);
+  const nextTypeCounts = buildTypeCountsFromAppIds(appIds);
+  const nextPlayerCounts = buildArrayFieldCountsFromAppIds(appIds, "players");
+  const nextFeatureCounts = buildArrayFieldCountsFromAppIds(appIds, "features");
+  const nextHardwareCounts = buildArrayFieldCountsFromAppIds(appIds, "hardware");
+  const nextAccessibilityCounts = buildArrayFieldCountsFromAppIds(appIds, "accessibility");
+  const nextPlatformCounts = buildArrayFieldCountsFromAppIds(appIds, "platforms");
+  const nextLanguageCounts = normalizeLanguageCountObjects(buildArrayFieldCountsFromAppIds(appIds, "languages"));
+  const nextFullAudioLanguageCounts = normalizeLanguageCountObjects(buildArrayFieldCountsFromAppIds(appIds, "fullAudioLanguages"));
+  const nextSubtitleLanguageCounts = normalizeLanguageCountObjects(buildArrayFieldCountsFromAppIds(appIds, "subtitleLanguages"));
+  const nextTechnologyCounts = buildArrayFieldCountsFromAppIds(appIds, "technologies");
+  const nextDeveloperCounts = buildArrayFieldCountsFromAppIds(appIds, "developers");
+  const nextPublisherCounts = buildArrayFieldCountsFromAppIds(appIds, "publishers");
+  const nextReleaseYearCounts = mergeReleaseTextCountsWithSeed(buildReleaseYearCountsFromAppIds(appIds));
+
+  if (nextTagCounts.length === 0 && tagBucket?.day && Array.isArray(tagBucket?.counts) && tagBucket.counts.length > 0) {
+    applyFrequencyBucketsToUi(tagBucket, typeBucket, extraBucket);
+    setStatus("Steam blocked metadata refresh. Keeping previous frequencies.", true);
+    return { ok: false, skipped: true, reason: "kept-previous" };
+  }
+
+  const nextTagCache = {
+    ...tagCache,
+    [bucket]: {
+      ...(tagBucket || {}),
+      day,
+      appCount: appIds.length,
+      counts: nextTagCounts
+    }
+  };
+  const nextTypeCache = {
+    ...typeCache,
+    [bucket]: {
+      day,
+      counts: nextTypeCounts
+    }
+  };
+  const nextExtraBucket = {
+    day,
+    playerCounts: nextPlayerCounts,
+    featureCounts: nextFeatureCounts,
+    hardwareCounts: nextHardwareCounts,
+    accessibilityCounts: nextAccessibilityCounts,
+    platformCounts: nextPlatformCounts,
+    languageCounts: nextLanguageCounts,
+    fullAudioLanguageCounts: nextFullAudioLanguageCounts,
+    subtitleLanguageCounts: nextSubtitleLanguageCounts,
+    technologyCounts: nextTechnologyCounts,
+    developerCounts: nextDeveloperCounts,
+    publisherCounts: nextPublisherCounts,
+    releaseYearCounts: nextReleaseYearCounts
+  };
+  const nextExtraCache = {
+    ...extraCache,
+    [bucket]: nextExtraBucket
+  };
+
+  // Atomic-like commit for frequency caches: only publish when every group is fully computed.
+  await browser.storage.local.set({
+    [TAG_COUNTS_CACHE_KEY]: nextTagCache,
+    [TYPE_COUNTS_CACHE_KEY]: nextTypeCache,
+    [EXTRA_FILTER_COUNTS_CACHE_KEY]: nextExtraCache
+  });
+
+  applyFrequencyBucketsToUi(nextTagCache[bucket], nextTypeCache[bucket], nextExtraBucket);
+  setStatus("Frequencies refreshed.");
+  return { ok: true, skipped: false };
 }
 
 function renderTagOptions() {
@@ -3366,7 +3496,6 @@ function createLineRow(options) {
   const onToggleCollection = options?.onToggleCollection || (() => Promise.resolve());
   const onSetIntent = options?.onSetIntent || (() => Promise.resolve());
   const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
-  const isMuted = Boolean(itemIntent.muted);
   const noteText = String(itemIntent.note || "");
   const targetPriceCents = Number.isFinite(Number(itemIntent.targetPriceCents))
     ? Math.max(0, Math.floor(Number(itemIntent.targetPriceCents)))
@@ -3519,17 +3648,6 @@ function createLineRow(options) {
   wfWrap.appendChild(maybeBtn);
   wfWrap.appendChild(trackBtn);
 
-  const muteBtn = document.createElement("button");
-  muteBtn.type = "button";
-  muteBtn.className = "line-btn";
-  muteBtn.textContent = isMuted ? "Unmute" : "Mute";
-  muteBtn.addEventListener("click", () => {
-    onSetIntent(appId, { muted: !isMuted })
-      .then(() => setStatus(isMuted ? "Unmuted." : "Muted."))
-      .catch(() => setStatus("Failed to toggle mute.", true));
-  });
-  wfWrap.appendChild(muteBtn);
-
   const targetBtn = document.createElement("button");
   targetBtn.type = "button";
   targetBtn.className = "line-btn";
@@ -3643,8 +3761,8 @@ function renderBatchMenuState() {
   if (batchHint) {
     const count = batchSelectedIds.size;
     batchHint.textContent = count > 0
-      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Follow, Shift+4 Mute, Shift+5 Unmute`
-      : "Batch mode active | Select cards to use shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Follow, Shift+4 Mute, Shift+5 Unmute";
+      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Follow`
+      : "Batch mode active | Select cards to use shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Follow";
     batchHint.classList.toggle("hidden", !batchMode);
   }
   if (collectionSelect) {
@@ -4135,9 +4253,6 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     if (!(intent.track > 0) || intent.owned) {
       return false;
     }
-    if (hideMuted && intent.muted) {
-      return false;
-    }
     if (cutoffSec > 0 && Number(entry?.publishedAt || 0) < cutoffSec) {
       return false;
     }
@@ -4209,12 +4324,6 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     archiveBtn.addEventListener("click", () => {
       setItemIntent(appId, { track: 0, buy: 0, owned: true }).catch(() => setStatus("Failed to archive item.", true));
     });
-    const muteBtn = document.createElement("button");
-    muteBtn.type = "button";
-    muteBtn.textContent = intent.muted ? "Unmute" : "Mute";
-    muteBtn.addEventListener("click", () => {
-      setItemIntent(appId, { muted: !intent.muted }).catch(() => setStatus("Failed to toggle mute.", true));
-    });
     const dismissBtn = document.createElement("button");
     dismissBtn.type = "button";
     dismissBtn.textContent = "Dismiss";
@@ -4232,7 +4341,6 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     actions.appendChild(buyBtn);
     actions.appendChild(maybeBtn);
     actions.appendChild(archiveBtn);
-    actions.appendChild(muteBtn);
     actions.appendChild(dismissBtn);
 
     row.appendChild(head);
@@ -4361,7 +4469,6 @@ async function render() {
   const sortSelect = document.getElementById("sort-select");
   const viewSelect = document.getElementById("view-select");
   const triageFilterSelect = document.getElementById("triage-filter-select");
-  const hideMutedCheckbox = document.getElementById("hide-muted-checkbox");
   const underTargetCheckbox = document.getElementById("under-target-checkbox");
   const trackWindowSelect = document.getElementById("track-window-select");
   const refreshTrackFeedBtn = document.getElementById("refresh-track-feed-btn");
@@ -4377,9 +4484,6 @@ async function render() {
   }
   if (triageFilterSelect) {
     triageFilterSelect.value = triageFilter;
-  }
-  if (hideMutedCheckbox) {
-    hideMutedCheckbox.checked = hideMuted;
   }
   if (underTargetCheckbox) {
     underTargetCheckbox.checked = onlyUnderTarget;
@@ -4650,8 +4754,6 @@ function bindBatchControls() {
   const buyActionBtn = document.getElementById("batch-action-buy");
   const maybeActionBtn = document.getElementById("batch-action-maybe");
   const trackActionBtn = document.getElementById("batch-action-track");
-  const muteActionBtn = document.getElementById("batch-action-mute");
-  const unmuteActionBtn = document.getElementById("batch-action-unmute");
   const addForm = document.getElementById("batch-add-form");
   const collectionSelect = document.getElementById("batch-collection-select");
   const addApplyBtn = document.getElementById("batch-add-apply-btn");
@@ -4714,19 +4816,6 @@ function bindBatchControls() {
     ).catch(() => setStatus("Failed to apply batch follow.", true));
   });
 
-  muteActionBtn?.addEventListener("click", () => {
-    applyBatchIntent(
-      { muted: true },
-      "Selected games muted."
-    ).catch(() => setStatus("Failed to apply batch mute.", true));
-  });
-
-  unmuteActionBtn?.addEventListener("click", () => {
-    applyBatchIntent(
-      { muted: false },
-      "Selected games unmuted."
-    ).catch(() => setStatus("Failed to apply batch unmute.", true));
-  });
 }
 
 function bindFilterControls() {
@@ -4793,11 +4882,6 @@ function bindFilterControls() {
     },
     onTriageFilterChange: async (value) => {
       triageFilter = String(value || "all");
-      page = 1;
-      await renderCards();
-    },
-    onHideMutedChange: async (checked) => {
-      hideMuted = Boolean(checked);
       page = 1;
       await renderCards();
     },
@@ -4972,7 +5056,11 @@ initUtils.run({
   renderRatingControls,
   render,
   refreshFilterOptionsInBackground,
-  refreshWholeDatabase
+  refreshWholeDatabase,
+  refreshFrequenciesOnly: async () => {
+    await refreshAllFrequencies({ force: true, silentWhenUpToDate: false });
+    await render();
+  }
 }).catch((error) => {
   const message = String(error?.message || error || "unknown init error");
   setStatus(`Failed to load collections page: ${message}`, true, { withNetworkHint: true });

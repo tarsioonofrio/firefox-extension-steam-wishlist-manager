@@ -76,7 +76,6 @@
       triageMaybeBtn: fragment.querySelector(".triage-maybe-btn"),
       triageTrackBtn: fragment.querySelector(".triage-track-btn"),
       triageArchiveBtn: fragment.querySelector(".triage-archive-btn"),
-      wfMuteBtn: fragment.querySelector(".wf-mute-btn"),
       targetPriceInput: fragment.querySelector(".target-price-input"),
       targetSaveBtn: fragment.querySelector(".target-save-btn"),
       targetClearBtn: fragment.querySelector(".target-clear-btn"),
@@ -135,7 +134,6 @@
     const confirmFn = options?.confirmFn || ((message) => window.confirm(message));
     const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
     const currentBucket = String(itemIntent.bucket || "INBOX").toUpperCase();
-    const isMuted = Boolean(itemIntent.muted);
     const targetPriceCents = Number.isFinite(Number(itemIntent.targetPriceCents))
       ? Math.max(0, Math.floor(Number(itemIntent.targetPriceCents)))
       : null;
@@ -209,18 +207,6 @@
         }
       });
     }
-    if (card.wfMuteBtn) {
-      card.wfMuteBtn.textContent = isMuted ? "Unmute" : "Mute";
-      card.wfMuteBtn.addEventListener("click", async () => {
-        try {
-          await onSetIntent(appId, { muted: !isMuted });
-          setStatus(isMuted ? "Unmuted." : "Muted.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to toggle mute."), true);
-        }
-      });
-    }
-
     if (card.targetStatusEl) {
       card.targetStatusEl.textContent = targetPriceCents > 0
         ? `Target: ${(targetPriceCents / 100).toFixed(2)}`

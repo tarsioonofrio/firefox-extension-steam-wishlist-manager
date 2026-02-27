@@ -87,6 +87,12 @@ async function openCollectionsWithRefresh() {
   await browser.tabs.create({ url });
 }
 
+async function openCollectionsWithFrequenciesRefresh() {
+  const base = browser.runtime.getURL("src/pages/collections.html");
+  const url = `${base}?refreshFrequencies=1`;
+  await browser.tabs.create({ url });
+}
+
 function triggerDownload(fileName, contentText) {
   const blob = new Blob([contentText], { type: "application/json;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -185,6 +191,21 @@ document.getElementById("refresh-db")?.addEventListener("click", async () => {
     setStatus("Refresh started in Collections page.");
   } catch {
     setStatus("Failed to refresh database.", true);
+  }
+});
+
+document.getElementById("refresh-frequencies")?.addEventListener("click", async () => {
+  const confirmed = window.confirm("Refresh filter frequencies now? Existing frequencies remain in use until recalculation finishes.");
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    setStatus("Starting frequency refresh in Collections page...");
+    await openCollectionsWithFrequenciesRefresh();
+    setStatus("Frequency refresh started in Collections page.");
+  } catch {
+    setStatus("Failed to refresh frequencies.", true);
   }
 });
 

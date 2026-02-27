@@ -10,6 +10,7 @@
     const render = options?.render || (async () => {});
     const refreshFilterOptionsInBackground = options?.refreshFilterOptionsInBackground || (() => {});
     const refreshWholeDatabase = options?.refreshWholeDatabase || (async () => {});
+    const refreshFrequenciesOnly = options?.refreshFrequenciesOnly || (async () => {});
     const syncFollowedFromSteam = options?.syncFollowedFromSteam || (async () => {});
 
     await loadMetaCache();
@@ -26,8 +27,15 @@
     refreshFilterOptionsInBackground();
 
     const refreshAll = new URLSearchParams(window.location.search).get("refreshAll") === "1";
+    const refreshFrequencies = new URLSearchParams(window.location.search).get("refreshFrequencies") === "1";
     if (refreshAll) {
       await refreshWholeDatabase();
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, "", cleanUrl);
+      return;
+    }
+    if (refreshFrequencies) {
+      await refreshFrequenciesOnly();
       const cleanUrl = window.location.pathname;
       window.history.replaceState({}, "", cleanUrl);
     }

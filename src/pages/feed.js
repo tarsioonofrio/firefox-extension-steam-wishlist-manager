@@ -5,7 +5,6 @@ const TRACK_FEED_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const steamFetchUtils = window.SWMSteamFetch;
 let state = null;
 let feedEntries = [];
-let hideMuted = false;
 let windowDays = 30;
 let searchQuery = "";
 
@@ -176,9 +175,6 @@ function render() {
     if (!(intent.track > 0) || intent.owned) {
       return false;
     }
-    if (hideMuted && intent.muted) {
-      return false;
-    }
     if (cutoffSec > 0 && Number(entry.publishedAt || 0) < cutoffSec) {
       return false;
     }
@@ -232,14 +228,6 @@ function render() {
       render();
     });
 
-    const muteBtn = document.createElement("button");
-    muteBtn.type = "button";
-    muteBtn.textContent = intent.muted ? "Unmute" : "Mute";
-    muteBtn.addEventListener("click", async () => {
-      await setIntent(entry.appId, { muted: !intent.muted });
-      render();
-    });
-
     const buyBtn = document.createElement("button");
     buyBtn.type = "button";
     buyBtn.textContent = "Buy";
@@ -258,7 +246,6 @@ function render() {
 
     actions.appendChild(openBtn);
     actions.appendChild(trackBtn);
-    actions.appendChild(muteBtn);
     actions.appendChild(buyBtn);
     actions.appendChild(maybeBtn);
 
@@ -281,10 +268,6 @@ async function init() {
 
   document.getElementById("refresh-btn")?.addEventListener("click", async () => {
     await refreshFeed();
-    render();
-  });
-  document.getElementById("hide-muted")?.addEventListener("change", (event) => {
-    hideMuted = Boolean(event?.target?.checked);
     render();
   });
   document.getElementById("window-days")?.addEventListener("change", (event) => {
