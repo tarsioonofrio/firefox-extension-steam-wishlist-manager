@@ -4,6 +4,8 @@ const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const TRACK_FEED_CACHE_KEY = "steamWishlistTrackFeedV1";
 const TRACK_FEED_META_KEY = "steamWishlistTrackFeedMetaV1";
+const TRACK_FEED_AUTO_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const TRACK_FEED_AUTO_RETRY_INTERVAL_MS = 2 * 60 * 1000;
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const WISHLIST_RANK_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const rankUtils = window.SWMWishlistRank;
@@ -90,6 +92,7 @@ let currentRenderedPageIds = [];
 let trackFeedEntries = [];
 let trackFeedRefreshing = false;
 let trackFeedLastRefreshedAt = 0;
+let trackFeedLastAutoRefreshAttemptAt = 0;
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -751,6 +754,35 @@ async function refreshTrackFeed() {
     trackFeedRefreshing = false;
     updateTrackFeedRefreshButtonState();
   }
+}
+
+function maybeAutoRefreshTrackFeed() {
+  if (activeCollection !== TRACK_FEED_SELECT_VALUE) {
+    return;
+  }
+  if (trackFeedRefreshing) {
+    return;
+  }
+  const trackIds = getTrackSourceAppIds();
+  if (trackIds.length === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  const stale = !(Number(trackFeedLastRefreshedAt || 0) > 0)
+    || (now - Number(trackFeedLastRefreshedAt || 0) >= TRACK_FEED_AUTO_REFRESH_INTERVAL_MS);
+  const retryWindowOpen = (now - Number(trackFeedLastAutoRefreshAttemptAt || 0)) < TRACK_FEED_AUTO_RETRY_INTERVAL_MS;
+  if (!stale || retryWindowOpen) {
+    return;
+  }
+
+  trackFeedLastAutoRefreshAttemptAt = now;
+  setTrackFeedProgress("Auto refreshing stale track feed...");
+  refreshTrackFeed()
+    .then(() => render())
+    .catch(() => {
+      setStatus("Auto refresh track feed failed.", true);
+    });
 }
 
 function hashStringToUint32(text) {
@@ -4157,6 +4189,7 @@ async function render() {
     deleteSelect.disabled = (state?.collectionOrder || []).length === 0;
   }
   await renderCards();
+  maybeAutoRefreshTrackFeed();
 }
 
 function renderRatingControls() {
