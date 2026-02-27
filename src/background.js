@@ -238,6 +238,15 @@ function sanitizeLabels(labels) {
   return out.slice(0, 12);
 }
 
+function mergeOwnedLabel(labels, owned) {
+  const base = sanitizeLabels(labels);
+  const withoutOwned = base.filter((label) => label !== "owned");
+  if (owned === true) {
+    withoutOwned.push("owned");
+  }
+  return sanitizeLabels(withoutOwned);
+}
+
 function normalizeItemRecord(appId, rawItem) {
   const src = rawItem && typeof rawItem === "object" ? rawItem : {};
   const track = clamp01to2(src.track, 0);
@@ -1329,7 +1338,10 @@ browser.runtime.onMessage.addListener((message, sender) => {
             ? Math.max(0, Math.floor(Number(message.targetPriceCents)))
             : null);
         const nextMuted = message.muted === undefined ? current.muted : Boolean(message.muted);
-        const nextLabels = message.labels === undefined ? current.labels : sanitizeLabels(message.labels);
+        let nextLabels = message.labels === undefined ? current.labels : sanitizeLabels(message.labels);
+        if (message.owned !== undefined) {
+          nextLabels = mergeOwnedLabel(nextLabels, Boolean(message.owned));
+        }
 
         upsertStateItem(state, appId, {
           title: String(message.title || current.title || "").slice(0, 200),
@@ -1386,6 +1398,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
         }
 
         const ts = Date.now();
+        const hasOwnedPatch = message.owned !== undefined;
+        const ownedPatch = Boolean(message.owned);
         for (const appId of appIds) {
           const current = normalizeItemRecord(appId, state.items?.[appId] || {});
           const nextTrack = message.track === undefined ? current.track : clamp01to2(message.track, current.track);
@@ -1397,6 +1411,10 @@ browser.runtime.onMessage.addListener((message, sender) => {
           );
           const nextMuted = message.muted === undefined ? current.muted : Boolean(message.muted);
 
+          const nextLabels = hasOwnedPatch
+            ? mergeOwnedLabel(current.labels, ownedPatch)
+            : current.labels;
+
           upsertStateItem(state, appId, {
             title: String(message.title || current.title || "").slice(0, 200),
             track: nextTrack,
@@ -1405,7 +1423,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
             note: current.note,
             targetPriceCents: current.targetPriceCents,
             muted: nextMuted,
-            labels: current.labels,
+            labels: nextLabels,
             triagedAt: ts
           });
         }

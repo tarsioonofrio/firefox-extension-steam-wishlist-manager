@@ -186,7 +186,7 @@
     const workflowActions = [
       { btn: card.wfPromoteBtn, patch: { track: 0, buy: 2, bucket: "BUY" }, ok: "Promoted to Buy radar." },
       { btn: card.wfConvertTrackBtn, patch: { track: 1, buy: 0, bucket: "TRACK" }, ok: "Converted to Track." },
-      { btn: card.wfOwnedBtn, patch: { track: 0, buy: 0, bucket: "ARCHIVE" }, ok: "Archived as owned." }
+      { btn: card.wfOwnedBtn, patch: { track: 0, buy: 0, bucket: "ARCHIVE", owned: true }, ok: "Marked as bought (owned)." }
     ];
     for (const entry of workflowActions) {
       if (!entry.btn) {

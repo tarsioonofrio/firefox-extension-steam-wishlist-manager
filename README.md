@@ -19,15 +19,15 @@ Main goal: make prioritization practical without changing your Steam account dat
 - Reads your wishlist rank from Steam API (`Your rank`), and enriches game metadata locally.
 - Lets you add/remove a game to/from static collections from card and line views.
 - Supports batch add/remove for multiple visible games.
-- Supports batch triage actions (`Promote`, `Track`, `Owned`, `Mute`, `Unmute`).
+- Supports batch triage actions (`Promote`, `Track`, `Bought`, `Mute`, `Unmute`).
 - Keyboard shortcuts:
   - Navigation: `j` / `k`
   - Triage focused item: `1` Track, `2` Maybe, `3` Buy, `4` Archive
-  - Batch triage on selected items: `Shift+1` Promote, `Shift+2` Track, `Shift+3` Owned, `Shift+4` Mute, `Shift+5` Unmute
+  - Batch triage on selected items: `Shift+1` Promote, `Shift+2` Track, `Shift+3` Bought, `Shift+4` Mute, `Shift+5` Unmute
 - When Batch mode is active, a top hint shows available batch shortcuts and selected count.
 - Supports saved dynamic collections based on current filters/sort.
-- Includes triage workflow (`Promote`, `Track`, `Owned`) with local mute/unmute.
-- Adds virtual views (`Inbox`, `Track`, `Buy radar`, `Archive`) and Track time window (`7d`, `30d`, `all`).
+- Includes triage workflow (`Promote`, `Track`, `Bought`) with local mute/unmute.
+- Adds virtual views (`Inbox`, `Track`, `Buy radar`, `Archive`, `Owned`) and Track time window (`7d`, `30d`, `all`).
 - Supports per-game target price and filter for games at/under target.
 - Highlights cards/rows when current price hits target.
 - Supports local per-game notes (saved in browser storage); search matches title, appid, and notes.

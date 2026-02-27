@@ -10,14 +10,9 @@
     "review-score"
   ]);
 
-  function resolveCollectionSelection(value, wishlistSelectValue, inboxSelectValue, trackSelectValue, buySelectValue, archiveSelectValue) {
+  function resolveCollectionSelection(value, wishlistSelectValue, inboxSelectValue, trackSelectValue, buySelectValue, archiveSelectValue, ownedSelectValue) {
     const raw = String(value || "__all__");
     const isWishlist = raw === String(wishlistSelectValue || "__wishlist__");
-    const isInbox = raw === String(inboxSelectValue || "__inbox__");
-    const isTrack = raw === String(trackSelectValue || "__track__");
-    const isBuy = raw === String(buySelectValue || "__buy__");
-    const isArchive = raw === String(archiveSelectValue || "__archive__");
-    const isVirtual = isInbox || isTrack || isBuy || isArchive;
     const sourceMode = isWishlist ? "wishlist" : "collections";
     return {
       sourceMode,

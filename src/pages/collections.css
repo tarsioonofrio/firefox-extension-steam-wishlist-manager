@@ -220,6 +220,12 @@ button.danger,
   font-size: 12px;
 }
 
+.radar-stats {
+  margin: 2px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .status-floating {
   position: fixed;
   left: 0;

@@ -35,6 +35,7 @@ const INBOX_SELECT_VALUE = "__inbox__";
 const TRACK_SELECT_VALUE = "__track__";
 const BUY_SELECT_VALUE = "__buy__";
 const ARCHIVE_SELECT_VALUE = "__archive__";
+const OWNED_SELECT_VALUE = "__owned__";
 const RELEASE_YEAR_DEFAULT_MIN = 2010;
 const steamFetchUtils = window.SWMSteamFetch;
 // Source baseline: SteamDB tags taxonomy (static seed for fast first render).
@@ -241,6 +242,8 @@ function getItemIntentState(appId) {
   const bucket = bucketRaw || (buy > 0 ? (buy >= 2 ? "BUY" : "MAYBE") : (track > 0 ? "TRACK" : "INBOX"));
   const muted = Boolean(item.muted);
   const note = String(item.note || "").trim();
+  const labels = Array.isArray(item.labels) ? item.labels.map((label) => String(label || "").trim().toLowerCase()).filter(Boolean) : [];
+  const owned = labels.includes("owned");
   const targetPriceCents = Number.isFinite(Number(item.targetPriceCents))
     ? Math.max(0, Math.floor(Number(item.targetPriceCents)))
     : null;
@@ -250,6 +253,7 @@ function getItemIntentState(appId) {
     bucket,
     muted,
     note,
+    owned,
     targetPriceCents
   };
 }
@@ -347,7 +351,8 @@ function isVirtualCollectionSelection(name) {
   return key === INBOX_SELECT_VALUE
     || key === TRACK_SELECT_VALUE
     || key === BUY_SELECT_VALUE
-    || key === ARCHIVE_SELECT_VALUE;
+    || key === ARCHIVE_SELECT_VALUE
+    || key === OWNED_SELECT_VALUE;
 }
 
 function getStaticCollectionNames() {
@@ -573,6 +578,17 @@ function getCurrentSourceAppIds() {
     for (const appId of Object.keys(state.items || {})) {
       const intent = getItemIntentState(appId);
       if (String(intent.bucket || "INBOX").toUpperCase() === "ARCHIVE") {
+        out.push(appId);
+      }
+    }
+    return out;
+  }
+
+  if (activeCollection === OWNED_SELECT_VALUE) {
+    const out = [];
+    for (const appId of Object.keys(state.items || {})) {
+      const intent = getItemIntentState(appId);
+      if (intent.owned) {
         out.push(appId);
       }
     }
@@ -1513,10 +1529,10 @@ async function handleKeyboardBatchIntent(actionCode) {
   }
   if (actionCode === "Digit3") {
     await applyBatchIntent(
-      { track: 0, buy: 0, bucket: "ARCHIVE" },
-      "Selected games archived as owned.",
+      { track: 0, buy: 0, bucket: "ARCHIVE", owned: true },
+      "Selected games marked as bought (owned).",
       true,
-      `Archive ${batchSelectedIds.size} selected game(s) as owned?`
+      `Mark ${batchSelectedIds.size} selected game(s) as bought (owned)?`
     );
     return;
   }
@@ -2895,6 +2911,7 @@ function renderCollectionSelect() {
     trackSelectValue: TRACK_SELECT_VALUE,
     buySelectValue: BUY_SELECT_VALUE,
     archiveSelectValue: ARCHIVE_SELECT_VALUE,
+    ownedSelectValue: OWNED_SELECT_VALUE,
     inboxCount: Object.keys(state?.items || {}).filter((appId) => {
       const intent = getItemIntentState(appId);
       return String(intent.bucket || "INBOX").toUpperCase() === "INBOX";
@@ -2911,6 +2928,10 @@ function renderCollectionSelect() {
     archiveCount: Object.keys(state?.items || {}).filter((appId) => {
       const intent = getItemIntentState(appId);
       return String(intent.bucket || "INBOX").toUpperCase() === "ARCHIVE";
+    }).length,
+    ownedCount: Object.keys(state?.items || {}).filter((appId) => {
+      const intent = getItemIntentState(appId);
+      return Boolean(intent.owned);
     }).length,
     collectionSizes: dynamicCollectionSizes,
     dynamicNames: Object.keys(state?.dynamicCollections || {})
@@ -3094,10 +3115,10 @@ function createLineRow(options) {
   const ownedBtn = document.createElement("button");
   ownedBtn.type = "button";
   ownedBtn.className = "line-btn";
-  ownedBtn.textContent = "Owned";
+  ownedBtn.textContent = "Bought";
   ownedBtn.addEventListener("click", () => {
-    onSetIntent(appId, { track: 0, buy: 0, bucket: "ARCHIVE" })
-      .then(() => setStatus("Archived as owned."))
+    onSetIntent(appId, { track: 0, buy: 0, bucket: "ARCHIVE", owned: true })
+      .then(() => setStatus("Marked as bought (owned)."))
       .catch(() => setStatus("Failed to archive item.", true));
   });
 
@@ -3229,8 +3250,8 @@ function renderBatchMenuState() {
   if (batchHint) {
     const count = batchSelectedIds.size;
     batchHint.textContent = count > 0
-      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Promote, Shift+2 Track, Shift+3 Owned, Shift+4 Mute, Shift+5 Unmute`
-      : "Batch mode active | Select cards to use shortcuts: Shift+1 Promote, Shift+2 Track, Shift+3 Owned, Shift+4 Mute, Shift+5 Unmute";
+      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Promote, Shift+2 Track, Shift+3 Bought, Shift+4 Mute, Shift+5 Unmute`
+      : "Batch mode active | Select cards to use shortcuts: Shift+1 Promote, Shift+2 Track, Shift+3 Bought, Shift+4 Mute, Shift+5 Unmute";
     batchHint.classList.toggle("hidden", !batchMode);
   }
   if (collectionSelect) {
@@ -3248,6 +3269,31 @@ function renderBatchMenuState() {
     collectionSelect.value = batchAddTargetCollection;
     collectionSelect.disabled = names.length === 0;
   }
+}
+
+function renderRadarStats() {
+  const el = document.getElementById("radar-stats");
+  if (!el) {
+    return;
+  }
+  const ids = Object.keys(state?.items || {});
+  let buyRadar = 0;
+  let underTarget = 0;
+  let owned = 0;
+  for (const appId of ids) {
+    const intent = getItemIntentState(appId);
+    const bucket = String(intent.bucket || "INBOX").toUpperCase();
+    if (bucket === "BUY" || bucket === "MAYBE") {
+      buyRadar += 1;
+    }
+    if (intent.owned) {
+      owned += 1;
+    }
+    if (isPriceAtOrUnderTarget(metaCache?.[appId] || {}, intent.targetPriceCents)) {
+      underTarget += 1;
+    }
+  }
+  el.textContent = `Radar | Buy: ${buyRadar} | Under target: ${underTarget} | Owned: ${owned}`;
 }
 
 function toggleBatchMode(force = null) {
@@ -3798,6 +3844,7 @@ async function render() {
   renderViewMenu();
   renderCollectionSelect();
   renderBatchMenuState();
+  renderRadarStats();
   const canRenameCurrent = sourceMode !== "wishlist"
     && activeCollection !== "__all__"
     && !isVirtualCollectionSelection(activeCollection);
@@ -3924,7 +3971,8 @@ async function handleCollectionChange(value) {
     INBOX_SELECT_VALUE,
     TRACK_SELECT_VALUE,
     BUY_SELECT_VALUE,
-    ARCHIVE_SELECT_VALUE
+    ARCHIVE_SELECT_VALUE,
+    OWNED_SELECT_VALUE
   );
   sourceMode = resolved.sourceMode;
   activeCollection = resolved.activeCollection;
@@ -4084,10 +4132,10 @@ function bindBatchControls() {
 
   ownedActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
-      { track: 0, buy: 0, bucket: "ARCHIVE" },
-      "Selected games archived as owned.",
+      { track: 0, buy: 0, bucket: "ARCHIVE", owned: true },
+      "Selected games marked as bought (owned).",
       true,
-      `Archive ${batchSelectedIds.size} selected game(s) as owned?`
+      `Mark ${batchSelectedIds.size} selected game(s) as bought (owned)?`
     ).catch(() => setStatus("Failed to apply batch owned action.", true));
   });
 
