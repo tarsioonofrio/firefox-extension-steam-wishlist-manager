@@ -700,17 +700,39 @@ function applyExtensionCachesToState(state) {
     if (!APP_ID_RE.test(appId) || !isObject(rawMeta)) {
       continue;
     }
+    const metaRelease = rawMeta.releaseDate || rawMeta.releaseDateRaw || rawMeta.releaseText || "";
+    const metaFinalPrice =
+      rawMeta.priceFinalCents ??
+      rawMeta.finalPriceCents ??
+      rawMeta.priceFinal ??
+      rawMeta.finalPrice ??
+      null;
+    const metaInitialPrice =
+      rawMeta.priceInitialCents ??
+      rawMeta.initialPriceCents ??
+      rawMeta.priceInitial ??
+      rawMeta.initialPrice ??
+      null;
+    const metaReviewPercent =
+      rawMeta.reviewPercent ??
+      rawMeta.reviewPositivePct ??
+      null;
+    const metaReviewTotal =
+      rawMeta.reviewTotal ??
+      rawMeta.reviewTotalVotes ??
+      rawMeta.recommendationsTotal ??
+      null;
     mergeItemPatch(state, appId, {
-      title: cleanText(rawMeta.title || rawMeta.name || "", 180),
+      title: cleanText(rawMeta.titleText || rawMeta.title || rawMeta.name || "", 180),
       type: cleanText(rawMeta.appType || rawMeta.type || "", 64),
-      releaseDate: cleanText(rawMeta.releaseDate || rawMeta.releaseDateRaw || "", 80),
-      releaseYear: parseReleaseYear(rawMeta.releaseDate || rawMeta.releaseDateRaw || ""),
+      releaseDate: cleanText(metaRelease, 80),
+      releaseYear: parseReleaseYear(metaRelease),
       discountPercent: Number.isFinite(Number(rawMeta.discountPercent)) ? Number(rawMeta.discountPercent) : null,
-      finalPriceCents: Number.isFinite(Number(rawMeta.priceFinalCents)) ? Number(rawMeta.priceFinalCents) : null,
-      initialPriceCents: Number.isFinite(Number(rawMeta.priceInitialCents)) ? Number(rawMeta.priceInitialCents) : null,
-      reviewPercent: Number.isFinite(Number(rawMeta.reviewPercent)) ? Number(rawMeta.reviewPercent) : null,
-      reviewTotal: Number.isFinite(Number(rawMeta.reviewTotal)) ? Number(rawMeta.reviewTotal) : null,
-      reviewSummary: cleanText(rawMeta.reviewSummary || "", 120),
+      finalPriceCents: Number.isFinite(Number(metaFinalPrice)) ? Number(metaFinalPrice) : null,
+      initialPriceCents: Number.isFinite(Number(metaInitialPrice)) ? Number(metaInitialPrice) : null,
+      reviewPercent: Number.isFinite(Number(metaReviewPercent)) ? Number(metaReviewPercent) : null,
+      reviewTotal: Number.isFinite(Number(metaReviewTotal)) ? Number(metaReviewTotal) : null,
+      reviewSummary: cleanText(rawMeta.reviewSummary || rawMeta.reviewText || "", 120),
       tags: ensureStringArray(rawMeta.tags || [], 120),
       features: ensureStringArray(rawMeta.features || [], 120),
       languages: ensureStringArray(rawMeta.languages || [], 80),
@@ -718,7 +740,7 @@ function applyExtensionCachesToState(state) {
       developers: ensureStringArray(rawMeta.developers || [], 40),
       publishers: ensureStringArray(rawMeta.publishers || [], 40),
       platforms: ensureStringArray(rawMeta.platforms || [], 10),
-      headerImage: cleanText(rawMeta.imageUrl || rawMeta.headerImage || "", 300)
+      headerImage: cleanText(rawMeta.imageUrl || rawMeta.headerImage || rawMeta.capsuleImage || "", 300)
     });
     mergedMeta += 1;
   }
