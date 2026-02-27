@@ -20,6 +20,8 @@ Main goal: make prioritization practical without changing your Steam account dat
 - Lets you add/remove a game to/from static collections from card and line views.
 - Supports batch add/remove for multiple visible games.
 - Supports saved dynamic collections based on current filters/sort.
+- Includes triage workflow (`Promote`, `Track`, `Owned`) with local mute/unmute.
+- Adds virtual views (`Inbox`, `Track`, `Buy radar`, `Archive`) and Track time window (`7d`, `30d`, `all`).
 - Keeps all collection data local in your browser profile.
 
 ## What It Does Not Do

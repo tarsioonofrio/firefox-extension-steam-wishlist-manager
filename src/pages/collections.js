@@ -63,6 +63,7 @@ let page = 1;
 let searchQuery = "";
 let triageFilter = "all";
 let hideMuted = false;
+let trackWindowDays = 30;
 let sortMode = "position";
 let viewMode = "card";
 
@@ -246,6 +247,23 @@ function getItemIntentState(appId) {
   };
 }
 
+function parseTrackWindowDays(value) {
+  const n = Number(value || 30);
+  if (!Number.isFinite(n)) {
+    return 30;
+  }
+  if (n <= 0) {
+    return 0;
+  }
+  if (n <= 7) {
+    return 7;
+  }
+  if (n <= 30) {
+    return 30;
+  }
+  return 30;
+}
+
 function matchesTriageFilter(appId) {
   const intent = getItemIntentState(appId);
   if (hideMuted && intent.muted) {
@@ -351,7 +369,8 @@ function exportCurrentFilterSnapshot() {
     releaseYearRangeEnabled,
     releaseYearMin,
     releaseYearMax,
-    hideMuted
+    hideMuted,
+    trackWindowDays
   };
 }
 
@@ -383,6 +402,7 @@ function applyFilterSnapshot(snapshot) {
   releaseYearMin = Number.isFinite(Number(data.releaseYearMin)) ? Number(data.releaseYearMin) : RELEASE_YEAR_DEFAULT_MIN;
   releaseYearMax = Number.isFinite(Number(data.releaseYearMax)) ? Number(data.releaseYearMax) : getReleaseYearMaxBound();
   hideMuted = Boolean(data.hideMuted);
+  trackWindowDays = parseTrackWindowDays(data.trackWindowDays);
 }
 
 function buildDynamicDefinitionFromCurrentView() {
@@ -491,12 +511,21 @@ function getCurrentSourceAppIds() {
 
   if (activeCollection === TRACK_SELECT_VALUE) {
     const out = [];
+    const windowDays = parseTrackWindowDays(trackWindowDays);
+    const cutoffMs = windowDays > 0 ? (Date.now() - (windowDays * 24 * 60 * 60 * 1000)) : 0;
     for (const appId of Object.keys(state.items || {})) {
       const intent = getItemIntentState(appId);
       if (String(intent.bucket || "INBOX").toUpperCase() === "TRACK") {
+        if (cutoffMs > 0) {
+          const triagedAt = Number(state?.items?.[appId]?.triagedAt || 0);
+          if (!Number.isFinite(triagedAt) || triagedAt < cutoffMs) {
+            continue;
+          }
+        }
         out.push(appId);
       }
     }
+    out.sort((a, b) => Number(state?.items?.[b]?.triagedAt || 0) - Number(state?.items?.[a]?.triagedAt || 0));
     return out;
   }
 
@@ -3555,6 +3584,7 @@ async function render() {
   const viewSelect = document.getElementById("view-select");
   const triageFilterSelect = document.getElementById("triage-filter-select");
   const hideMutedCheckbox = document.getElementById("hide-muted-checkbox");
+  const trackWindowSelect = document.getElementById("track-window-select");
   const renameActionBtn = document.getElementById("menu-action-rename");
   const deleteActionBtn = document.getElementById("menu-action-delete");
   const deleteSelect = document.getElementById("delete-collection-select");
@@ -3569,6 +3599,10 @@ async function render() {
   }
   if (hideMutedCheckbox) {
     hideMutedCheckbox.checked = hideMuted;
+  }
+  if (trackWindowSelect) {
+    trackWindowSelect.value = String(parseTrackWindowDays(trackWindowDays));
+    trackWindowSelect.classList.toggle("hidden", activeCollection !== TRACK_SELECT_VALUE);
   }
 
   renderSortMenu();
@@ -3884,6 +3918,11 @@ function bindFilterControls() {
     },
     onHideMutedChange: async (checked) => {
       hideMuted = Boolean(checked);
+      page = 1;
+      await renderCards();
+    },
+    onTrackWindowChange: async (value) => {
+      trackWindowDays = parseTrackWindowDays(value);
       page = 1;
       await renderCards();
     }
