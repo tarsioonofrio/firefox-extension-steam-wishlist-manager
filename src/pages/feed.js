@@ -20,13 +20,19 @@ function setStatus(message, isError = false) {
 
 function getIntent(appId) {
   const item = state?.items?.[appId] || {};
-  const track = Number(item.track || 0) > 0 ? 1 : 0;
+  const rawTrackIntent = String(item.trackIntent || "").trim().toUpperCase();
+  const rawBuyIntent = String(item.buyIntent || "").trim().toUpperCase();
+  const track = rawTrackIntent === "ON" ? 1 : (rawTrackIntent === "OFF" ? 0 : (Number(item.track || 0) > 0 ? 1 : 0));
   const buyRaw = Number(item.buy || 0);
-  const buy = buyRaw >= 2 ? 2 : (buyRaw > 0 ? 1 : 0);
+  const buy = rawBuyIntent === "BUY"
+    ? 2
+    : (rawBuyIntent === "MAYBE" ? 1 : (buyRaw >= 2 ? 2 : (buyRaw > 0 ? 1 : 0)));
   const labels = Array.isArray(item.labels) ? item.labels.map((x) => String(x || "").toLowerCase()) : [];
   return {
     track,
     buy,
+    trackIntent: rawTrackIntent || "UNSET",
+    buyIntent: rawBuyIntent || "UNSET",
     muted: Boolean(item.muted),
     owned: labels.includes("owned")
   };
@@ -142,12 +148,18 @@ async function refreshFeed() {
 
 async function setIntent(appId, patch) {
   const item = state?.items?.[appId] || {};
-  await browser.runtime.sendMessage({
+  const response = await browser.runtime.sendMessage({
     type: "set-item-intent",
     appId,
     title: String(item?.title || ""),
     ...patch
   });
+  const steamErrors = Array.isArray(response?.steamWrite?.errors)
+    ? response.steamWrite.errors.map((x) => String(x || "").trim()).filter(Boolean)
+    : [];
+  if (steamErrors.length > 0) {
+    setStatus(`Local state saved, but Steam write failed: ${steamErrors[0]}`, true);
+  }
   await loadState();
 }
 
@@ -214,7 +226,7 @@ function render() {
 
     const trackBtn = document.createElement("button");
     trackBtn.type = "button";
-    trackBtn.textContent = intent.track > 0 ? "Untrack" : "Track";
+    trackBtn.textContent = intent.track > 0 ? "Unfollow" : "Follow";
     trackBtn.addEventListener("click", async () => {
       await setIntent(entry.appId, { track: intent.track > 0 ? 0 : 1 });
       render();

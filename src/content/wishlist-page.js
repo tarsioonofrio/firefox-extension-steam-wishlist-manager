@@ -599,12 +599,115 @@ async function syncWishlistOrderFromDom(steamIdHint = "") {
   }
 }
 
+async function getStoreSessionIdFromPage() {
+  const response = await withTimeout(fetch("https://store.steampowered.com/account/preferences", {
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      Accept: "text/html"
+    }
+  }), 12000, "preferences fetch timeout");
+  if (!response.ok) {
+    throw new Error(`Could not load session page (${response.status}).`);
+  }
+  const html = await withTimeout(response.text(), 12000, "preferences text timeout");
+  const match = html.match(/g_sessionID\s*=\s*"([^"]+)"/i);
+  const sessionId = String(match?.[1] || "").trim();
+  if (!sessionId) {
+    throw new Error("Could not resolve Steam session id from page.");
+  }
+  return sessionId;
+}
+
+async function proxyReadUserdata() {
+  const params = new URLSearchParams();
+  params.set("_", String(Date.now()));
+  const response = await withTimeout(fetch(
+    `https://store.steampowered.com/dynamicstore/userdata/?${params.toString()}`,
+    {
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        Accept: "text/html"
+      }
+    }
+  ), 12000, "userdata fetch timeout");
+  if (!response.ok) {
+    throw new Error(`Could not read Steam userdata (${response.status}).`);
+  }
+  const data = await withTimeout(response.json(), 12000, "userdata json timeout");
+  return {
+    rgWishlist: Array.isArray(data?.rgWishlist) ? data.rgWishlist : [],
+    rgFollowedApps: Array.isArray(data?.rgFollowedApps) ? data.rgFollowedApps : []
+  };
+}
+
+async function proxyWriteSteamAction(action, appId) {
+  const act = String(action || "").trim();
+  const id = String(appId || "").trim();
+  if (!id) {
+    throw new Error("Invalid appId.");
+  }
+  const sessionId = await getStoreSessionIdFromPage();
+  let url = "";
+  const form = new FormData();
+  form.set("sessionid", sessionId);
+  form.set("appid", id);
+  if (act === "wishlist-add") {
+    url = "https://store.steampowered.com/api/addtowishlist";
+  } else if (act === "wishlist-remove") {
+    url = "https://store.steampowered.com/api/removefromwishlist";
+  } else if (act === "follow-on") {
+    url = "https://store.steampowered.com/explore/followgame/";
+  } else if (act === "follow-off") {
+    url = "https://store.steampowered.com/explore/followgame/";
+    form.set("unfollow", "1");
+  } else {
+    throw new Error("Unsupported action.");
+  }
+
+  const response = await withTimeout(fetch(url, {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    body: form,
+    headers: {
+      "X-Requested-With": "SteamWishlistManager"
+    }
+  }), 12000, "write action timeout");
+  const status = Number(response?.status || 0);
+  const rawText = await withTimeout(response.text(), 12000, "write action text timeout");
+  let body = null;
+  if (rawText) {
+    try {
+      body = JSON.parse(rawText);
+    } catch {
+      body = rawText;
+    }
+  }
+  const success = body === true
+    || body?.success === true
+    || Number(body?.success) > 0
+    || body?.result === 1;
+  return {
+    ok: status >= 200 && status < 300 && success,
+    status,
+    body
+  };
+}
+
 browser.runtime.onMessage.addListener((message) => {
   if (!message || typeof message !== "object") {
     return undefined;
   }
   if (message.type === "sync-wishlist-order-from-dom") {
     return syncWishlistOrderFromDom(String(message.steamId || ""));
+  }
+  if (message.type === "steam-proxy-read-userdata") {
+    return proxyReadUserdata();
+  }
+  if (message.type === "steam-proxy-write-action") {
+    return proxyWriteSteamAction(String(message.action || ""), String(message.appId || ""));
   }
   return undefined;
 });

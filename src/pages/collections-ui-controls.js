@@ -40,7 +40,7 @@
 
     const trackOption = document.createElement("option");
     trackOption.value = trackSelectValue;
-    trackOption.textContent = `Track (${trackCount})`;
+    trackOption.textContent = `Followed (${trackCount})`;
     select.appendChild(trackOption);
 
     const buyOption = document.createElement("option");

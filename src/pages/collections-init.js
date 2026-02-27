@@ -10,11 +10,13 @@
     const render = options?.render || (async () => {});
     const refreshFilterOptionsInBackground = options?.refreshFilterOptionsInBackground || (() => {});
     const refreshWholeDatabase = options?.refreshWholeDatabase || (async () => {});
+    const syncFollowedFromSteam = options?.syncFollowedFromSteam || (async () => {});
 
     await loadMetaCache();
     await loadWishlistAddedMap();
     const state = await refreshState();
     setActiveCollectionFromState(state);
+    await syncFollowedFromSteam();
 
     attachEvents();
     quickPopulateFiltersFromCache();

@@ -4,6 +4,7 @@ const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV2";
+const FOLLOWED_SYNC_META_KEY = "steamWishlistFollowedSyncMetaV1";
 const NATIVE_BRIDGE_HOST_NAME = "dev.tarsio.steam_wishlist_manager_bridge";
 const BACKUP_SETTINGS_KEY = "steamWishlistBackupSettingsV1";
 const BACKUP_HISTORY_KEY = "steamWishlistBackupHistoryV1";
@@ -31,11 +32,14 @@ const NATIVE_BRIDGE_DATA_KEYS = [
   BACKUP_SETTINGS_KEY
 ];
 const WISHLIST_ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+const FOLLOWED_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 const MAX_COLLECTION_NAME_LENGTH = 64;
 const MAX_COLLECTIONS = 100;
 const MAX_ITEMS_PER_COLLECTION = 5000;
 const VALID_APP_ID_PATTERN = /^\d{1,10}$/;
 const VALID_BUCKETS = new Set(["INBOX", "TRACK", "MAYBE", "BUY", "ARCHIVE"]);
+const VALID_BUY_INTENTS = new Set(["UNSET", "NONE", "MAYBE", "BUY"]);
+const VALID_TRACK_INTENTS = new Set(["UNSET", "OFF", "ON"]);
 const STEAM_WRITE_MIN_INTERVAL_MS = 250;
 let backgroundWishlistDomSyncInFlight = false;
 let nativeBridgePublishTimer = null;
@@ -255,11 +259,21 @@ function normalizeItemRecord(appId, rawItem) {
   const src = rawItem && typeof rawItem === "object" ? rawItem : {};
   const track = clamp01to2(src.track, 0);
   const buy = clamp01to2(src.buy, 0);
+  const rawBuyIntent = String(src.buyIntent || "").trim().toUpperCase();
+  const rawTrackIntent = String(src.trackIntent || "").trim().toUpperCase();
+  const buyIntent = VALID_BUY_INTENTS.has(rawBuyIntent)
+    ? rawBuyIntent
+    : (buy >= 2 ? "BUY" : (buy === 1 ? "MAYBE" : "UNSET"));
+  const trackIntent = VALID_TRACK_INTENTS.has(rawTrackIntent)
+    ? rawTrackIntent
+    : (track > 0 ? "ON" : "UNSET");
   return {
     appId,
     title: String(src.title || "").slice(0, 200),
     track,
     buy,
+    buyIntent,
+    trackIntent,
     bucket: normalizeBucket(src.bucket, track, buy),
     note: String(src.note || "").slice(0, 600),
     targetPriceCents: Number.isFinite(Number(src.targetPriceCents))
@@ -278,6 +292,8 @@ function hasItemTriageState(item) {
   const normalized = normalizeItemRecord(String(item.appId || ""), item);
   return normalized.track > 0
     || normalized.buy > 0
+    || normalized.buyIntent !== "UNSET"
+    || normalized.trackIntent !== "UNSET"
     || normalized.bucket === "ARCHIVE"
     || Boolean(normalized.note)
     || Number.isFinite(Number(normalized.targetPriceCents))
@@ -602,6 +618,102 @@ function ensureDynamicCollection(state, name, definition) {
   return normalized;
 }
 
+function sanitizeFollowedAppIds(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const out = [];
+  const seen = new Set();
+  for (const raw of values) {
+    const appId = String(raw || "").trim();
+    if (!VALID_APP_ID_PATTERN.test(appId) || seen.has(appId)) {
+      continue;
+    }
+    seen.add(appId);
+    out.push(appId);
+  }
+  return out;
+}
+
+async function syncFollowedAppsFromSteam(state, force = false) {
+  const now = Date.now();
+  const storedMeta = await browser.storage.local.get(FOLLOWED_SYNC_META_KEY);
+  const cachedMeta = storedMeta?.[FOLLOWED_SYNC_META_KEY] || {};
+  const lastSyncedAt = Number(cachedMeta.lastSyncedAt || 0);
+  if (!force && lastSyncedAt > 0 && (now - lastSyncedAt) < FOLLOWED_SYNC_INTERVAL_MS) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "fresh-cache",
+      lastSyncedAt,
+      followedCount: Number(cachedMeta.followedCount || 0),
+      updatedCount: 0
+    };
+  }
+
+  let followedIds = [];
+  try {
+    const params = new URLSearchParams();
+    params.set("_", String(Date.now()));
+    const userDataResponse = await fetch(`https://store.steampowered.com/dynamicstore/userdata/?${params.toString()}`, {
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        Accept: "text/html"
+      }
+    });
+    if (!userDataResponse.ok) {
+      throw new Error(`Could not read Steam userdata (${userDataResponse.status}).`);
+    }
+    const userData = await userDataResponse.json();
+    if (!userData || typeof userData !== "object" || !Array.isArray(userData.rgFollowedApps)) {
+      throw new Error("Steam userdata missing rgFollowedApps.");
+    }
+    followedIds = sanitizeFollowedAppIds(userData.rgFollowedApps);
+  } catch {
+    const proxied = await sendMessageToStoreTabWithFallback({
+      type: "steam-proxy-read-userdata"
+    });
+    followedIds = sanitizeFollowedAppIds(proxied?.rgFollowedApps);
+    if (followedIds.length === 0) {
+      throw new Error("Could not read followed apps from Steam.");
+    }
+  }
+  let updatedCount = 0;
+
+  for (const appId of followedIds) {
+    const current = normalizeItemRecord(appId, state.items?.[appId] || {});
+    const next = normalizeItemRecord(appId, {
+      ...current,
+      track: 1,
+      trackIntent: "ON",
+      bucket: normalizeBucket(current.bucket, 1, current.buy)
+    });
+    const changed = current.track !== next.track
+      || current.trackIntent !== next.trackIntent
+      || current.bucket !== next.bucket;
+    if (changed) {
+      state.items[appId] = next;
+      updatedCount += 1;
+    }
+  }
+
+  await browser.storage.local.set({
+    [FOLLOWED_SYNC_META_KEY]: {
+      lastSyncedAt: now,
+      followedCount: followedIds.length
+    }
+  });
+
+  return {
+    ok: true,
+    skipped: false,
+    lastSyncedAt: now,
+    followedCount: followedIds.length,
+    updatedCount
+  };
+}
+
 function encodeVarint(value) {
   let n = 0n;
   if (typeof value === "bigint") {
@@ -675,7 +787,10 @@ async function postSteamForm(url, formValues, retryOn401 = true) {
     method: "POST",
     credentials: "include",
     cache: "no-store",
-    body: buildSteamFormData(formValues)
+    body: buildSteamFormData(formValues),
+    headers: {
+      "X-Requested-With": "SteamWishlistManager"
+    }
   });
   if (response.status === 401 && retryOn401) {
     steamSessionIdCache = "";
@@ -688,43 +803,103 @@ async function postSteamForm(url, formValues, retryOn401 = true) {
     const body = await response.text().catch(() => "");
     throw new Error(`Steam write failed (${response.status})${body ? `: ${body.slice(0, 180)}` : ""}`);
   }
-  return response;
+  const bodyText = await response.text().catch(() => "");
+  let body = null;
+  if (bodyText) {
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      body = bodyText;
+    }
+  }
+  return {
+    status: response.status,
+    bodyText,
+    body
+  };
 }
 
 async function setSteamWishlist(appId, enabled) {
-  const sessionId = await fetchSteamSessionId(false);
-  const url = enabled
-    ? "https://store.steampowered.com/api/addtowishlist"
-    : "https://store.steampowered.com/api/removefromwishlist";
-  await postSteamForm(url, { sessionid: sessionId, appid: appId });
+  try {
+    const sessionId = await fetchSteamSessionId(false);
+    const url = enabled
+      ? "https://store.steampowered.com/api/addtowishlist"
+      : "https://store.steampowered.com/api/removefromwishlist";
+    const response = await postSteamForm(url, { sessionid: sessionId, appid: appId });
+    const body = response?.body;
+    const success = body === true
+      || body?.success === true
+      || Number(body?.success) > 0
+      || body?.result === 1;
+    if (!success) {
+      throw new Error(`Steam wishlist write rejected${response?.bodyText ? `: ${String(response.bodyText).slice(0, 180)}` : ""}`);
+    }
+  } catch {
+    const fallback = await sendMessageToStoreTabWithFallback({
+      type: "steam-proxy-write-action",
+      action: enabled ? "wishlist-add" : "wishlist-remove",
+      appId
+    });
+    if (!fallback?.ok) {
+      throw new Error(`Steam wishlist write rejected (${fallback?.status || 0}).`);
+    }
+  }
   return { target: "wishlist", enabled: Boolean(enabled), appId };
 }
 
 async function setSteamFollow(appId, enabled) {
-  const sessionId = await fetchSteamSessionId(false);
-  const payload = {
-    sessionid: sessionId,
-    appid: appId,
-    ...(enabled ? {} : { unfollow: "1" })
-  };
-  await postSteamForm("https://store.steampowered.com/explore/followgame/", payload);
+  try {
+    const sessionId = await fetchSteamSessionId(false);
+    const payload = {
+      sessionid: sessionId,
+      appid: appId,
+      ...(enabled ? {} : { unfollow: "1" })
+    };
+    const response = await postSteamForm("https://store.steampowered.com/explore/followgame/", payload);
+    const body = response?.body;
+    const success = body === true || body?.success === true || Number(body?.success) > 0;
+    if (!success) {
+      throw new Error(`Steam follow write rejected${response?.bodyText ? `: ${String(response.bodyText).slice(0, 180)}` : ""}`);
+    }
+  } catch {
+    const fallback = await sendMessageToStoreTabWithFallback({
+      type: "steam-proxy-write-action",
+      action: enabled ? "follow-on" : "follow-off",
+      appId
+    });
+    if (!fallback?.ok) {
+      throw new Error(`Steam follow write rejected (${fallback?.status || 0}).`);
+    }
+  }
   return { target: "follow", enabled: Boolean(enabled), appId };
 }
 
 async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent) {
   const prev = previousIntent && typeof previousIntent === "object" ? previousIntent : {};
   const next = nextIntent && typeof nextIntent === "object" ? nextIntent : {};
-  const prevBuy = Number(prev.buy || 0) > 0;
-  const nextBuy = Number(next.buy || 0) > 0;
-  const prevTrack = Number(prev.track || 0) > 0;
-  const nextTrack = Number(next.track || 0) > 0;
+  const prevBuyIntent = String(prev.buyIntent || "UNSET").toUpperCase();
+  const nextBuyIntent = String(next.buyIntent || "UNSET").toUpperCase();
+  const prevTrackIntent = String(prev.trackIntent || "UNSET").toUpperCase();
+  const nextTrackIntent = String(next.trackIntent || "UNSET").toUpperCase();
 
   const actions = [];
-  if (prevBuy !== nextBuy) {
-    actions.push(() => setSteamWishlist(appId, nextBuy));
+  const prevWishlistDesired = prevBuyIntent === "BUY" || prevBuyIntent === "MAYBE"
+    ? true
+    : (prevBuyIntent === "NONE" ? false : null);
+  const nextWishlistDesired = nextBuyIntent === "BUY" || nextBuyIntent === "MAYBE"
+    ? true
+    : (nextBuyIntent === "NONE" ? false : null);
+  if (prevWishlistDesired !== nextWishlistDesired && nextWishlistDesired !== null) {
+    actions.push(() => setSteamWishlist(appId, nextWishlistDesired));
   }
-  if (prevTrack !== nextTrack) {
-    actions.push(() => setSteamFollow(appId, nextTrack));
+  const prevFollowDesired = prevTrackIntent === "ON"
+    ? true
+    : (prevTrackIntent === "OFF" ? false : null);
+  const nextFollowDesired = nextTrackIntent === "ON"
+    ? true
+    : (nextTrackIntent === "OFF" ? false : null);
+  if (prevFollowDesired !== nextFollowDesired && nextFollowDesired !== null) {
+    actions.push(() => setSteamFollow(appId, nextFollowDesired));
   }
 
   if (actions.length === 0) {
@@ -1134,6 +1309,45 @@ async function sendMessageToTabWithRetry(tabId, message, retries = 30, delayMs =
   throw lastError || new Error("Could not send message to wishlist tab.");
 }
 
+async function sendMessageToStoreTabWithFallback(message) {
+  const queryUrls = [
+    "*://store.steampowered.com/wishlist/*",
+    "*://store.steampowered.com/app/*",
+    "*://store.steampowered.com/*"
+  ];
+  let existingTabs = [];
+  for (const pattern of queryUrls) {
+    const tabs = await browser.tabs.query({ url: pattern });
+    if (Array.isArray(tabs) && tabs.length > 0) {
+      existingTabs = tabs;
+      break;
+    }
+  }
+
+  let createdTabId = null;
+  let targetTabId = Number(existingTabs?.[0]?.id || 0);
+
+  if (!(targetTabId > 0)) {
+    const createdTab = await browser.tabs.create({
+      url: "https://store.steampowered.com/",
+      active: false
+    });
+    targetTabId = Number(createdTab?.id || 0);
+    createdTabId = targetTabId > 0 ? targetTabId : null;
+    if (!(targetTabId > 0)) {
+      throw new Error("Could not open Store tab for Steam proxy.");
+    }
+  }
+
+  try {
+    return await sendMessageToTabWithRetry(targetTabId, message, 40, 500);
+  } finally {
+    if (createdTabId) {
+      browser.tabs.remove(createdTabId).catch(() => {});
+    }
+  }
+}
+
 async function waitForWishlistTabReady(tabId, timeoutMs = 90000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -1457,6 +1671,20 @@ browser.runtime.onMessage.addListener((message, sender) => {
         const current = normalizeItemRecord(appId, state.items?.[appId] || {});
         const nextTrack = message.track === undefined ? current.track : clamp01to2(message.track, current.track);
         const nextBuy = message.buy === undefined ? current.buy : clamp01to2(message.buy, current.buy);
+        const nextTrackIntent = message.trackIntent !== undefined
+          ? (VALID_TRACK_INTENTS.has(String(message.trackIntent || "").toUpperCase())
+            ? String(message.trackIntent || "").toUpperCase()
+            : current.trackIntent)
+          : (message.track === undefined
+            ? current.trackIntent
+            : (nextTrack > 0 ? "ON" : "OFF"));
+        const nextBuyIntent = message.buyIntent !== undefined
+          ? (VALID_BUY_INTENTS.has(String(message.buyIntent || "").toUpperCase())
+            ? String(message.buyIntent || "").toUpperCase()
+            : current.buyIntent)
+          : (message.buy === undefined
+            ? current.buyIntent
+            : (nextBuy >= 2 ? "BUY" : (nextBuy === 1 ? "MAYBE" : "NONE")));
         const nextBucket = normalizeBucket(
           message.bucket === undefined ? current.bucket : message.bucket,
           nextTrack,
@@ -1479,6 +1707,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
           title: String(message.title || current.title || "").slice(0, 200),
           track: nextTrack,
           buy: nextBuy,
+          trackIntent: nextTrackIntent,
+          buyIntent: nextBuyIntent,
           bucket: nextBucket,
           note: nextNote,
           targetPriceCents: nextTargetPrice,
@@ -1489,7 +1719,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
         await setState(state);
         let steamWrite = null;
-        if (message.syncSteam !== false) {
+        if (message.syncSteam !== false && message.owned === undefined) {
           steamWrite = await syncSteamSignalsForIntentChange(appId, previousItem, state.items[appId]);
         }
         return { ok: true, item: state.items[appId], state, steamWrite };
@@ -1541,6 +1771,20 @@ browser.runtime.onMessage.addListener((message, sender) => {
           const current = normalizeItemRecord(appId, state.items?.[appId] || {});
           const nextTrack = message.track === undefined ? current.track : clamp01to2(message.track, current.track);
           const nextBuy = message.buy === undefined ? current.buy : clamp01to2(message.buy, current.buy);
+          const nextTrackIntent = message.trackIntent !== undefined
+            ? (VALID_TRACK_INTENTS.has(String(message.trackIntent || "").toUpperCase())
+              ? String(message.trackIntent || "").toUpperCase()
+              : current.trackIntent)
+            : (message.track === undefined
+              ? current.trackIntent
+              : (nextTrack > 0 ? "ON" : "OFF"));
+          const nextBuyIntent = message.buyIntent !== undefined
+            ? (VALID_BUY_INTENTS.has(String(message.buyIntent || "").toUpperCase())
+              ? String(message.buyIntent || "").toUpperCase()
+              : current.buyIntent)
+            : (message.buy === undefined
+              ? current.buyIntent
+              : (nextBuy >= 2 ? "BUY" : (nextBuy === 1 ? "MAYBE" : "NONE")));
           const nextBucket = normalizeBucket(
             message.bucket === undefined ? current.bucket : message.bucket,
             nextTrack,
@@ -1557,6 +1801,8 @@ browser.runtime.onMessage.addListener((message, sender) => {
             title: String(message.title || current.title || "").slice(0, 200),
             track: nextTrack,
             buy: nextBuy,
+            trackIntent: nextTrackIntent,
+            buyIntent: nextBuyIntent,
             bucket: nextBucket,
             note: current.note,
             targetPriceCents: current.targetPriceCents,
@@ -1565,7 +1811,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
             triagedAt: ts
           });
 
-          if (message.syncSteam !== false) {
+          if (message.syncSteam !== false && message.owned === undefined) {
             const steamWrite = await syncSteamSignalsForIntentChange(appId, previousItem, state.items[appId]);
             steamWriteResults.push({
               appId,
@@ -1736,6 +1982,14 @@ browser.runtime.onMessage.addListener((message, sender) => {
       case "publish-native-bridge-snapshot": {
         const result = await publishNativeBridgeSnapshot(String(message.reason || "manual"));
         return { ok: Boolean(result?.ok), ...result };
+      }
+
+      case "sync-followed-from-steam": {
+        const result = await syncFollowedAppsFromSteam(state, Boolean(message.force));
+        if (!result.skipped && result.updatedCount > 0) {
+          await setState(state);
+        }
+        return result;
       }
 
       default:

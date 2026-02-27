@@ -320,9 +320,19 @@ function deriveBucketFromState(track, buy, owned) {
 
 function getItemIntentState(appId) {
   const item = state?.items?.[appId] || {};
-  const track = Number(item.track || 0) > 0 ? 1 : 0;
+  const steamWishlisted = Object.prototype.hasOwnProperty.call(wishlistAddedMap || {}, String(appId || ""));
   const buyRaw = Number(item.buy || 0);
-  const buy = buyRaw >= 2 ? 2 : (buyRaw > 0 ? 1 : 0);
+  const trackRaw = Number(item.track || 0);
+  const rawBuyIntent = String(item.buyIntent || "").trim().toUpperCase();
+  const rawTrackIntent = String(item.trackIntent || "").trim().toUpperCase();
+  const buyIntent = rawBuyIntent === "BUY" || rawBuyIntent === "MAYBE" || rawBuyIntent === "NONE" || rawBuyIntent === "UNSET"
+    ? rawBuyIntent
+    : (buyRaw >= 2 ? "BUY" : (buyRaw > 0 ? "MAYBE" : "UNSET"));
+  const trackIntent = rawTrackIntent === "ON" || rawTrackIntent === "OFF" || rawTrackIntent === "UNSET"
+    ? rawTrackIntent
+    : (trackRaw > 0 ? "ON" : "UNSET");
+  const track = trackIntent === "ON" ? 1 : (trackIntent === "OFF" ? 0 : (trackRaw > 0 ? 1 : 0));
+  const buy = buyIntent === "BUY" ? 2 : (buyIntent === "MAYBE" ? 1 : (buyRaw >= 2 ? 2 : (buyRaw > 0 ? 1 : 0)));
   const muted = Boolean(item.muted);
   const note = String(item.note || "").trim();
   const labels = Array.isArray(item.labels) ? item.labels.map((label) => String(label || "").trim().toLowerCase()).filter(Boolean) : [];
@@ -334,6 +344,9 @@ function getItemIntentState(appId) {
   return {
     track,
     buy,
+    trackIntent,
+    buyIntent,
+    steamWishlisted,
     bucket,
     muted,
     note,
@@ -1714,7 +1727,10 @@ async function refreshCurrentPageItems() {
     return;
   }
 
-  setStatus(`Refreshing ${ids.length} visible items...`);
+  setStatus(`Refreshing ${ids.length} visible items (Steam + metadata)...`);
+  await loadWishlistAddedMap();
+  await syncFollowedFromSteam();
+  await refreshState();
   await ensureMetaForAppIds(ids, ids.length, true, "Refreshing visible items:");
   await browser.storage.local.remove([TAG_COUNTS_CACHE_KEY, TYPE_COUNTS_CACHE_KEY, EXTRA_FILTER_COUNTS_CACHE_KEY]);
   invalidateWishlistPrecomputedSorts();
@@ -1728,7 +1744,10 @@ async function refreshSingleItem(appId) {
   if (!appId) {
     return;
   }
-  setStatus(`Refreshing ${appId}...`);
+  setStatus(`Refreshing ${appId} (Steam + metadata)...`);
+  await loadWishlistAddedMap();
+  await syncFollowedFromSteam();
+  await refreshState();
   await fetchAppMeta(appId, { force: true });
   invalidateWishlistPrecomputedSorts();
   await render();
@@ -1749,6 +1768,12 @@ async function setItemIntent(appId, intentPatch = {}) {
   });
   if (!response?.ok) {
     throw new Error(String(response?.error || "Failed to update triage intent."));
+  }
+  const steamErrors = Array.isArray(response?.steamWrite?.errors)
+    ? response.steamWrite.errors.map((x) => String(x || "").trim()).filter(Boolean)
+    : [];
+  if (steamErrors.length > 0) {
+    setStatus(`Local state saved, but Steam write failed: ${steamErrors[0]}`, true, { withNetworkHint: true });
   }
   await refreshState();
   await render();
@@ -1854,7 +1879,7 @@ async function handleKeyboardBatchIntent(actionCode) {
   if (actionCode === "Digit3") {
     await applyBatchIntent(
       { track: 1 },
-      "Selected games set to Track."
+      "Selected games set to Follow."
     );
     return;
   }
@@ -3466,7 +3491,7 @@ function createLineRow(options) {
   buyBtn.textContent = "Buy";
   buyBtn.addEventListener("click", () => {
     onSetIntent(appId, { buy: itemIntent.buy === 2 ? 0 : 2 })
-      .then(() => setStatus(itemIntent.buy === 2 ? "Buy unset." : "Set to Buy."))
+      .then(() => setStatus(itemIntent.buy === 2 ? "Buy cleared (removed from Steam wishlist)." : "Set to Buy (added to Steam wishlist)."))
       .catch(() => setStatus("Failed to set Buy.", true));
   });
 
@@ -3476,17 +3501,17 @@ function createLineRow(options) {
   maybeBtn.textContent = "Maybe";
   maybeBtn.addEventListener("click", () => {
     onSetIntent(appId, { buy: itemIntent.buy === 1 ? 0 : 1 })
-      .then(() => setStatus(itemIntent.buy === 1 ? "Maybe unset." : "Set to Maybe."))
+      .then(() => setStatus(itemIntent.buy === 1 ? "Maybe cleared (removed from Steam wishlist)." : "Set to Maybe (added to Steam wishlist)."))
       .catch(() => setStatus("Failed to set Maybe.", true));
   });
 
   const trackBtn = document.createElement("button");
   trackBtn.type = "button";
   trackBtn.className = "line-btn";
-  trackBtn.textContent = itemIntent.track > 0 ? "Untrack" : "Track";
+  trackBtn.textContent = itemIntent.track > 0 ? "Unfollow" : "Follow";
   trackBtn.addEventListener("click", () => {
     onSetIntent(appId, { track: itemIntent.track > 0 ? 0 : 1 })
-      .then(() => setStatus(itemIntent.track > 0 ? "Untracked." : "Tracked."))
+      .then(() => setStatus(itemIntent.track > 0 ? "Untracked (unfollowed on Steam)." : "Tracked (followed on Steam)."))
       .catch(() => setStatus("Failed to toggle track.", true));
   });
 
@@ -3618,8 +3643,8 @@ function renderBatchMenuState() {
   if (batchHint) {
     const count = batchSelectedIds.size;
     batchHint.textContent = count > 0
-      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Track, Shift+4 Mute, Shift+5 Unmute`
-      : "Batch mode active | Select cards to use shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Track, Shift+4 Mute, Shift+5 Unmute";
+      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Follow, Shift+4 Mute, Shift+5 Unmute`
+      : "Batch mode active | Select cards to use shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Follow, Shift+4 Mute, Shift+5 Unmute";
     batchHint.classList.toggle("hidden", !batchMode);
   }
   if (collectionSelect) {
@@ -3756,11 +3781,20 @@ async function applyBatchIntent(intentPatch, successMessage, requireConfirm = fa
   if (!response?.ok) {
     throw new Error(String(response?.error || "Failed to apply batch intent action."));
   }
+  const failures = Array.isArray(response?.steamWriteResults)
+    ? response.steamWriteResults.filter((entry) => Array.isArray(entry?.errors) && entry.errors.length > 0)
+    : [];
 
   batchSelectedIds.clear();
   await refreshState();
   await render();
-  setStatus(successMessage || "Batch action applied.");
+  if (failures.length > 0) {
+    const first = failures[0];
+    const firstError = String(first?.errors?.[0] || "Steam write failed");
+    setStatus(`${successMessage || "Batch action applied."} Steam write failed for ${failures.length} item(s): ${firstError}`, true, { withNetworkHint: true });
+  } else {
+    setStatus(successMessage || "Batch action applied.");
+  }
 }
 
 function getCollectionsContainingApp(appId) {
@@ -3987,6 +4021,7 @@ async function renderCards() {
   for (const appId of pageIds) {
     const hasStateTitle = Boolean(state?.items?.[appId]?.title);
     const title = state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || `App ${appId}`;
+    const itemIntent = getItemIntentState(appId);
     const card = cardRenderUtils.createCardNodes({
       template,
       appId,
@@ -4000,14 +4035,15 @@ async function renderCards() {
       card,
       appId,
       imageUrl: getCardImageUrl(appId),
-      wishlistDate: formatUnixDate(wishlistAddedMap[appId])
+      wishlistDate: formatUnixDate(wishlistAddedMap[appId]),
+      itemIntent
     });
     cardRenderUtils.bindCardActions({
       card,
       appId,
       sourceMode,
       activeCollection,
-      itemIntent: getItemIntentState(appId),
+      itemIntent,
       allCollectionNames: getStaticCollectionNames(),
       selectedCollectionNames: getCollectionsContainingApp(appId),
       setStatus,
@@ -4674,8 +4710,8 @@ function bindBatchControls() {
   trackActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
       { track: 1 },
-      "Selected games set to Track."
-    ).catch(() => setStatus("Failed to apply batch track.", true));
+      "Selected games set to Follow."
+    ).catch(() => setStatus("Failed to apply batch follow.", true));
   });
 
   muteActionBtn?.addEventListener("click", () => {
@@ -4900,6 +4936,25 @@ function attachEvents() {
   bindKeyboardShortcuts();
 }
 
+async function syncFollowedFromSteam() {
+  try {
+    const response = await browser.runtime.sendMessage({
+      type: "sync-followed-from-steam",
+      force: true
+    });
+    if (!response?.ok) {
+      setStatus(String(response?.error || "Failed to import followed apps from Steam."), true, { withNetworkHint: true });
+      return;
+    }
+    if (!response?.skipped && Number(response?.updatedCount || 0) > 0) {
+      await refreshState();
+      setStatus(`Imported ${response.updatedCount} followed game(s) from Steam.`);
+    }
+  } catch {
+    setStatus("Failed to import followed apps from Steam.", true, { withNetworkHint: true });
+  }
+}
+
 initUtils.run({
   loadMetaCache,
   loadWishlistAddedMap,
@@ -4912,6 +4967,7 @@ initUtils.run({
     sourceMode = "wishlist";
   },
   attachEvents,
+  syncFollowedFromSteam,
   quickPopulateFiltersFromCache,
   renderRatingControls,
   render,

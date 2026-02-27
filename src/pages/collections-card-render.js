@@ -95,6 +95,7 @@
     const appId = String(options?.appId || "");
     const imageUrl = String(options?.imageUrl || "");
     const wishlistDate = String(options?.wishlistDate || "-");
+    const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
     if (!card) {
       return;
     }
@@ -115,7 +116,10 @@
       card.appidEl.textContent = `AppID: ${appId}`;
     }
     if (card.wishlistAddedEl) {
-      card.wishlistAddedEl.textContent = `Wishlisted: ${wishlistDate}`;
+      const buyIntent = String(itemIntent.buyIntent || "UNSET").toUpperCase();
+      const trackIntent = String(itemIntent.trackIntent || "UNSET").toUpperCase();
+      const steamWishlistHint = itemIntent.steamWishlisted ? "Steam" : "-";
+      card.wishlistAddedEl.textContent = `Wishlisted: ${wishlistDate} | Steam: ${steamWishlistHint} | BuyIntent: ${buyIntent} | TrackIntent: ${trackIntent}`;
     }
   }
 
@@ -175,10 +179,16 @@
       if (!action.btn) {
         continue;
       }
+      if (action.key === "track") {
+        action.btn.textContent = itemIntent.track > 0 ? "Unfollow" : "Follow";
+      }
       action.btn.classList.toggle("active", Boolean(action.isActive?.(itemIntent)));
       action.btn.addEventListener("click", async () => {
         try {
           await onSetIntent(appId, action.patch || {});
+          if (action.key === "track") {
+            setStatus(itemIntent.track > 0 ? "Unfollowed on Steam." : "Followed on Steam.");
+          }
         } catch (error) {
           setStatus(String(error?.message || "Failed to update intent."), true);
         }
