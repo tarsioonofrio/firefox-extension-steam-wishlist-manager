@@ -48,6 +48,12 @@ const DEFAULT_STATE = {
     extraCounts: {},
     importedAt: 0
   },
+  extensionSyncRequest: {
+    requestedAt: 0,
+    scopes: [],
+    reason: "",
+    fulfilledAt: 0
+  },
   wishlistRank: {
     steamId: "",
     orderedAppIds: [],
@@ -323,6 +329,16 @@ function normalizeState(raw) {
     typeCounts: isObject(extensionCaches.typeCounts) ? extensionCaches.typeCounts : {},
     extraCounts: isObject(extensionCaches.extraCounts) ? extensionCaches.extraCounts : {},
     importedAt: Number.isFinite(Number(extensionCaches.importedAt)) ? Number(extensionCaches.importedAt) : 0
+  };
+
+  const extensionSyncRequest = isObject(state.extensionSyncRequest) ? state.extensionSyncRequest : {};
+  state.extensionSyncRequest = {
+    requestedAt: Number.isFinite(Number(extensionSyncRequest.requestedAt)) ? Number(extensionSyncRequest.requestedAt) : 0,
+    scopes: Array.isArray(extensionSyncRequest.scopes)
+      ? extensionSyncRequest.scopes.map((v) => cleanText(v, 64)).filter(Boolean).slice(0, 20)
+      : [],
+    reason: cleanText(extensionSyncRequest.reason || "", 240),
+    fulfilledAt: Number.isFinite(Number(extensionSyncRequest.fulfilledAt)) ? Number(extensionSyncRequest.fulfilledAt) : 0
   };
 
   const rank = isObject(state.wishlistRank) ? state.wishlistRank : {};
@@ -710,6 +726,28 @@ function applyExtensionCachesToState(state) {
   };
 }
 
+function requestExtensionSync(state, scopes, reason) {
+  const requestedScopes = Array.isArray(scopes)
+    ? scopes.map((v) => cleanText(v, 64)).filter(Boolean)
+    : [];
+  state.extensionSyncRequest = {
+    requestedAt: now(),
+    scopes: requestedScopes,
+    reason: cleanText(reason || "", 240),
+    fulfilledAt: Number(state.extensionCaches?.importedAt || 0)
+  };
+  state.syncStatus.lastError = "";
+  state.syncStatus.phase = "awaiting_extension_sync";
+  state.syncStatus.updatedAt = now();
+  return {
+    requiresExtensionSync: true,
+    requestedAt: state.extensionSyncRequest.requestedAt,
+    scopes: requestedScopes,
+    reason: state.extensionSyncRequest.reason,
+    guidance: "Update data in extension (Collections/Configurations), export backup JSON, then import via swm_import_extension_backup_file/json."
+  };
+}
+
 function buildGamesCatalog(state) {
   const ids = new Set();
   for (const appIds of Object.values(state.collections || {})) {
@@ -859,6 +897,7 @@ async function updateSyncStatus(state, patch) {
 }
 
 async function fetchJsonWithRetry(url, options = {}, onAttempt = null) {
+  assertNetworkAccessAllowed();
   let lastError = null;
   for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt += 1) {
     try {
@@ -893,6 +932,7 @@ async function fetchJsonWithRetry(url, options = {}, onAttempt = null) {
 }
 
 async function fetchJsonViaCurl(url, options = {}) {
+  assertNetworkAccessAllowed();
   const escapedUrl = String(url).replace(/"/g, '\\"');
   const parts = ["curl", "-L", "-s", "--max-time", "30"];
   const headers = isObject(options?.headers) ? options.headers : {};
@@ -910,6 +950,7 @@ async function fetchJsonViaCurl(url, options = {}) {
 }
 
 async function fetchJsonSmart(url, options = {}, onAttempt = null) {
+  assertNetworkAccessAllowed();
   try {
     return await fetchJsonWithRetry(url, options, onAttempt);
   } catch (error) {
@@ -1261,11 +1302,35 @@ const mcp = new McpServer({
 
 const toolHandlers = new Map();
 const toolSchemas = new Map();
+const NETWORK_ALLOWED_TOOLS = new Set([
+  "swm_refresh_wishlist_rank",
+  "swm_refresh_wishlist_data",
+  "swm_refresh_appdetails",
+  "swm_refresh_frequencies",
+  "swm_refresh_all",
+  "swm_refresh_all_resume"
+]);
+let activeToolName = "";
+
+function assertNetworkAccessAllowed() {
+  if (!NETWORK_ALLOWED_TOOLS.has(String(activeToolName || ""))) {
+    throw new Error(`Network access is not allowed for tool: ${String(activeToolName || "unknown")}`);
+  }
+}
 
 function registerTool(name, config, handler) {
-  toolHandlers.set(name, handler);
+  const wrappedHandler = async (args) => {
+    const previous = activeToolName;
+    activeToolName = String(name || "");
+    try {
+      return await handler(args);
+    } finally {
+      activeToolName = previous;
+    }
+  };
+  toolHandlers.set(name, wrappedHandler);
   toolSchemas.set(name, config?.inputSchema || {});
-  return mcp.registerTool(name, config, handler);
+  return mcp.registerTool(name, config, wrappedHandler);
 }
 
 registerTool(
@@ -1664,70 +1729,16 @@ registerTool(
         }
       };
     }
-
-    try {
-      await updateSyncStatus(state, {
-        phase: "refresh_wishlist_rank",
-        done: 0,
-        total: 1,
-        lastError: ""
-      });
-      await writeState(state);
-
-      const rows = await fetchWishlistRankPages(sid, async (done, total) => {
-        const live = await readState();
-        await updateSyncStatus(live, {
-          phase: "refresh_wishlist_rank",
-          done,
-          total,
-          lastError: ""
-        });
-        await writeState(live);
-      });
-      const rank = computeWishlistOrder(rows);
-
-      state.wishlistRank = {
+    const request = requestExtensionSync(state, ["wishlist-rank"], "Missing/old wishlist rank cache in MCP DB.");
+    await writeState(state);
+    return {
+      content: [{ type: "text", text: "Rank refresh requires extension sync." }],
+      structuredContent: {
         steamId: sid,
-        orderedAppIds: rank.orderedAppIds,
-        priorityByAppId: rank.priorityByAppId,
-        dateAddedByAppId: rank.dateAddedByAppId,
-        totalCount: rank.totalCount,
-        syncedAt: now(),
-        lastError: ""
-      };
-
-      for (const appId of rank.orderedAppIds) {
-        mergeItemPatch(state, appId, {
-          wishlistDateAdded: rank.dateAddedByAppId[appId] || null
-        });
+        source: "extension-required",
+        ...request
       }
-
-      await updateSyncStatus(state, {
-        phase: "idle",
-        done: rank.totalCount,
-        total: rank.totalCount,
-        lastError: ""
-      });
-      await writeState(state);
-
-      return {
-        content: [{ type: "text", text: `Wishlist rank refreshed: ${rank.totalCount} items.` }],
-        structuredContent: {
-          steamId: sid,
-          totalCount: rank.totalCount,
-          first10: rank.orderedAppIds.slice(0, 10),
-          syncedAt: state.wishlistRank.syncedAt
-        }
-      };
-    } catch (error) {
-      state.wishlistRank.lastError = cleanText(error?.message || "rank refresh failed", 240);
-      await updateSyncStatus(state, {
-        phase: "idle",
-        lastError: state.wishlistRank.lastError
-      });
-      await writeState(state);
-      throw error;
-    }
+    };
   }
 );
 
@@ -1769,7 +1780,6 @@ registerTool(
         }
       };
     }
-
     const ageMs = now() - Number(state.wishlistData?.syncedAt || 0);
     if (!force && state.wishlistData?.steamId === sid && ageMs < 24 * 60 * 60 * 1000 && Object.keys(state.wishlistData.byAppId || {}).length > 0) {
       return {
@@ -1781,63 +1791,20 @@ registerTool(
         }
       };
     }
-
-    try {
-      await updateSyncStatus(state, {
-        phase: "refresh_wishlist_data",
-        done: 0,
-        total: maxPages,
-        lastError: ""
-      });
-      await writeState(state);
-
-      const result = await refreshWishlistData(state, sid, maxPages, async (done, total) => {
-        const live = await readState();
-        await updateSyncStatus(live, {
-          phase: "refresh_wishlist_data",
-          done,
-          total,
-          lastError: ""
-        });
-        await writeState(live);
-      });
-
-      state.wishlistData = {
+    const request = requestExtensionSync(
+      state,
+      ["wishlist-data", "meta-cache"],
+      `Missing/old wishlist metadata cache in MCP DB (maxPages requested: ${Number(maxPages || 0)}).`
+    );
+    await writeState(state);
+    return {
+      content: [{ type: "text", text: "Wishlist data refresh requires extension sync." }],
+      structuredContent: {
         steamId: sid,
-        byAppId: result.byAppId,
-        pagesFetched: result.pagesFetched,
-        lastPageFetched: result.lastPageFetched,
-        syncedAt: now(),
-        lastError: ""
-      };
-
-      await updateSyncStatus(state, {
-        phase: "idle",
-        done: result.pagesFetched,
-        total: Math.max(1, result.pagesFetched),
-        lastError: ""
-      });
-      await writeState(state);
-
-      return {
-        content: [{ type: "text", text: `Wishlist data refreshed: ${Object.keys(result.byAppId).length} apps.` }],
-        structuredContent: {
-          steamId: sid,
-          appCount: Object.keys(result.byAppId).length,
-          pagesFetched: result.pagesFetched,
-          lastPageFetched: result.lastPageFetched,
-          syncedAt: state.wishlistData.syncedAt
-        }
-      };
-    } catch (error) {
-      state.wishlistData.lastError = cleanText(error?.message || "wishlist data refresh failed", 240);
-      await updateSyncStatus(state, {
-        phase: "idle",
-        lastError: state.wishlistData.lastError
-      });
-      await writeState(state);
-      throw error;
-    }
+        source: "extension-required",
+        ...request
+      }
+    };
   }
 );
 
@@ -1878,128 +1845,24 @@ registerTool(
         }
       };
     }
-
-    let appIds = [];
-
-    if (cleanText(appIdsCsv || "")) {
-      appIds = String(appIdsCsv)
-        .split(",")
-        .map((v) => String(v || "").trim())
-        .filter((v) => APP_ID_RE.test(v));
-    } else {
-      appIds = collectTargetAppIds(state, source);
-    }
-
-    appIds = appIds.slice(offset, offset + limit);
-
-    if (onlyMissing) {
-      appIds = appIds.filter((id) => !state.appdetails?.byAppId?.[id]?.fetchedAt);
-    }
-
-    if (appIds.length === 0) {
-      return {
-        content: [{ type: "text", text: "No app ids selected for appdetails refresh." }],
-        structuredContent: { updated: 0, total: 0 }
-      };
-    }
-
-    let updated = 0;
-    let failed = 0;
-
-    try {
-      await updateSyncStatus(state, {
-        phase: "refresh_appdetails",
-        done: 0,
-        total: appIds.length,
-        lastError: ""
-      });
-      await writeState(state);
-
-      for (let i = 0; i < appIds.length; i += 1) {
-        const appId = appIds[i];
-        try {
-          const url = new URL("https://store.steampowered.com/api/appdetails");
-          url.searchParams.set("appids", appId);
-          url.searchParams.set("l", STEAM_LANG);
-          url.searchParams.set("cc", STEAM_CC);
-
-          const payload = await fetchJsonSmart(url.toString(), {
-            headers: {
-              Accept: "application/json"
-            }
-          });
-
-          const parsed = parseAppdetailsPayload(appId, payload);
-          if (parsed) {
-            state.appdetails.byAppId[appId] = {
-              appId,
-              data: parsed,
-              fetchedAt: now(),
-              error: ""
-            };
-            mergeItemPatch(state, appId, parsed);
-            updated += 1;
-          } else {
-            failed += 1;
-            state.appdetails.byAppId[appId] = {
-              appId,
-              data: {},
-              fetchedAt: now(),
-              error: "appdetails returned no data"
-            };
-          }
-        } catch (error) {
-          failed += 1;
-          state.appdetails.byAppId[appId] = {
-            appId,
-            data: {},
-            fetchedAt: now(),
-            error: cleanText(error?.message || "appdetails fetch failed", 240)
-          };
-          const status = Number(error?.status || 0);
-          if (status === 403 || status === 429) {
-            throw new Error(`Steam blocked appdetails requests (${status}). Pausing sync.`);
-          }
-        }
-
-        await updateSyncStatus(state, {
-          phase: "refresh_appdetails",
-          done: i + 1,
-          total: appIds.length,
-          lastError: ""
-        });
-        await writeState(state);
-        await sleep(REQUEST_DELAY_MS);
+    const request = requestExtensionSync(
+      state,
+      ["meta-cache", "appdetails"],
+      `Missing extension meta cache for appdetails refresh (source=${source}, offset=${offset}, limit=${limit}, onlyMissing=${Boolean(onlyMissing)}).`
+    );
+    await writeState(state);
+    return {
+      content: [{ type: "text", text: "Appdetails refresh requires extension sync." }],
+      structuredContent: {
+        source: "extension-required",
+        requestedSource: source,
+        appIdsCsv: cleanText(appIdsCsv || "", 500),
+        offset,
+        limit,
+        onlyMissing: Boolean(onlyMissing),
+        ...request
       }
-
-      state.appdetails.syncedAt = now();
-      state.appdetails.lastError = "";
-      await updateSyncStatus(state, {
-        phase: "idle",
-        done: appIds.length,
-        total: appIds.length,
-        lastError: ""
-      });
-      await writeState(state);
-
-      return {
-        content: [{ type: "text", text: `Appdetails refresh finished. Updated ${updated}/${appIds.length}.` }],
-        structuredContent: {
-          updated,
-          failed,
-          total: appIds.length,
-          syncedAt: state.appdetails.syncedAt
-        }
-      };
-    } catch (error) {
-      state.appdetails.lastError = cleanText(error?.message || "appdetails refresh failed", 240);
-      await updateSyncStatus(state, {
-        phase: "idle",
-        lastError: state.appdetails.lastError
-      });
-      await writeState(state);
-      throw error;
-    }
+    };
   }
 );
 
@@ -2047,50 +1910,18 @@ registerTool(
         }
       };
     }
-
-    const appIds = collectTargetAppIds(state, source);
-
-    await updateSyncStatus(state, {
-      phase: "refresh_frequencies",
-      done: 0,
-      total: appIds.length,
-      lastError: ""
-    });
+    const request = requestExtensionSync(
+      state,
+      ["tag-counts", "type-counts", "extra-filter-counts"],
+      `Missing extension frequency caches (source=${source}).`
+    );
     await writeState(state);
-
-    const frequencies = computeFrequenciesFromIds(state, appIds);
-
-    state.frequencies = {
-      ...frequencies,
-      syncedAt: now(),
-      source
-    };
-
-    await updateSyncStatus(state, {
-      phase: "idle",
-      done: appIds.length,
-      total: appIds.length,
-      lastError: ""
-    });
-    await writeState(state);
-
     return {
-      content: [{ type: "text", text: `Frequencies recomputed from ${appIds.length} items.` }],
+      content: [{ type: "text", text: "Frequencies refresh requires extension sync." }],
       structuredContent: {
-        source,
-        appCount: appIds.length,
-        syncedAt: state.frequencies.syncedAt,
-        bucketSizes: {
-          tags: Object.keys(state.frequencies.tags).length,
-          type: Object.keys(state.frequencies.type).length,
-          languages: Object.keys(state.frequencies.languages).length,
-          fullAudioLanguages: Object.keys(state.frequencies.fullAudioLanguages).length,
-          platforms: Object.keys(state.frequencies.platforms).length,
-          features: Object.keys(state.frequencies.features).length,
-          developers: Object.keys(state.frequencies.developers).length,
-          publishers: Object.keys(state.frequencies.publishers).length,
-          releaseYears: Object.keys(state.frequencies.releaseYears).length
-        }
+        source: "extension-required",
+        requestedSource: source,
+        ...request
       }
     };
   }
@@ -2192,23 +2023,19 @@ async function runRefreshAllPipeline({
 
   await persistPipelineMeta("");
 
-  const runStep = async (stepName, runner) => {
+  const runStep = async (stepName, toolName, args) => {
     try {
-      const result = await runner();
-      report.push({
-        step: stepName,
-        ok: true,
-        result
-      });
+      const handler = toolHandlers.get(toolName);
+      if (typeof handler !== "function") {
+        throw new Error(`Tool handler not found: ${toolName}`);
+      }
+      const result = await handler(args || {});
+      report.push({ step: stepName, ok: true, result: result?.structuredContent ?? result });
       await persistPipelineMeta(stepName);
       return result;
     } catch (error) {
       const message = cleanText(error?.message || `${stepName} failed`, 240);
-      report.push({
-        step: stepName,
-        ok: false,
-        error: message
-      });
+      report.push({ step: stepName, ok: false, error: message });
       await persistPipelineMeta(stepName);
       if (!continueOnError) {
         throw error;
@@ -2217,230 +2044,15 @@ async function runRefreshAllPipeline({
     }
   };
 
-  await runStep("wishlist-rank", async () => {
-    const state = await readState();
-    const ageMs = now() - Number(state.wishlistRank?.syncedAt || 0);
-    if (
-      !rankForce &&
-      state.wishlistRank?.steamId === sid &&
-      ageMs < 24 * 60 * 60 * 1000 &&
-      state.wishlistRank.orderedAppIds.length > 0
-    ) {
-      return {
-        skipped: true,
-        totalCount: state.wishlistRank.totalCount,
-        syncedAt: state.wishlistRank.syncedAt
-      };
-    }
-    await updateSyncStatus(state, {
-      phase: "refresh_wishlist_rank",
-      done: 0,
-      total: 1,
-      lastError: ""
-    });
-    await writeState(state);
-
-    const rows = await fetchWishlistRankPages(sid, async (done, total) => {
-      const live = await readState();
-      await updateSyncStatus(live, {
-        phase: "refresh_wishlist_rank",
-        done,
-        total,
-        lastError: ""
-      });
-      await writeState(live);
-    });
-    const rank = computeWishlistOrder(rows);
-
-    state.wishlistRank = {
-      steamId: sid,
-      orderedAppIds: rank.orderedAppIds,
-      priorityByAppId: rank.priorityByAppId,
-      dateAddedByAppId: rank.dateAddedByAppId,
-      totalCount: rank.totalCount,
-      syncedAt: now(),
-      lastError: ""
-    };
-    for (const appId of rank.orderedAppIds) {
-      mergeItemPatch(state, appId, {
-        wishlistDateAdded: rank.dateAddedByAppId[appId] || null
-      });
-    }
-    await updateSyncStatus(state, {
-      phase: "idle",
-      done: rank.totalCount,
-      total: rank.totalCount,
-      lastError: ""
-    });
-    await writeState(state);
-    return {
-      skipped: false,
-      totalCount: rank.totalCount,
-      syncedAt: state.wishlistRank.syncedAt
-    };
+  await runStep("wishlist-rank", "swm_refresh_wishlist_rank", { steamId: sid, force: rankForce });
+  await runStep("wishlist-data", "swm_refresh_wishlist_data", { steamId: sid, maxPages: wishlistDataMaxPages, force: wishlistDataForce });
+  await runStep("appdetails", "swm_refresh_appdetails", {
+    source: appdetailsSource,
+    offset: 0,
+    limit: appdetailsLimit,
+    onlyMissing: appdetailsOnlyMissing
   });
-
-  await runStep("wishlist-data", async () => {
-    const state = await readState();
-    const ageMs = now() - Number(state.wishlistData?.syncedAt || 0);
-    if (
-      !wishlistDataForce &&
-      state.wishlistData?.steamId === sid &&
-      ageMs < 24 * 60 * 60 * 1000 &&
-      Object.keys(state.wishlistData.byAppId || {}).length > 0
-    ) {
-      return {
-        skipped: true,
-        appCount: Object.keys(state.wishlistData.byAppId || {}).length,
-        syncedAt: state.wishlistData.syncedAt
-      };
-    }
-
-    await updateSyncStatus(state, {
-      phase: "refresh_wishlist_data",
-      done: 0,
-      total: wishlistDataMaxPages,
-      lastError: ""
-    });
-    await writeState(state);
-
-    const result = await refreshWishlistData(state, sid, wishlistDataMaxPages, async (done, total) => {
-      const live = await readState();
-      await updateSyncStatus(live, {
-        phase: "refresh_wishlist_data",
-        done,
-        total,
-        lastError: ""
-      });
-      await writeState(live);
-    });
-
-    state.wishlistData = {
-      steamId: sid,
-      byAppId: result.byAppId,
-      pagesFetched: result.pagesFetched,
-      lastPageFetched: result.lastPageFetched,
-      syncedAt: now(),
-      lastError: ""
-    };
-    await updateSyncStatus(state, {
-      phase: "idle",
-      done: result.pagesFetched,
-      total: Math.max(1, result.pagesFetched),
-      lastError: ""
-    });
-    await writeState(state);
-    return {
-      skipped: false,
-      appCount: Object.keys(result.byAppId).length,
-      pagesFetched: result.pagesFetched,
-      syncedAt: state.wishlistData.syncedAt
-    };
-  });
-
-  await runStep("appdetails", async () => {
-    const state = await readState();
-    let appIds = collectTargetAppIds(state, appdetailsSource).slice(0, appdetailsLimit);
-    if (appdetailsOnlyMissing) {
-      appIds = appIds.filter((id) => !state.appdetails?.byAppId?.[id]?.fetchedAt);
-    }
-    if (appIds.length === 0) {
-      return { skipped: true, total: 0, updated: 0, failed: 0 };
-    }
-
-    let updated = 0;
-    let failed = 0;
-    await updateSyncStatus(state, {
-      phase: "refresh_appdetails",
-      done: 0,
-      total: appIds.length,
-      lastError: ""
-    });
-    await writeState(state);
-
-    for (let i = 0; i < appIds.length; i += 1) {
-      const appId = appIds[i];
-      try {
-        const url = new URL("https://store.steampowered.com/api/appdetails");
-        url.searchParams.set("appids", appId);
-        url.searchParams.set("l", STEAM_LANG);
-        url.searchParams.set("cc", STEAM_CC);
-        const payload = await fetchJsonSmart(url.toString(), {
-          headers: { Accept: "application/json" }
-        });
-        const parsed = parseAppdetailsPayload(appId, payload);
-        if (parsed) {
-          state.appdetails.byAppId[appId] = { appId, data: parsed, fetchedAt: now(), error: "" };
-          mergeItemPatch(state, appId, parsed);
-          updated += 1;
-        } else {
-          failed += 1;
-          state.appdetails.byAppId[appId] = { appId, data: {}, fetchedAt: now(), error: "appdetails returned no data" };
-        }
-      } catch (error) {
-        failed += 1;
-        state.appdetails.byAppId[appId] = {
-          appId,
-          data: {},
-          fetchedAt: now(),
-          error: cleanText(error?.message || "appdetails fetch failed", 240)
-        };
-        const status = Number(error?.status || 0);
-        if (status === 403 || status === 429) {
-          throw new Error(`Steam blocked appdetails requests (${status}). Pausing sync.`);
-        }
-      }
-      await updateSyncStatus(state, {
-        phase: "refresh_appdetails",
-        done: i + 1,
-        total: appIds.length,
-        lastError: ""
-      });
-      await writeState(state);
-      await sleep(REQUEST_DELAY_MS);
-    }
-
-    state.appdetails.syncedAt = now();
-    state.appdetails.lastError = "";
-    await updateSyncStatus(state, {
-      phase: "idle",
-      done: appIds.length,
-      total: appIds.length,
-      lastError: ""
-    });
-    await writeState(state);
-    return { skipped: false, total: appIds.length, updated, failed, syncedAt: state.appdetails.syncedAt };
-  });
-
-  await runStep("frequencies", async () => {
-    const state = await readState();
-    const appIds = collectTargetAppIds(state, "wishlist-rank");
-    await updateSyncStatus(state, {
-      phase: "refresh_frequencies",
-      done: 0,
-      total: appIds.length,
-      lastError: ""
-    });
-    await writeState(state);
-
-    const frequencies = computeFrequenciesFromIds(state, appIds);
-    state.frequencies = {
-      ...frequencies,
-      syncedAt: now(),
-      source: "wishlist-rank"
-    };
-    await updateSyncStatus(state, {
-      phase: "idle",
-      done: appIds.length,
-      total: appIds.length,
-      lastError: ""
-    });
-    await writeState(state);
-    return {
-      appCount: appIds.length,
-      syncedAt: state.frequencies.syncedAt
-    };
-  });
+  await runStep("frequencies", "swm_refresh_frequencies", { source: "wishlist-rank" });
 
   const finalState = await readState();
   await updateSyncStatus(finalState, {
@@ -2453,12 +2065,14 @@ async function runRefreshAllPipeline({
   await writeState(finalState);
 
   const failedSteps = report.filter((step) => !step.ok).length;
+  const requiresExtensionSync = report.some((step) => step?.result?.requiresExtensionSync);
   return {
     content: [{ type: "text", text: `Refresh pipeline finished. steps=${report.length}, failed=${failedSteps}` }],
     structuredContent: {
       steamId: sid,
       report,
       failedSteps,
+      requiresExtensionSync,
       syncStatus: finalState.syncStatus
     }
   };
