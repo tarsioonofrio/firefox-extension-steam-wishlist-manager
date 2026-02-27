@@ -240,6 +240,7 @@ function getItemIntentState(appId) {
   const bucketRaw = String(item.bucket || "").trim().toUpperCase();
   const bucket = bucketRaw || (buy > 0 ? (buy >= 2 ? "BUY" : "MAYBE") : (track > 0 ? "TRACK" : "INBOX"));
   const muted = Boolean(item.muted);
+  const note = String(item.note || "").trim();
   const targetPriceCents = Number.isFinite(Number(item.targetPriceCents))
     ? Math.max(0, Math.floor(Number(item.targetPriceCents)))
     : null;
@@ -248,6 +249,7 @@ function getItemIntentState(appId) {
     buy,
     bucket,
     muted,
+    note,
     targetPriceCents
   };
 }
@@ -2839,6 +2841,7 @@ function getFiltersContext() {
     sortUtils,
     sortByWishlistPriority,
     getTitle: (appId) => String(state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || ""),
+    getNote: (appId) => String(state?.items?.[appId]?.note || ""),
     getMeta: (appId) => metaCache?.[appId] || {},
     getMetaTags,
     getMetaType,
@@ -2950,6 +2953,7 @@ function createLineRow(options) {
   const onSetIntent = options?.onSetIntent || (() => Promise.resolve());
   const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
   const isMuted = Boolean(itemIntent.muted);
+  const noteText = String(itemIntent.note || "");
   const targetPriceCents = Number.isFinite(Number(itemIntent.targetPriceCents))
     ? Math.max(0, Math.floor(Number(itemIntent.targetPriceCents)))
     : null;
@@ -3140,6 +3144,21 @@ function createLineRow(options) {
       .catch(() => setStatus("Failed to save target price.", true));
   });
   wfWrap.appendChild(targetBtn);
+
+  const noteBtn = document.createElement("button");
+  noteBtn.type = "button";
+  noteBtn.className = "line-btn";
+  noteBtn.textContent = noteText ? "Note*" : "Note";
+  noteBtn.addEventListener("click", () => {
+    const raw = window.prompt("Set note (leave empty to clear):", noteText);
+    if (raw === null) {
+      return;
+    }
+    onSetIntent(appId, { note: String(raw || "").slice(0, 600) })
+      .then(() => setStatus(raw ? "Note saved." : "Note cleared."))
+      .catch(() => setStatus("Failed to update note.", true));
+  });
+  wfWrap.appendChild(noteBtn);
   left.appendChild(wfWrap);
 
   const center = document.createElement("div");

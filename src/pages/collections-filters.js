@@ -57,6 +57,9 @@
     const getTitle = typeof ctx?.getTitle === "function"
       ? ctx.getTitle
       : (appId) => String(appId);
+    const getNote = typeof ctx?.getNote === "function"
+      ? ctx.getNote
+      : () => "";
     const getMeta = typeof ctx?.getMeta === "function"
       ? ctx.getMeta
       : () => ({});
@@ -211,7 +214,11 @@
 
     const list = baseIds.filter((appId) => {
       const title = String(getTitle(appId)).toLowerCase();
-      const textOk = !searchQuery || title.includes(searchQuery) || String(appId).includes(searchQuery);
+      const note = String(getNote(appId)).toLowerCase();
+      const textOk = !searchQuery
+        || title.includes(searchQuery)
+        || String(appId).includes(searchQuery)
+        || note.includes(searchQuery);
       return textOk
         && passesTagFilter(appId)
         && passesTypeFilter(appId)

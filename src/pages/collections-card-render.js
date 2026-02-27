@@ -83,6 +83,9 @@
       targetPriceInput: fragment.querySelector(".target-price-input"),
       targetSaveBtn: fragment.querySelector(".target-save-btn"),
       targetClearBtn: fragment.querySelector(".target-clear-btn"),
+      noteInput: fragment.querySelector(".note-input"),
+      noteSaveBtn: fragment.querySelector(".note-save-btn"),
+      noteClearBtn: fragment.querySelector(".note-clear-btn"),
       refreshItemBtn: fragment.querySelector(".refresh-item-btn"),
       collectionsToggleBtn: fragment.querySelector(".collections-toggle-btn"),
       collectionsDropdown: fragment.querySelector(".collections-dropdown"),
@@ -135,6 +138,7 @@
     const targetPriceCents = Number.isFinite(Number(itemIntent.targetPriceCents))
       ? Math.max(0, Math.floor(Number(itemIntent.targetPriceCents)))
       : null;
+    const noteText = String(itemIntent.note || "");
     if (!card) {
       return;
     }
@@ -270,6 +274,42 @@
           setStatus("Target price cleared.");
         } catch (error) {
           setStatus(String(error?.message || "Failed to clear target price."), true);
+        }
+      });
+    }
+
+    if (card.noteInput) {
+      card.noteInput.value = noteText;
+      card.noteInput.addEventListener("keydown", async (event) => {
+        if (event.key !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        try {
+          await onSetIntent(appId, { note: String(card.noteInput?.value || "").slice(0, 600) });
+          setStatus("Note saved.");
+        } catch (error) {
+          setStatus(String(error?.message || "Failed to save note."), true);
+        }
+      });
+    }
+    if (card.noteSaveBtn) {
+      card.noteSaveBtn.addEventListener("click", async () => {
+        try {
+          await onSetIntent(appId, { note: String(card.noteInput?.value || "").slice(0, 600) });
+          setStatus("Note saved.");
+        } catch (error) {
+          setStatus(String(error?.message || "Failed to save note."), true);
+        }
+      });
+    }
+    if (card.noteClearBtn) {
+      card.noteClearBtn.addEventListener("click", async () => {
+        try {
+          await onSetIntent(appId, { note: "" });
+          setStatus("Note cleared.");
+        } catch (error) {
+          setStatus(String(error?.message || "Failed to clear note."), true);
         }
       });
     }

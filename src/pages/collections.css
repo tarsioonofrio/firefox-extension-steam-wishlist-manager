@@ -842,6 +842,27 @@ main {
   font-size: 11px;
 }
 
+.note-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.note-input {
+  min-width: 0;
+  height: 22px;
+  font-size: 12px;
+}
+
+.note-save-btn,
+.note-clear-btn {
+  height: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
 .target-status.target-hit,
 .line-target.target-hit {
   color: #a8e6b0;
