@@ -10,11 +10,13 @@
     const buySelectValue = String(options?.buySelectValue || "__buy__");
     const archiveSelectValue = String(options?.archiveSelectValue || "__archive__");
     const ownedSelectValue = String(options?.ownedSelectValue || "__owned__");
+    const trackFeedSelectValue = String(options?.trackFeedSelectValue || "__track_feed__");
     const inboxCount = Number(options?.inboxCount || 0);
     const trackCount = Number(options?.trackCount || 0);
     const buyCount = Number(options?.buyCount || 0);
     const archiveCount = Number(options?.archiveCount || 0);
     const ownedCount = Number(options?.ownedCount || 0);
+    const trackFeedCount = Number(options?.trackFeedCount || 0);
     const collectionSizes = options?.collectionSizes || {};
     const dynamicNames = new Set(Array.isArray(options?.dynamicNames) ? options.dynamicNames : []);
 
@@ -57,6 +59,11 @@
     ownedOption.value = ownedSelectValue;
     ownedOption.textContent = `Owned (${ownedCount})`;
     select.appendChild(ownedOption);
+
+    const feedOption = document.createElement("option");
+    feedOption.value = trackFeedSelectValue;
+    feedOption.textContent = `Track feed (${trackFeedCount})`;
+    select.appendChild(feedOption);
 
     const allOption = document.createElement("option");
     allOption.value = "__all__";

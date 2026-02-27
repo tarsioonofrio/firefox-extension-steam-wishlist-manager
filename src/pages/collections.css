@@ -963,6 +963,49 @@ main {
   color: var(--muted);
 }
 
+.feed-row {
+  border: 1px solid #2f445a;
+  border-radius: 4px;
+  background: var(--panel-2);
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.feed-row-head {
+  display: grid;
+  gap: 3px;
+}
+
+.feed-link {
+  color: #d7e5f3;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.feed-meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.feed-summary {
+  margin: 0;
+  color: #c7d5e0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.feed-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.feed-actions button {
+  height: 24px;
+  padding: 0 8px;
+}
+
 @media (max-width: 760px) {
   body {
     height: auto;

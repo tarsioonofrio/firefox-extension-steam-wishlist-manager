@@ -2,6 +2,7 @@ const PAGE_SIZE = 30;
 const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
+const TRACK_FEED_CACHE_KEY = "steamWishlistTrackFeedV1";
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const WISHLIST_RANK_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const rankUtils = window.SWMWishlistRank;
@@ -36,6 +37,7 @@ const TRACK_SELECT_VALUE = "__track__";
 const BUY_SELECT_VALUE = "__buy__";
 const ARCHIVE_SELECT_VALUE = "__archive__";
 const OWNED_SELECT_VALUE = "__owned__";
+const TRACK_FEED_SELECT_VALUE = "__track_feed__";
 const RELEASE_YEAR_DEFAULT_MIN = 2010;
 const steamFetchUtils = window.SWMSteamFetch;
 // Source baseline: SteamDB tags taxonomy (static seed for fast first render).
@@ -84,6 +86,7 @@ let wishlistSortOrders = {};
 let wishlistSnapshotDay = "";
 let wishlistMetaSyncInFlight = false;
 let currentRenderedPageIds = [];
+let trackFeedEntries = [];
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -233,6 +236,14 @@ function formatUnixDate(timestamp) {
   return new Date(n * 1000).toLocaleDateString("pt-BR");
 }
 
+function formatFeedDate(timestampSec) {
+  const n = Number(timestampSec || 0);
+  if (!Number.isFinite(n) || n <= 0) {
+    return "-";
+  }
+  return new Date(n * 1000).toLocaleString("pt-BR");
+}
+
 function getItemIntentState(appId) {
   const item = state?.items?.[appId] || {};
   const track = Number(item.track || 0) > 0 ? 1 : 0;
@@ -352,7 +363,8 @@ function isVirtualCollectionSelection(name) {
     || key === TRACK_SELECT_VALUE
     || key === BUY_SELECT_VALUE
     || key === ARCHIVE_SELECT_VALUE
-    || key === OWNED_SELECT_VALUE;
+    || key === OWNED_SELECT_VALUE
+    || key === TRACK_FEED_SELECT_VALUE;
 }
 
 function getStaticCollectionNames() {
@@ -595,6 +607,10 @@ function getCurrentSourceAppIds() {
     return out;
   }
 
+  if (activeCollection === TRACK_FEED_SELECT_VALUE) {
+    return [];
+  }
+
   if (activeCollection === "__all__") {
     const all = [];
     for (const name of getStaticCollectionNames()) {
@@ -611,6 +627,75 @@ function getCurrentSourceAppIds() {
   }
 
   return [...(state.collections?.[activeCollection] || [])];
+}
+
+function getTrackSourceAppIds() {
+  const out = [];
+  for (const appId of Object.keys(state?.items || {})) {
+    const intent = getItemIntentState(appId);
+    if (String(intent.bucket || "INBOX").toUpperCase() === "TRACK") {
+      out.push(appId);
+    }
+  }
+  return out;
+}
+
+async function refreshTrackFeed() {
+  const trackIds = getTrackSourceAppIds();
+  if (trackIds.length === 0) {
+    setStatus("No tracked items to refresh feed.");
+    return;
+  }
+  setStatus(`Refreshing Track Feed... 0/${trackIds.length}`);
+  const dedupe = new Map();
+  const nowSec = Math.floor(Date.now() / 1000);
+  const keepSince = nowSec - (60 * 24 * 60 * 60);
+  for (const old of trackFeedEntries) {
+    if (Number(old?.publishedAt || 0) >= keepSince && old?.eventId) {
+      dedupe.set(String(old.eventId), old);
+    }
+  }
+
+  let done = 0;
+  for (const appId of trackIds) {
+    try {
+      const payload = await fetchSteamJson(
+        `https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=${appId}&count=3&maxlength=280&format=json`
+      );
+      const items = Array.isArray(payload?.appnews?.newsitems) ? payload.appnews.newsitems : [];
+      for (const item of items) {
+        const gid = String(item?.gid || "").trim();
+        const url = String(item?.url || "").trim();
+        const title = String(item?.title || "").trim();
+        const publishedAt = Number(item?.date || 0);
+        if (!title || !url || !Number.isFinite(publishedAt) || publishedAt <= 0) {
+          continue;
+        }
+        if (publishedAt < keepSince) {
+          continue;
+        }
+        const eventId = gid ? `${appId}:${gid}` : `${appId}:${url}:${publishedAt}`;
+        dedupe.set(eventId, {
+          eventId,
+          appId: String(appId),
+          title,
+          url,
+          author: String(item?.author || "").trim(),
+          summary: String(item?.contents || "").replace(/\s+/g, " ").trim().slice(0, 320),
+          publishedAt
+        });
+      }
+    } catch {
+      // non-fatal per app
+    }
+    done += 1;
+    setStatus(`Refreshing Track Feed... ${done}/${trackIds.length}`);
+  }
+
+  trackFeedEntries = Array.from(dedupe.values())
+    .sort((a, b) => Number(b.publishedAt || 0) - Number(a.publishedAt || 0));
+  await saveTrackFeedCache();
+  setStatus(`Track Feed refreshed: ${trackFeedEntries.length} events.`);
 }
 
 function hashStringToUint32(text) {
@@ -1594,10 +1679,46 @@ async function loadMetaCache() {
   await loadSteamDbTagSeedFromJson();
   const stored = await browser.storage.local.get(META_CACHE_KEY);
   metaCache = stored[META_CACHE_KEY] || {};
+  await loadTrackFeedCache();
 }
 
 async function saveMetaCache() {
   await browser.storage.local.set({ [META_CACHE_KEY]: metaCache });
+}
+
+async function loadTrackFeedCache() {
+  const stored = await browser.storage.local.get(TRACK_FEED_CACHE_KEY);
+  const source = Array.isArray(stored?.[TRACK_FEED_CACHE_KEY]) ? stored[TRACK_FEED_CACHE_KEY] : [];
+  const out = [];
+  const seen = new Set();
+  for (const entry of source) {
+    const eventId = String(entry?.eventId || "").trim();
+    const appId = String(entry?.appId || "").trim();
+    const title = String(entry?.title || "").trim();
+    const url = String(entry?.url || "").trim();
+    const publishedAt = Number(entry?.publishedAt || 0);
+    if (!eventId || !appId || !title || !url || !Number.isFinite(publishedAt) || publishedAt <= 0) {
+      continue;
+    }
+    if (seen.has(eventId)) {
+      continue;
+    }
+    seen.add(eventId);
+    out.push({
+      eventId,
+      appId,
+      title,
+      url,
+      author: String(entry?.author || "").trim(),
+      summary: String(entry?.summary || "").trim().slice(0, 320),
+      publishedAt
+    });
+  }
+  trackFeedEntries = out.sort((a, b) => Number(b.publishedAt || 0) - Number(a.publishedAt || 0));
+}
+
+async function saveTrackFeedCache() {
+  await browser.storage.local.set({ [TRACK_FEED_CACHE_KEY]: trackFeedEntries });
 }
 
 function getCardImageUrl(appId) {
@@ -2912,6 +3033,7 @@ function renderCollectionSelect() {
     buySelectValue: BUY_SELECT_VALUE,
     archiveSelectValue: ARCHIVE_SELECT_VALUE,
     ownedSelectValue: OWNED_SELECT_VALUE,
+    trackFeedSelectValue: TRACK_FEED_SELECT_VALUE,
     inboxCount: Object.keys(state?.items || {}).filter((appId) => {
       const intent = getItemIntentState(appId);
       return String(intent.bucket || "INBOX").toUpperCase() === "INBOX";
@@ -2933,6 +3055,7 @@ function renderCollectionSelect() {
       const intent = getItemIntentState(appId);
       return Boolean(intent.owned);
     }).length,
+    trackFeedCount: trackFeedEntries.length,
     collectionSizes: dynamicCollectionSizes,
     dynamicNames: Object.keys(state?.dynamicCollections || {})
   });
@@ -3477,6 +3600,11 @@ async function renderCards() {
     return;
   }
 
+  if (activeCollection === TRACK_FEED_SELECT_VALUE) {
+    await renderTrackFeedItems(cardsEl, emptyEl);
+    return;
+  }
+
   const sourceIds = getCurrentSourceAppIds();
   const needsMetaForSort = sortMode !== "position";
   const needsMetaForSearch = Boolean(String(searchQuery || "").trim());
@@ -3710,6 +3838,106 @@ async function renderCards() {
   applyKeyboardFocusVisual();
 }
 
+async function renderTrackFeedItems(cardsEl, emptyEl) {
+  const cutoffSec = parseTrackWindowDays(trackWindowDays) > 0
+    ? Math.floor(Date.now() / 1000) - (parseTrackWindowDays(trackWindowDays) * 24 * 60 * 60)
+    : 0;
+  const q = String(searchQuery || "").trim().toLowerCase();
+  const entries = trackFeedEntries.filter((entry) => {
+    const appId = String(entry?.appId || "");
+    if (!appId) {
+      return false;
+    }
+    const intent = getItemIntentState(appId);
+    if (String(intent.bucket || "INBOX").toUpperCase() !== "TRACK") {
+      return false;
+    }
+    if (hideMuted && intent.muted) {
+      return false;
+    }
+    if (cutoffSec > 0 && Number(entry?.publishedAt || 0) < cutoffSec) {
+      return false;
+    }
+    if (!q) {
+      return true;
+    }
+    const appTitle = String(state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || "");
+    const hay = `${entry.title} ${entry.summary || ""} ${appTitle} ${appId}`.toLowerCase();
+    return hay.includes(q);
+  });
+
+  renderPager(entries.length);
+  const start = (page - 1) * PAGE_SIZE;
+  const pageEntries = entries.slice(start, start + PAGE_SIZE);
+  currentRenderedPageIds = [];
+  cardsEl.innerHTML = "";
+  cardsEl.classList.remove("batch-mode");
+  cardsEl.classList.remove("line-mode");
+  emptyEl.classList.toggle("hidden", pageEntries.length > 0);
+
+  for (const entry of pageEntries) {
+    const row = document.createElement("article");
+    row.className = "feed-row";
+
+    const appId = String(entry.appId || "");
+    const title = String(entry.title || "");
+    const appTitle = String(state?.items?.[appId]?.title || metaCache?.[appId]?.titleText || `App ${appId}`);
+
+    const head = document.createElement("div");
+    head.className = "feed-row-head";
+    const link = document.createElement("a");
+    link.href = String(entry.url || "#");
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.className = "feed-link";
+    link.textContent = title || "(untitled)";
+    const meta = document.createElement("span");
+    meta.className = "feed-meta";
+    meta.textContent = `${appTitle} | ${formatFeedDate(entry.publishedAt)}`;
+    head.appendChild(link);
+    head.appendChild(meta);
+
+    const summary = document.createElement("p");
+    summary.className = "feed-summary";
+    summary.textContent = String(entry.summary || "").slice(0, 280) || "-";
+
+    const actions = document.createElement("div");
+    actions.className = "feed-actions";
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.textContent = "Open post";
+    openBtn.addEventListener("click", () => window.open(String(entry.url || "#"), "_blank", "noopener"));
+    const promoteBtn = document.createElement("button");
+    promoteBtn.type = "button";
+    promoteBtn.textContent = "Promote";
+    promoteBtn.addEventListener("click", () => {
+      setItemIntent(appId, { track: 0, buy: 2, bucket: "BUY" }).catch(() => setStatus("Failed to promote item.", true));
+    });
+    const archiveBtn = document.createElement("button");
+    archiveBtn.type = "button";
+    archiveBtn.textContent = "Archive";
+    archiveBtn.addEventListener("click", () => {
+      setItemIntent(appId, { track: 0, buy: 0, bucket: "ARCHIVE" }).catch(() => setStatus("Failed to archive item.", true));
+    });
+    const intent = getItemIntentState(appId);
+    const muteBtn = document.createElement("button");
+    muteBtn.type = "button";
+    muteBtn.textContent = intent.muted ? "Unmute" : "Mute";
+    muteBtn.addEventListener("click", () => {
+      setItemIntent(appId, { muted: !intent.muted }).catch(() => setStatus("Failed to toggle mute.", true));
+    });
+    actions.appendChild(openBtn);
+    actions.appendChild(promoteBtn);
+    actions.appendChild(archiveBtn);
+    actions.appendChild(muteBtn);
+
+    row.appendChild(head);
+    row.appendChild(summary);
+    row.appendChild(actions);
+    cardsEl.appendChild(row);
+  }
+}
+
 async function refreshState() {
   state = await browser.runtime.sendMessage({ type: "get-state" });
 }
@@ -3837,7 +4065,7 @@ async function render() {
   }
   if (trackWindowSelect) {
     trackWindowSelect.value = String(parseTrackWindowDays(trackWindowDays));
-    trackWindowSelect.classList.toggle("hidden", activeCollection !== TRACK_SELECT_VALUE);
+    trackWindowSelect.classList.toggle("hidden", activeCollection !== TRACK_SELECT_VALUE && activeCollection !== TRACK_FEED_SELECT_VALUE);
   }
 
   renderSortMenu();
@@ -3972,7 +4200,8 @@ async function handleCollectionChange(value) {
     TRACK_SELECT_VALUE,
     BUY_SELECT_VALUE,
     ARCHIVE_SELECT_VALUE,
-    OWNED_SELECT_VALUE
+    OWNED_SELECT_VALUE,
+    TRACK_FEED_SELECT_VALUE
   );
   sourceMode = resolved.sourceMode;
   activeCollection = resolved.activeCollection;
@@ -4188,6 +4417,12 @@ function bindFilterControls() {
       renderExtraFilterOptions();
     },
     onRefreshPage: () => {
+      if (activeCollection === TRACK_FEED_SELECT_VALUE) {
+        refreshTrackFeed()
+          .then(() => render())
+          .catch(() => setStatus("Failed to refresh track feed.", true));
+        return;
+      }
       refreshCurrentPageItems().catch(() => setStatus("Failed to refresh visible items.", true));
     },
     onTriageFilterChange: async (value) => {

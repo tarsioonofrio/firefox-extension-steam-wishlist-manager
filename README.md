@@ -27,7 +27,8 @@ Main goal: make prioritization practical without changing your Steam account dat
 - When Batch mode is active, a top hint shows available batch shortcuts and selected count.
 - Supports saved dynamic collections based on current filters/sort.
 - Includes triage workflow (`Promote`, `Track`, `Bought`) with local mute/unmute.
-- Adds virtual views (`Inbox`, `Track`, `Buy radar`, `Archive`, `Owned`) and Track time window (`7d`, `30d`, `all`).
+- Adds virtual views (`Inbox`, `Track`, `Track feed`, `Buy radar`, `Archive`, `Owned`) and Track time window (`7d`, `30d`, `all`).
+- `Refresh` updates the Track feed when `Track feed` is selected.
 - Supports per-game target price and filter for games at/under target.
 - Highlights cards/rows when current price hits target.
 - Supports local per-game notes (saved in browser storage); search matches title, appid, and notes.
