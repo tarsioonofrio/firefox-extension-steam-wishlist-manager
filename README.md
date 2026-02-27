@@ -31,6 +31,7 @@ Main goal: make prioritization practical without changing your Steam account dat
 - `Refresh` updates the Track feed when `Track feed` is selected.
 - `Refresh track feed` button shows sync progress and last refresh timestamp.
 - Track feed auto-refreshes when stale (best effort) when you open the `Track feed` source.
+- Track feed supports per-event `Dismiss` and `Reset dismissed` to control local noise.
 - Supports per-game target price and filter for games at/under target.
 - Highlights cards/rows when current price hits target.
 - Supports local per-game notes (saved in browser storage); search matches title, appid, and notes.

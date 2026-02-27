@@ -4,6 +4,7 @@ const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const TRACK_FEED_CACHE_KEY = "steamWishlistTrackFeedV1";
 const TRACK_FEED_META_KEY = "steamWishlistTrackFeedMetaV1";
+const TRACK_FEED_DISMISSED_KEY = "steamWishlistTrackFeedDismissedV1";
 const TRACK_FEED_AUTO_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const TRACK_FEED_AUTO_RETRY_INTERVAL_MS = 2 * 60 * 1000;
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -93,6 +94,7 @@ let trackFeedEntries = [];
 let trackFeedRefreshing = false;
 let trackFeedLastRefreshedAt = 0;
 let trackFeedLastAutoRefreshAttemptAt = 0;
+let trackFeedDismissedEventIds = new Set();
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -245,14 +247,15 @@ function renderTrackFeedMeta() {
   }
   if (Number(trackFeedLastRefreshedAt || 0) > 0) {
     const ts = new Date(Number(trackFeedLastRefreshedAt)).toLocaleString("pt-BR");
-    setTrackFeedProgress(`Last refreshed: ${ts} | events: ${trackFeedEntries.length}`);
+    setTrackFeedProgress(`Last refreshed: ${ts} | events: ${trackFeedEntries.length} | dismissed: ${trackFeedDismissedEventIds.size}`);
     return;
   }
-  setTrackFeedProgress(`Track feed not refreshed yet | events: ${trackFeedEntries.length}`);
+  setTrackFeedProgress(`Track feed not refreshed yet | events: ${trackFeedEntries.length} | dismissed: ${trackFeedDismissedEventIds.size}`);
 }
 
 function updateTrackFeedRefreshButtonState() {
   const refreshTrackFeedBtn = document.getElementById("refresh-track-feed-btn");
+  const resetTrackFeedDismissedBtn = document.getElementById("reset-track-feed-dismissed-btn");
   if (!refreshTrackFeedBtn) {
     return;
   }
@@ -1774,7 +1777,7 @@ async function saveMetaCache() {
 }
 
 async function loadTrackFeedCache() {
-  const stored = await browser.storage.local.get([TRACK_FEED_CACHE_KEY, TRACK_FEED_META_KEY]);
+  const stored = await browser.storage.local.get([TRACK_FEED_CACHE_KEY, TRACK_FEED_META_KEY, TRACK_FEED_DISMISSED_KEY]);
   const source = Array.isArray(stored?.[TRACK_FEED_CACHE_KEY]) ? stored[TRACK_FEED_CACHE_KEY] : [];
   const out = [];
   const seen = new Set();
@@ -1803,6 +1806,8 @@ async function loadTrackFeedCache() {
   }
   trackFeedEntries = out.sort((a, b) => Number(b.publishedAt || 0) - Number(a.publishedAt || 0));
   trackFeedLastRefreshedAt = Number(stored?.[TRACK_FEED_META_KEY]?.lastRefreshedAt || 0);
+  const dismissed = Array.isArray(stored?.[TRACK_FEED_DISMISSED_KEY]) ? stored[TRACK_FEED_DISMISSED_KEY] : [];
+  trackFeedDismissedEventIds = new Set(dismissed.map((id) => String(id || "").trim()).filter(Boolean));
 }
 
 async function saveTrackFeedCache() {
@@ -1810,7 +1815,8 @@ async function saveTrackFeedCache() {
     [TRACK_FEED_CACHE_KEY]: trackFeedEntries,
     [TRACK_FEED_META_KEY]: {
       lastRefreshedAt: Number(trackFeedLastRefreshedAt || 0)
-    }
+    },
+    [TRACK_FEED_DISMISSED_KEY]: Array.from(trackFeedDismissedEventIds)
   });
 }
 
@@ -3937,6 +3943,9 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     : 0;
   const q = String(searchQuery || "").trim().toLowerCase();
   const entries = trackFeedEntries.filter((entry) => {
+    if (trackFeedDismissedEventIds.has(String(entry?.eventId || ""))) {
+      return false;
+    }
     const appId = String(entry?.appId || "");
     if (!appId) {
       return false;
@@ -4019,10 +4028,24 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     muteBtn.addEventListener("click", () => {
       setItemIntent(appId, { muted: !intent.muted }).catch(() => setStatus("Failed to toggle mute.", true));
     });
+    const dismissBtn = document.createElement("button");
+    dismissBtn.type = "button";
+    dismissBtn.textContent = "Dismiss";
+    dismissBtn.addEventListener("click", () => {
+      const eventId = String(entry?.eventId || "");
+      if (!eventId) {
+        return;
+      }
+      trackFeedDismissedEventIds.add(eventId);
+      saveTrackFeedCache()
+        .then(() => render())
+        .catch(() => setStatus("Failed to dismiss feed item.", true));
+    });
     actions.appendChild(openBtn);
     actions.appendChild(promoteBtn);
     actions.appendChild(archiveBtn);
     actions.appendChild(muteBtn);
+    actions.appendChild(dismissBtn);
 
     row.appendChild(head);
     row.appendChild(summary);
@@ -4163,6 +4186,13 @@ async function render() {
   }
   if (refreshTrackFeedBtn) {
     refreshTrackFeedBtn.classList.toggle("hidden", activeCollection !== TRACK_FEED_SELECT_VALUE);
+  }
+  if (resetTrackFeedDismissedBtn) {
+    resetTrackFeedDismissedBtn.classList.toggle("hidden", activeCollection !== TRACK_FEED_SELECT_VALUE);
+    resetTrackFeedDismissedBtn.disabled = trackFeedDismissedEventIds.size === 0;
+    resetTrackFeedDismissedBtn.textContent = trackFeedDismissedEventIds.size > 0
+      ? `Reset dismissed (${trackFeedDismissedEventIds.size})`
+      : "Reset dismissed";
   }
   updateTrackFeedRefreshButtonState();
   if (activeCollection !== TRACK_FEED_SELECT_VALUE) {
@@ -4533,6 +4563,21 @@ function bindFilterControls() {
       refreshTrackFeed()
         .then(() => render())
         .catch(() => setStatus("Failed to refresh track feed.", true));
+    },
+    onResetTrackFeedDismissed: () => {
+      if (trackFeedDismissedEventIds.size === 0) {
+        setStatus("No dismissed feed items.");
+        return;
+      }
+      const confirmed = window.confirm(`Reset ${trackFeedDismissedEventIds.size} dismissed feed item(s)?`);
+      if (!confirmed) {
+        return;
+      }
+      trackFeedDismissedEventIds.clear();
+      saveTrackFeedCache()
+        .then(() => render())
+        .then(() => setStatus("Dismissed feed items reset."))
+        .catch(() => setStatus("Failed to reset dismissed feed items.", true));
     },
     onTriageFilterChange: async (value) => {
       triageFilter = String(value || "all");

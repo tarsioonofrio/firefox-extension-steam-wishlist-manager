@@ -8,6 +8,7 @@
     const onTextFilterInput = options?.onTextFilterInput || (() => {});
     const onRefreshPage = options?.onRefreshPage || (() => {});
     const onRefreshTrackFeed = options?.onRefreshTrackFeed || (() => {});
+    const onResetTrackFeedDismissed = options?.onResetTrackFeedDismissed || (() => {});
     const onTriageFilterChange = options?.onTriageFilterChange || (async () => {});
     const onHideMutedChange = options?.onHideMutedChange || (async () => {});
     const onUnderTargetChange = options?.onUnderTargetChange || (async () => {});
@@ -53,6 +54,10 @@
 
     document.getElementById("refresh-track-feed-btn")?.addEventListener("click", () => {
       onRefreshTrackFeed();
+    });
+
+    document.getElementById("reset-track-feed-dismissed-btn")?.addEventListener("click", () => {
+      onResetTrackFeedDismissed();
     });
 
     document.getElementById("triage-filter-select")?.addEventListener("change", async (event) => {
