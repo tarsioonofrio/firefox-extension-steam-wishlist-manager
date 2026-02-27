@@ -15,6 +15,9 @@ const __dirname = path.dirname(__filename);
 const DB_PATH = process.env.SWM_MCP_DB_PATH
   ? path.resolve(process.env.SWM_MCP_DB_PATH)
   : path.join(__dirname, "data", "state.json");
+const NATIVE_BRIDGE_SNAPSHOT_PATH = process.env.SWM_NATIVE_BRIDGE_SNAPSHOT_PATH
+  ? path.resolve(process.env.SWM_NATIVE_BRIDGE_SNAPSHOT_PATH)
+  : path.join(__dirname, "data", "extension-bridge-snapshot.json");
 
 const APP_ID_RE = /^\d{1,10}$/;
 const STEAM_ID_RE = /^\d{5,20}$/;
@@ -569,6 +572,49 @@ function parseBackupJsonToAllData(inputJson) {
     throw new Error("Backup payload missing data field.");
   }
   return data;
+}
+
+function setExtensionCachesFromAllData(state, allData, importedAt = now()) {
+  const data = isObject(allData) ? allData : {};
+  state.extensionCaches = {
+    wishlistAdded: isObject(data[EXTENSION_WISHLIST_CACHE_KEY]) ? data[EXTENSION_WISHLIST_CACHE_KEY] : {},
+    metaCache: isObject(data[EXTENSION_META_CACHE_KEY]) ? data[EXTENSION_META_CACHE_KEY] : {},
+    tagCounts: isObject(data[EXTENSION_TAG_COUNTS_KEY]) ? data[EXTENSION_TAG_COUNTS_KEY] : {},
+    typeCounts: isObject(data[EXTENSION_TYPE_COUNTS_KEY]) ? data[EXTENSION_TYPE_COUNTS_KEY] : {},
+    extraCounts: isObject(data[EXTENSION_EXTRA_COUNTS_KEY]) ? data[EXTENSION_EXTRA_COUNTS_KEY] : {},
+    importedAt: Number.isFinite(Number(importedAt)) ? Number(importedAt) : now()
+  };
+  state.extensionSyncRequest.fulfilledAt = state.extensionCaches.importedAt;
+  return state;
+}
+
+async function hydrateFromNativeBridgeIfNewer() {
+  let bridge = null;
+  try {
+    const raw = await readFile(NATIVE_BRIDGE_SNAPSHOT_PATH, "utf8");
+    bridge = JSON.parse(raw);
+  } catch {
+    return { hydrated: false, reason: "bridge snapshot not found" };
+  }
+
+  const allData = isObject(bridge?.data) ? bridge.data : null;
+  if (!allData) {
+    return { hydrated: false, reason: "bridge snapshot has no data" };
+  }
+  const bridgeUpdatedAt = Number(bridge?.updatedAt || 0);
+  const state = await readState();
+  const importedAt = Number(state.extensionCaches?.importedAt || 0);
+  if (Number.isFinite(bridgeUpdatedAt) && bridgeUpdatedAt > 0 && importedAt >= bridgeUpdatedAt) {
+    return { hydrated: false, reason: "state already up to date" };
+  }
+
+  setExtensionCachesFromAllData(state, allData, bridgeUpdatedAt || now());
+  applyExtensionCachesToState(state);
+  await writeState(state);
+  return {
+    hydrated: true,
+    importedAt: state.extensionCaches.importedAt
+  };
 }
 
 function normalizeCountListToMap(list) {
@@ -1323,6 +1369,7 @@ function registerTool(name, config, handler) {
     const previous = activeToolName;
     activeToolName = String(name || "");
     try {
+      await hydrateFromNativeBridgeIfNewer();
       return await handler(args);
     } finally {
       activeToolName = previous;
@@ -1557,14 +1604,7 @@ registerTool(
       nextState = await writeState(mergeStates(current, incoming));
     }
 
-    nextState.extensionCaches = {
-      wishlistAdded: isObject(allData[EXTENSION_WISHLIST_CACHE_KEY]) ? allData[EXTENSION_WISHLIST_CACHE_KEY] : {},
-      metaCache: isObject(allData[EXTENSION_META_CACHE_KEY]) ? allData[EXTENSION_META_CACHE_KEY] : {},
-      tagCounts: isObject(allData[EXTENSION_TAG_COUNTS_KEY]) ? allData[EXTENSION_TAG_COUNTS_KEY] : {},
-      typeCounts: isObject(allData[EXTENSION_TYPE_COUNTS_KEY]) ? allData[EXTENSION_TYPE_COUNTS_KEY] : {},
-      extraCounts: isObject(allData[EXTENSION_EXTRA_COUNTS_KEY]) ? allData[EXTENSION_EXTRA_COUNTS_KEY] : {},
-      importedAt: now()
-    };
+    setExtensionCachesFromAllData(nextState, allData, now());
     applyExtensionCachesToState(nextState);
     nextState = await writeState(nextState);
 
@@ -1603,14 +1643,7 @@ registerTool(
       nextState = await writeState(mergeStates(current, incoming));
     }
 
-    nextState.extensionCaches = {
-      wishlistAdded: isObject(allData[EXTENSION_WISHLIST_CACHE_KEY]) ? allData[EXTENSION_WISHLIST_CACHE_KEY] : {},
-      metaCache: isObject(allData[EXTENSION_META_CACHE_KEY]) ? allData[EXTENSION_META_CACHE_KEY] : {},
-      tagCounts: isObject(allData[EXTENSION_TAG_COUNTS_KEY]) ? allData[EXTENSION_TAG_COUNTS_KEY] : {},
-      typeCounts: isObject(allData[EXTENSION_TYPE_COUNTS_KEY]) ? allData[EXTENSION_TYPE_COUNTS_KEY] : {},
-      extraCounts: isObject(allData[EXTENSION_EXTRA_COUNTS_KEY]) ? allData[EXTENSION_EXTRA_COUNTS_KEY] : {},
-      importedAt: now()
-    };
+    setExtensionCachesFromAllData(nextState, allData, now());
     applyExtensionCachesToState(nextState);
     nextState = await writeState(nextState);
 

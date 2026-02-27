@@ -60,6 +60,12 @@ Notes:
 - MCP direct CLI (debug/easier local use):
   - `node mcp/server.mjs --list-tools`
   - `node mcp/server.mjs --run-tool swm_get_sync_status '{}'`
+- Install Firefox Native Messaging bridge host:
+  - `npm run native:host:install`
+  - `npm run native:host:ping` (self-test)
+  - Why the host manifest is required:
+    - Firefox only allows Native Messaging to hosts explicitly registered in `~/.mozilla/native-messaging-hosts/*.json`.
+    - The manifest also restricts which extension ID can talk to the host (`allowed_extensions`).
 - Validate manifest: `npm run check:manifest`
 - Logic smoke test: `npm run test:logic`
 
@@ -130,6 +136,9 @@ Notes:
 - This is an initial MCP layer to start external automation/workflows.
 - It currently uses its own local DB and supports bridge import from extension backup JSON.
 - Refresh tools prioritize extension-exported caches (`steamWishlistAddedMapV3`, meta/filter caches) before any direct Steam request.
+- Native bridge mode:
+  - Extension can publish local storage snapshot to `mcp/data/extension-bridge-snapshot.json` via Native Messaging.
+  - MCP auto-hydrates from this snapshot before tool execution.
 - For best results:
   - Export backup from Configurations page.
   - Import with `swm_import_extension_backup_file` (`mode=replace` first sync).

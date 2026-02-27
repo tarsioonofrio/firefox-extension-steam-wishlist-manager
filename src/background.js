@@ -4,6 +4,7 @@ const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const TAG_COUNTS_CACHE_KEY = "steamWishlistTagCountsCacheV1";
 const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV2";
+const NATIVE_BRIDGE_HOST_NAME = "dev.tarsio.steam_wishlist_manager_bridge";
 const BACKUP_SETTINGS_KEY = "steamWishlistBackupSettingsV1";
 const BACKUP_HISTORY_KEY = "steamWishlistBackupHistoryV1";
 const BACKUP_ALARM_NAME = "steamWishlistAutoBackup";
@@ -20,12 +21,22 @@ const BACKUP_DATA_KEYS = [
   EXTRA_FILTER_COUNTS_CACHE_KEY,
   BACKUP_SETTINGS_KEY
 ];
+const NATIVE_BRIDGE_DATA_KEYS = [
+  STORAGE_KEY,
+  META_CACHE_KEY,
+  WISHLIST_ADDED_CACHE_KEY,
+  TAG_COUNTS_CACHE_KEY,
+  TYPE_COUNTS_CACHE_KEY,
+  EXTRA_FILTER_COUNTS_CACHE_KEY,
+  BACKUP_SETTINGS_KEY
+];
 const WISHLIST_ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_COLLECTION_NAME_LENGTH = 64;
 const MAX_COLLECTIONS = 100;
 const MAX_ITEMS_PER_COLLECTION = 5000;
 const VALID_APP_ID_PATTERN = /^\d{1,10}$/;
 let backgroundWishlistDomSyncInFlight = false;
+let nativeBridgePublishTimer = null;
 
 function normalizeBackupSettings(rawSettings) {
   const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
@@ -311,6 +322,47 @@ async function getState() {
 
 async function setState(state) {
   await browser.storage.local.set({ [STORAGE_KEY]: normalizeState(state) });
+  scheduleNativeBridgePublish("set-state");
+}
+
+function scheduleNativeBridgePublish(reason = "state-change", delayMs = 500) {
+  if (!browser?.runtime?.sendNativeMessage) {
+    return;
+  }
+  if (nativeBridgePublishTimer) {
+    clearTimeout(nativeBridgePublishTimer);
+  }
+  nativeBridgePublishTimer = setTimeout(() => {
+    nativeBridgePublishTimer = null;
+    publishNativeBridgeSnapshot(reason).catch(() => {});
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
+async function publishNativeBridgeSnapshot(reason = "manual") {
+  if (!browser?.runtime?.sendNativeMessage) {
+    return { ok: false, skipped: true, reason: "sendNativeMessage unavailable" };
+  }
+  const payload = await browser.storage.local.get(NATIVE_BRIDGE_DATA_KEYS);
+  const message = {
+    type: "snapshot",
+    source: "steam-wishlist-manager-extension",
+    schemaVersion: 1,
+    reason: String(reason || "manual"),
+    updatedAt: Date.now(),
+    data: payload
+  };
+  try {
+    const response = await browser.runtime.sendNativeMessage(NATIVE_BRIDGE_HOST_NAME, message);
+    return {
+      ok: true,
+      response: response || {}
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: String(error?.message || error || "native bridge publish failed")
+    };
+  }
 }
 
 function ensureCollection(state, name) {
@@ -1256,11 +1308,13 @@ browser.runtime.onMessage.addListener((message, sender) => {
           TYPE_COUNTS_CACHE_KEY,
           EXTRA_FILTER_COUNTS_CACHE_KEY
         ]);
+        scheduleNativeBridgePublish("invalidate-caches");
         return { ok: true };
       }
 
       case "create-backup-snapshot": {
         const meta = await createBackupSnapshot(String(message.reason || "manual"));
+        scheduleNativeBridgePublish("create-backup-snapshot");
         return { ok: true, backup: meta };
       }
 
@@ -1271,6 +1325,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
       case "set-backup-settings": {
         const settings = await setBackupSettings(message.settings || {});
+        scheduleNativeBridgePublish("set-backup-settings");
         return { ok: true, settings };
       }
 
@@ -1282,6 +1337,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
       case "clear-all-data": {
         await browser.storage.local.clear();
+        scheduleNativeBridgePublish("clear-all-data");
         return { ok: true };
       }
 
@@ -1298,6 +1354,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
             steamId
           }
         });
+        scheduleNativeBridgePublish("set-wishlist-steamid");
         try {
           await syncWishlistOrderCache(true);
         } catch {
@@ -1308,7 +1365,9 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
       case "sync-wishlist-order-cache": {
         try {
-          return await syncWishlistOrderCache(Boolean(message.force));
+          const result = await syncWishlistOrderCache(Boolean(message.force));
+          scheduleNativeBridgePublish("sync-wishlist-order-cache");
+          return result;
         } catch (error) {
           const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
           const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
@@ -1318,13 +1377,16 @@ browser.runtime.onMessage.addListener((message, sender) => {
               priorityLastError: String(error?.message || error || "unknown sync error")
             }
           });
+          scheduleNativeBridgePublish("sync-wishlist-order-cache-error");
           return { ok: false, error: String(error?.message || error || "unknown sync error") };
         }
       }
 
       case "sync-wishlist-order-via-background-tab": {
         try {
-          return await syncWishlistOrderViaBackgroundTab(Boolean(message.force));
+          const result = await syncWishlistOrderViaBackgroundTab(Boolean(message.force));
+          scheduleNativeBridgePublish("sync-wishlist-order-via-background-tab");
+          return result;
         } catch (error) {
           const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
           const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
@@ -1334,8 +1396,14 @@ browser.runtime.onMessage.addListener((message, sender) => {
               priorityLastError: String(error?.message || error || "background wishlist sync failed")
             }
           });
+          scheduleNativeBridgePublish("sync-wishlist-order-via-background-tab-error");
           return { ok: false, error: String(error?.message || error || "background wishlist sync failed") };
         }
+      }
+
+      case "publish-native-bridge-snapshot": {
+        const result = await publishNativeBridgeSnapshot(String(message.reason || "manual"));
+        return { ok: Boolean(result?.ok), ...result };
       }
 
       default:
@@ -1364,10 +1432,13 @@ async function initializeBackupScheduler() {
 
 browser.runtime.onInstalled?.addListener(() => {
   initializeBackupScheduler().catch(() => {});
+  scheduleNativeBridgePublish("on-installed", 1500);
 });
 
 browser.runtime.onStartup?.addListener(() => {
   initializeBackupScheduler().catch(() => {});
+  scheduleNativeBridgePublish("on-startup", 1500);
 });
 
 initializeBackupScheduler().catch(() => {});
+scheduleNativeBridgePublish("background-init", 3000);

@@ -3,7 +3,7 @@
   "name": "Steam Wishlist Manager",
   "version": "0.1.0",
   "description": "Organize Steam wishlist games into custom collections with independent ordering.",
-  "permissions": ["storage", "tabs", "alarms"],
+  "permissions": ["storage", "tabs", "alarms", "nativeMessaging"],
   "host_permissions": [
     "*://api.steampowered.com/*",
     "*://store.steampowered.com/app/*",

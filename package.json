@@ -7,6 +7,8 @@
     "dev": "web-ext run --source-dir . --target=firefox-desktop",
     "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts",
     "mcp:server": "node mcp/server.mjs",
+    "native:host:install": "bash scripts/install-native-host-firefox.sh",
+    "native:host:ping": "bash scripts/native-host-selftest.sh",
     "check:manifest": "node -e \"JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('manifest ok')\"",
     "test:logic": "node tests/module-smoke.mjs",
     "test:ui": "node tests/ui-smoke.mjs",
