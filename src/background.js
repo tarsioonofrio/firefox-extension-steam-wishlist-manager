@@ -36,8 +36,12 @@ const MAX_COLLECTIONS = 100;
 const MAX_ITEMS_PER_COLLECTION = 5000;
 const VALID_APP_ID_PATTERN = /^\d{1,10}$/;
 const VALID_BUCKETS = new Set(["INBOX", "TRACK", "MAYBE", "BUY", "ARCHIVE"]);
+const STEAM_WRITE_MIN_INTERVAL_MS = 250;
 let backgroundWishlistDomSyncInFlight = false;
 let nativeBridgePublishTimer = null;
+let steamSessionIdCache = "";
+let steamSessionIdCachedAt = 0;
+let steamWriteLastAt = 0;
 
 function normalizeBackupSettings(rawSettings) {
   const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
@@ -617,6 +621,133 @@ function encodeVarint(value) {
   }
   out.push(Number(n));
   return out;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+async function rateLimitSteamWrite() {
+  const now = Date.now();
+  const waitMs = (steamWriteLastAt + STEAM_WRITE_MIN_INTERVAL_MS) - now;
+  if (waitMs > 0) {
+    await sleep(waitMs);
+  }
+  steamWriteLastAt = Date.now();
+}
+
+function buildSteamFormData(values) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(values || {})) {
+    form.append(String(key), String(value ?? ""));
+  }
+  return form;
+}
+
+async function fetchSteamSessionId(force = false) {
+  const now = Date.now();
+  if (!force && steamSessionIdCache && now - steamSessionIdCachedAt < 10 * 60 * 1000) {
+    return steamSessionIdCache;
+  }
+  await rateLimitSteamWrite();
+  const response = await fetch("https://store.steampowered.com/account/preferences", {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    throw new Error(`Could not load Steam session page (${response.status}).`);
+  }
+  const html = await response.text();
+  const match = html.match(/g_sessionID\s*=\s*"([^"]+)"/i);
+  const sessionId = String(match?.[1] || "").trim();
+  if (!sessionId) {
+    throw new Error("Could not resolve Steam session id.");
+  }
+  steamSessionIdCache = sessionId;
+  steamSessionIdCachedAt = Date.now();
+  return sessionId;
+}
+
+async function postSteamForm(url, formValues, retryOn401 = true) {
+  await rateLimitSteamWrite();
+  const response = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    body: buildSteamFormData(formValues)
+  });
+  if (response.status === 401 && retryOn401) {
+    steamSessionIdCache = "";
+    steamSessionIdCachedAt = 0;
+    const renewed = await fetchSteamSessionId(true);
+    const nextValues = { ...formValues, sessionid: renewed };
+    return postSteamForm(url, nextValues, false);
+  }
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Steam write failed (${response.status})${body ? `: ${body.slice(0, 180)}` : ""}`);
+  }
+  return response;
+}
+
+async function setSteamWishlist(appId, enabled) {
+  const sessionId = await fetchSteamSessionId(false);
+  const url = enabled
+    ? "https://store.steampowered.com/api/addtowishlist"
+    : "https://store.steampowered.com/api/removefromwishlist";
+  await postSteamForm(url, { sessionid: sessionId, appid: appId });
+  return { target: "wishlist", enabled: Boolean(enabled), appId };
+}
+
+async function setSteamFollow(appId, enabled) {
+  const sessionId = await fetchSteamSessionId(false);
+  const payload = {
+    sessionid: sessionId,
+    appid: appId,
+    ...(enabled ? {} : { unfollow: "1" })
+  };
+  await postSteamForm("https://store.steampowered.com/explore/followgame/", payload);
+  return { target: "follow", enabled: Boolean(enabled), appId };
+}
+
+async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent) {
+  const prev = previousIntent && typeof previousIntent === "object" ? previousIntent : {};
+  const next = nextIntent && typeof nextIntent === "object" ? nextIntent : {};
+  const prevBuy = Number(prev.buy || 0) > 0;
+  const nextBuy = Number(next.buy || 0) > 0;
+  const prevTrack = Number(prev.track || 0) > 0;
+  const nextTrack = Number(next.track || 0) > 0;
+
+  const actions = [];
+  if (prevBuy !== nextBuy) {
+    actions.push(() => setSteamWishlist(appId, nextBuy));
+  }
+  if (prevTrack !== nextTrack) {
+    actions.push(() => setSteamFollow(appId, nextTrack));
+  }
+
+  if (actions.length === 0) {
+    return { ok: true, changed: false, applied: [] };
+  }
+
+  const applied = [];
+  const errors = [];
+  for (const action of actions) {
+    try {
+      const result = await action();
+      applied.push(result);
+    } catch (error) {
+      errors.push(String(error?.message || error || "steam sync failed"));
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    changed: true,
+    applied,
+    errors
+  };
 }
 
 function decodeVarint(bytes, startIndex) {
@@ -1343,6 +1474,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
           nextLabels = mergeOwnedLabel(nextLabels, Boolean(message.owned));
         }
 
+        const previousItem = current;
         upsertStateItem(state, appId, {
           title: String(message.title || current.title || "").slice(0, 200),
           track: nextTrack,
@@ -1356,7 +1488,11 @@ browser.runtime.onMessage.addListener((message, sender) => {
         });
 
         await setState(state);
-        return { ok: true, item: state.items[appId], state };
+        let steamWrite = null;
+        if (message.syncSteam !== false) {
+          steamWrite = await syncSteamSignalsForIntentChange(appId, previousItem, state.items[appId]);
+        }
+        return { ok: true, item: state.items[appId], state, steamWrite };
       }
 
       case "batch-update-collection": {
@@ -1400,6 +1536,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
         const ts = Date.now();
         const hasOwnedPatch = message.owned !== undefined;
         const ownedPatch = Boolean(message.owned);
+        const steamWriteResults = [];
         for (const appId of appIds) {
           const current = normalizeItemRecord(appId, state.items?.[appId] || {});
           const nextTrack = message.track === undefined ? current.track : clamp01to2(message.track, current.track);
@@ -1415,6 +1552,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
             ? mergeOwnedLabel(current.labels, ownedPatch)
             : current.labels;
 
+          const previousItem = current;
           upsertStateItem(state, appId, {
             title: String(message.title || current.title || "").slice(0, 200),
             track: nextTrack,
@@ -1426,10 +1564,18 @@ browser.runtime.onMessage.addListener((message, sender) => {
             labels: nextLabels,
             triagedAt: ts
           });
+
+          if (message.syncSteam !== false) {
+            const steamWrite = await syncSteamSignalsForIntentChange(appId, previousItem, state.items[appId]);
+            steamWriteResults.push({
+              appId,
+              ...steamWrite
+            });
+          }
         }
 
         await setState(state);
-        return { ok: true, updated: appIds.length, state };
+        return { ok: true, updated: appIds.length, state, steamWriteResults };
       }
 
       case "set-collection-items-order": {

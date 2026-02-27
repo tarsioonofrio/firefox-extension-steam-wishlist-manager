@@ -6,10 +6,12 @@
   "permissions": ["storage", "tabs", "alarms", "nativeMessaging"],
   "host_permissions": [
     "*://api.steampowered.com/*",
+    "*://store.steampowered.com/account/preferences*",
     "*://store.steampowered.com/app/*",
     "*://store.steampowered.com/appreviews/*",
     "*://store.steampowered.com/api/*",
     "*://store.steampowered.com/dynamicstore/*",
+    "*://store.steampowered.com/explore/followgame/*",
     "*://store.steampowered.com/wishlist*",
     "*://store.steampowered.com/wishlist/*"
   ],
