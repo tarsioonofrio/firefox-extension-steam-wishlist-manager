@@ -226,6 +226,12 @@ button.danger,
   font-size: 12px;
 }
 
+.track-feed-progress {
+  margin: 2px 0 10px;
+  color: #c7d5e0;
+  font-size: 12px;
+}
+
 .status-floating {
   position: fixed;
   left: 0;

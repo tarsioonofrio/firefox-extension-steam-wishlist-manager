@@ -218,6 +218,17 @@ function setStatus(text, isError = false) {
   el.style.color = isError ? "#ff9696" : "";
 }
 
+function setTrackFeedProgress(text) {
+  const el = document.getElementById("track-feed-progress");
+  if (!el) {
+    return;
+  }
+  const next = String(text || "").trim();
+  el.textContent = next;
+  const shouldShow = activeCollection === TRACK_FEED_SELECT_VALUE && Boolean(next);
+  el.classList.toggle("hidden", !shouldShow);
+}
+
 function invalidateWishlistPrecomputedSorts() {
   wishlistSortSignature = "";
   wishlistSortOrders = {};
@@ -644,9 +655,11 @@ async function refreshTrackFeed() {
   const trackIds = getTrackSourceAppIds();
   if (trackIds.length === 0) {
     setStatus("No tracked items to refresh feed.");
+    setTrackFeedProgress("");
     return;
   }
   setStatus(`Refreshing Track Feed... 0/${trackIds.length}`);
+  setTrackFeedProgress(`Refreshing track feed... 0/${trackIds.length}`);
   const dedupe = new Map();
   const nowSec = Math.floor(Date.now() / 1000);
   const keepSince = nowSec - (60 * 24 * 60 * 60);
@@ -690,12 +703,14 @@ async function refreshTrackFeed() {
     }
     done += 1;
     setStatus(`Refreshing Track Feed... ${done}/${trackIds.length}`);
+    setTrackFeedProgress(`Refreshing track feed... ${done}/${trackIds.length}`);
   }
 
   trackFeedEntries = Array.from(dedupe.values())
     .sort((a, b) => Number(b.publishedAt || 0) - Number(a.publishedAt || 0));
   await saveTrackFeedCache();
   setStatus(`Track Feed refreshed: ${trackFeedEntries.length} events.`);
+  setTrackFeedProgress(`Track feed refreshed: ${trackFeedEntries.length} events.`);
 }
 
 function hashStringToUint32(text) {
@@ -4045,6 +4060,7 @@ async function render() {
   const hideMutedCheckbox = document.getElementById("hide-muted-checkbox");
   const underTargetCheckbox = document.getElementById("under-target-checkbox");
   const trackWindowSelect = document.getElementById("track-window-select");
+  const refreshTrackFeedBtn = document.getElementById("refresh-track-feed-btn");
   const renameActionBtn = document.getElementById("menu-action-rename");
   const deleteActionBtn = document.getElementById("menu-action-delete");
   const deleteSelect = document.getElementById("delete-collection-select");
@@ -4066,6 +4082,12 @@ async function render() {
   if (trackWindowSelect) {
     trackWindowSelect.value = String(parseTrackWindowDays(trackWindowDays));
     trackWindowSelect.classList.toggle("hidden", activeCollection !== TRACK_SELECT_VALUE && activeCollection !== TRACK_FEED_SELECT_VALUE);
+  }
+  if (refreshTrackFeedBtn) {
+    refreshTrackFeedBtn.classList.toggle("hidden", activeCollection !== TRACK_FEED_SELECT_VALUE);
+  }
+  if (activeCollection !== TRACK_FEED_SELECT_VALUE) {
+    setTrackFeedProgress("");
   }
 
   renderSortMenu();
@@ -4424,6 +4446,11 @@ function bindFilterControls() {
         return;
       }
       refreshCurrentPageItems().catch(() => setStatus("Failed to refresh visible items.", true));
+    },
+    onRefreshTrackFeed: () => {
+      refreshTrackFeed()
+        .then(() => render())
+        .catch(() => setStatus("Failed to refresh track feed.", true));
     },
     onTriageFilterChange: async (value) => {
       triageFilter = String(value || "all");
