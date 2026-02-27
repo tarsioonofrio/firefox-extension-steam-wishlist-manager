@@ -108,7 +108,8 @@ This repository now includes an initial MCP server implementation at:
 - `mcp/server.mjs`
 
 Persistence:
-- Local JSON DB (default): `mcp/data/state.json`
+- Local JSON DB (default): `/tmp/steam-wishlist-manager-mcp-state.json`
+  (override with `SWM_MCP_DB_PATH`)
 - Override path with env var: `SWM_MCP_DB_PATH=/path/to/state.json`
 
 Available tools (v0.2):

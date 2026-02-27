@@ -15,7 +15,8 @@ const __dirname = path.dirname(__filename);
 
 const DB_PATH = process.env.SWM_MCP_DB_PATH
   ? path.resolve(process.env.SWM_MCP_DB_PATH)
-  : path.join(__dirname, "data", "state.json");
+  : path.join(os.tmpdir(), "steam-wishlist-manager-mcp-state.json");
+const LEGACY_DB_PATH = path.join(__dirname, "data", "state.json");
 const NATIVE_BRIDGE_SNAPSHOT_PATH = process.env.SWM_NATIVE_BRIDGE_SNAPSHOT_PATH
   ? path.resolve(process.env.SWM_NATIVE_BRIDGE_SNAPSHOT_PATH)
   : path.join(os.tmpdir(), "steam-wishlist-manager-extension-bridge-snapshot.json");
@@ -934,7 +935,14 @@ async function readState() {
     const raw = await readFile(DB_PATH, "utf8");
     return normalizeState(JSON.parse(raw));
   } catch {
-    return normalizeState(DEFAULT_STATE);
+    try {
+      const legacyRaw = await readFile(LEGACY_DB_PATH, "utf8");
+      const migrated = normalizeState(JSON.parse(legacyRaw));
+      await writeState(migrated);
+      return migrated;
+    } catch {
+      return normalizeState(DEFAULT_STATE);
+    }
   }
 }
 
