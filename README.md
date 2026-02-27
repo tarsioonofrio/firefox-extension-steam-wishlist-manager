@@ -129,6 +129,7 @@ Available tools (v0.2):
 Notes:
 - This is an initial MCP layer to start external automation/workflows.
 - It currently uses its own local DB and supports bridge import from extension backup JSON.
+- Refresh tools prioritize extension-exported caches (`steamWishlistAddedMapV3`, meta/filter caches) before any direct Steam request.
 - For best results:
   - Export backup from Configurations page.
   - Import with `swm_import_extension_backup_file` (`mode=replace` first sync).

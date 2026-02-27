@@ -1,9 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
+
+const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +21,11 @@ const STEAM_ID_RE = /^\d{5,20}$/;
 const MAX_COLLECTION_NAME_LENGTH = 64;
 const MAX_ITEMS_PER_COLLECTION = 5000;
 const EXTENSION_STATE_KEY = "steamWishlistCollectionsState";
+const EXTENSION_META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
+const EXTENSION_WISHLIST_CACHE_KEY = "steamWishlistAddedMapV3";
+const EXTENSION_TAG_COUNTS_KEY = "steamWishlistTagCountsCacheV1";
+const EXTENSION_TYPE_COUNTS_KEY = "steamWishlistTypeCountsCacheV1";
+const EXTENSION_EXTRA_COUNTS_KEY = "steamWishlistExtraFilterCountsCacheV2";
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const CODEX_MODEL = process.env.SWM_CODEX_MODEL || "gpt-5.1-codex-mini";
 const STEAM_LANG = process.env.SWM_STEAM_LANG || "english";
@@ -31,6 +40,14 @@ const DEFAULT_STATE = {
   collections: {},
   dynamicCollections: {},
   items: {},
+  extensionCaches: {
+    wishlistAdded: {},
+    metaCache: {},
+    tagCounts: {},
+    typeCounts: {},
+    extraCounts: {},
+    importedAt: 0
+  },
   wishlistRank: {
     steamId: "",
     orderedAppIds: [],
@@ -298,6 +315,16 @@ function normalizeState(raw) {
   }
   state.items = nextItems;
 
+  const extensionCaches = isObject(state.extensionCaches) ? state.extensionCaches : {};
+  state.extensionCaches = {
+    wishlistAdded: isObject(extensionCaches.wishlistAdded) ? extensionCaches.wishlistAdded : {},
+    metaCache: isObject(extensionCaches.metaCache) ? extensionCaches.metaCache : {},
+    tagCounts: isObject(extensionCaches.tagCounts) ? extensionCaches.tagCounts : {},
+    typeCounts: isObject(extensionCaches.typeCounts) ? extensionCaches.typeCounts : {},
+    extraCounts: isObject(extensionCaches.extraCounts) ? extensionCaches.extraCounts : {},
+    importedAt: Number.isFinite(Number(extensionCaches.importedAt)) ? Number(extensionCaches.importedAt) : 0
+  };
+
   const rank = isObject(state.wishlistRank) ? state.wishlistRank : {};
   const orderedAppIds = Array.isArray(rank.orderedAppIds)
     ? rank.orderedAppIds.map((id) => String(id || "").trim()).filter((id) => APP_ID_RE.test(id))
@@ -516,6 +543,173 @@ function parseBackupJsonToExtensionState(inputJson) {
   return extensionState;
 }
 
+function parseBackupJsonToAllData(inputJson) {
+  const parsed = JSON.parse(String(inputJson || "{}"));
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Invalid backup payload.");
+  }
+  const data = parsed?.data;
+  if (!data || typeof data !== "object") {
+    throw new Error("Backup payload missing data field.");
+  }
+  return data;
+}
+
+function normalizeCountListToMap(list) {
+  const map = {};
+  if (!Array.isArray(list)) {
+    return map;
+  }
+  for (const row of list) {
+    if (!row || typeof row !== "object") {
+      continue;
+    }
+    const name = cleanText(row.name || row.label || "", 120);
+    const count = Number(row.count || 0);
+    if (!name || !Number.isFinite(count) || count <= 0) {
+      continue;
+    }
+    map[name] = Math.floor(count);
+  }
+  return map;
+}
+
+function chooseLatestBucket(cacheObj) {
+  if (!isObject(cacheObj)) {
+    return null;
+  }
+  let best = null;
+  let bestTs = -1;
+  for (const value of Object.values(cacheObj)) {
+    if (!isObject(value)) {
+      continue;
+    }
+    const ts = Number(value.seedFetchedAt || 0);
+    const day = Number(String(value.day || "").replaceAll("-", ""));
+    const rank = Number.isFinite(ts) && ts > 0 ? ts : (Number.isFinite(day) ? day : 0);
+    if (rank > bestTs) {
+      bestTs = rank;
+      best = value;
+    }
+  }
+  return best;
+}
+
+function applyExtensionCachesToState(state) {
+  const caches = state.extensionCaches || {};
+  const wishlist = isObject(caches.wishlistAdded) ? caches.wishlistAdded : {};
+  const ordered = Array.isArray(wishlist.orderedAppIds)
+    ? wishlist.orderedAppIds.map((id) => String(id || "").trim()).filter((id) => APP_ID_RE.test(id))
+    : [];
+  const priorityMap = isObject(wishlist.priorityMap) ? wishlist.priorityMap : {};
+  const addedMap = isObject(wishlist.map) ? wishlist.map : {};
+
+  if (ordered.length > 0) {
+    const normalizedPriorityMap = {};
+    for (const id of ordered) {
+      const n = Number(priorityMap[id]);
+      normalizedPriorityMap[id] = Number.isFinite(n) ? n : (ordered.indexOf(id) + 1);
+    }
+    const normalizedAddedMap = {};
+    for (const [id, value] of Object.entries(addedMap)) {
+      if (!APP_ID_RE.test(id)) {
+        continue;
+      }
+      const ts = Number(value);
+      if (Number.isFinite(ts) && ts > 0) {
+        normalizedAddedMap[id] = ts;
+      }
+    }
+    state.wishlistRank = {
+      steamId: STEAM_ID_RE.test(String(wishlist.steamId || "")) ? String(wishlist.steamId) : String(state.wishlistRank.steamId || ""),
+      orderedAppIds: ordered,
+      priorityByAppId: normalizedPriorityMap,
+      dateAddedByAppId: normalizedAddedMap,
+      totalCount: ordered.length,
+      syncedAt: Number.isFinite(Number(wishlist.priorityCachedAt)) ? Number(wishlist.priorityCachedAt) : now(),
+      lastError: cleanText(wishlist.priorityLastError || "", 240)
+    };
+  }
+
+  const metaCache = isObject(caches.metaCache) ? caches.metaCache : {};
+  let mergedMeta = 0;
+  for (const [appId, rawMeta] of Object.entries(metaCache)) {
+    if (!APP_ID_RE.test(appId) || !isObject(rawMeta)) {
+      continue;
+    }
+    mergeItemPatch(state, appId, {
+      title: cleanText(rawMeta.title || rawMeta.name || "", 180),
+      type: cleanText(rawMeta.appType || rawMeta.type || "", 64),
+      releaseDate: cleanText(rawMeta.releaseDate || rawMeta.releaseDateRaw || "", 80),
+      releaseYear: parseReleaseYear(rawMeta.releaseDate || rawMeta.releaseDateRaw || ""),
+      discountPercent: Number.isFinite(Number(rawMeta.discountPercent)) ? Number(rawMeta.discountPercent) : null,
+      finalPriceCents: Number.isFinite(Number(rawMeta.priceFinalCents)) ? Number(rawMeta.priceFinalCents) : null,
+      initialPriceCents: Number.isFinite(Number(rawMeta.priceInitialCents)) ? Number(rawMeta.priceInitialCents) : null,
+      reviewPercent: Number.isFinite(Number(rawMeta.reviewPercent)) ? Number(rawMeta.reviewPercent) : null,
+      reviewTotal: Number.isFinite(Number(rawMeta.reviewTotal)) ? Number(rawMeta.reviewTotal) : null,
+      reviewSummary: cleanText(rawMeta.reviewSummary || "", 120),
+      tags: ensureStringArray(rawMeta.tags || [], 120),
+      features: ensureStringArray(rawMeta.features || [], 120),
+      languages: ensureStringArray(rawMeta.languages || [], 80),
+      fullAudioLanguages: ensureStringArray(rawMeta.fullAudioLanguages || [], 80),
+      developers: ensureStringArray(rawMeta.developers || [], 40),
+      publishers: ensureStringArray(rawMeta.publishers || [], 40),
+      platforms: ensureStringArray(rawMeta.platforms || [], 10),
+      headerImage: cleanText(rawMeta.imageUrl || rawMeta.headerImage || "", 300)
+    });
+    mergedMeta += 1;
+  }
+
+  state.wishlistData.byAppId = {};
+  for (const appId of state.wishlistRank.orderedAppIds || []) {
+    const item = state.items?.[appId];
+    if (!item) {
+      continue;
+    }
+    state.wishlistData.byAppId[appId] = {
+      appId,
+      name: cleanText(item.title || "", 180),
+      releaseDate: cleanText(item.releaseDate || "", 80),
+      reviewSummary: cleanText(item.reviewSummary || "", 120),
+      reviewPercent: Number.isFinite(Number(item.reviewPercent)) ? Number(item.reviewPercent) : null,
+      reviewTotal: Number.isFinite(Number(item.reviewTotal)) ? Number(item.reviewTotal) : null,
+      discountPercent: Number.isFinite(Number(item.discountPercent)) ? Number(item.discountPercent) : null,
+      finalPriceCents: Number.isFinite(Number(item.finalPriceCents)) ? Number(item.finalPriceCents) : null,
+      currency: cleanText(item.currency || "", 12),
+      tags: ensureStringArray(item.tags || [], 120),
+      headerImage: cleanText(item.headerImage || "", 300),
+      updatedAt: Number.isFinite(Number(item.updatedAt)) ? Number(item.updatedAt) : now()
+    };
+  }
+  state.wishlistData.steamId = state.wishlistRank.steamId;
+  state.wishlistData.pagesFetched = 0;
+  state.wishlistData.lastPageFetched = -1;
+  state.wishlistData.syncedAt = now();
+  state.wishlistData.lastError = "";
+
+  const tagBucket = chooseLatestBucket(caches.tagCounts);
+  const typeBucket = chooseLatestBucket(caches.typeCounts);
+  const extraBucket = chooseLatestBucket(caches.extraCounts);
+  state.frequencies = {
+    tags: normalizeCountListToMap(tagBucket?.counts || []),
+    type: normalizeCountListToMap(typeBucket?.counts || []),
+    languages: normalizeCountListToMap(extraBucket?.languageCounts || []),
+    fullAudioLanguages: normalizeCountListToMap(extraBucket?.fullAudioLanguageCounts || []),
+    platforms: normalizeCountListToMap(extraBucket?.platformCounts || []),
+    features: normalizeCountListToMap(extraBucket?.featureCounts || []),
+    developers: normalizeCountListToMap(extraBucket?.developerCounts || []),
+    publishers: normalizeCountListToMap(extraBucket?.publisherCounts || []),
+    releaseYears: normalizeCountListToMap(extraBucket?.releaseYearCounts || []),
+    syncedAt: now(),
+    source: "extension-caches"
+  };
+
+  return {
+    rankCount: state.wishlistRank.orderedAppIds.length,
+    mergedMeta
+  };
+}
+
 function buildGamesCatalog(state) {
   const ids = new Set();
   for (const appIds of Object.values(state.collections || {})) {
@@ -698,6 +892,35 @@ async function fetchJsonWithRetry(url, options = {}, onAttempt = null) {
   throw lastError || new Error("Request failed.");
 }
 
+async function fetchJsonViaCurl(url, options = {}) {
+  const escapedUrl = String(url).replace(/"/g, '\\"');
+  const parts = ["curl", "-L", "-s", "--max-time", "30"];
+  const headers = isObject(options?.headers) ? options.headers : {};
+  for (const [key, value] of Object.entries(headers)) {
+    const escapedHeader = `${String(key)}: ${String(value)}`.replace(/"/g, '\\"');
+    parts.push("-H", `"${escapedHeader}"`);
+  }
+  parts.push(`"${escapedUrl}"`);
+  const cmd = parts.join(" ");
+
+  const { stdout } = await execFileAsync("bash", ["-lc", cmd], {
+    maxBuffer: 8 * 1024 * 1024
+  });
+  return JSON.parse(String(stdout || "{}"));
+}
+
+async function fetchJsonSmart(url, options = {}, onAttempt = null) {
+  try {
+    return await fetchJsonWithRetry(url, options, onAttempt);
+  } catch (error) {
+    const message = String(error?.message || "");
+    if (!/fetch failed|network|ENOTFOUND|ECONNREFUSED|ECONNRESET/i.test(message)) {
+      throw error;
+    }
+    return fetchJsonViaCurl(url, options);
+  }
+}
+
 function computeWishlistOrder(items) {
   const rows = [];
   for (const raw of Array.isArray(items) ? items : []) {
@@ -757,7 +980,7 @@ async function fetchWishlistRankPages(steamId, setProgress) {
     url.searchParams.set("count", String(perPage));
     url.searchParams.set("start", String(start));
 
-    const payload = await fetchJsonWithRetry(url.toString());
+    const payload = await fetchJsonSmart(url.toString());
     const response = isObject(payload?.response) ? payload.response : payload;
     const rows = Array.isArray(response?.items) ? response.items : [];
     const pageTotal = Number(response?.total_count);
@@ -817,7 +1040,7 @@ async function refreshWishlistData(state, steamId, maxPages, onPage) {
 
   for (let page = 0; page < maxPages; page += 1) {
     const url = `https://store.steampowered.com/wishlist/profiles/${steamId}/wishlistdata/?p=${page}`;
-    const payload = await fetchJsonWithRetry(url, {
+    const payload = await fetchJsonSmart(url, {
       headers: {
         Accept: "application/json"
       }
@@ -1257,6 +1480,7 @@ registerTool(
     }
   },
   async ({ backupJson, mode }) => {
+    const allData = parseBackupJsonToAllData(backupJson);
     const extensionState = parseBackupJsonToExtensionState(backupJson);
     const incoming = toNormalizedStateFromExtensionState(extensionState);
     let nextState = null;
@@ -1267,6 +1491,17 @@ registerTool(
       const current = await readState();
       nextState = await writeState(mergeStates(current, incoming));
     }
+
+    nextState.extensionCaches = {
+      wishlistAdded: isObject(allData[EXTENSION_WISHLIST_CACHE_KEY]) ? allData[EXTENSION_WISHLIST_CACHE_KEY] : {},
+      metaCache: isObject(allData[EXTENSION_META_CACHE_KEY]) ? allData[EXTENSION_META_CACHE_KEY] : {},
+      tagCounts: isObject(allData[EXTENSION_TAG_COUNTS_KEY]) ? allData[EXTENSION_TAG_COUNTS_KEY] : {},
+      typeCounts: isObject(allData[EXTENSION_TYPE_COUNTS_KEY]) ? allData[EXTENSION_TYPE_COUNTS_KEY] : {},
+      extraCounts: isObject(allData[EXTENSION_EXTRA_COUNTS_KEY]) ? allData[EXTENSION_EXTRA_COUNTS_KEY] : {},
+      importedAt: now()
+    };
+    applyExtensionCachesToState(nextState);
+    nextState = await writeState(nextState);
 
     return {
       content: [{ type: "text", text: `Backup imported (${mode}).` }],
@@ -1292,6 +1527,7 @@ registerTool(
   async ({ backupFilePath, mode }) => {
     const filePath = path.resolve(String(backupFilePath || ""));
     const jsonText = await readFile(filePath, "utf8");
+    const allData = parseBackupJsonToAllData(jsonText);
     const extensionState = parseBackupJsonToExtensionState(jsonText);
     const incoming = toNormalizedStateFromExtensionState(extensionState);
     let nextState = null;
@@ -1301,6 +1537,18 @@ registerTool(
       const current = await readState();
       nextState = await writeState(mergeStates(current, incoming));
     }
+
+    nextState.extensionCaches = {
+      wishlistAdded: isObject(allData[EXTENSION_WISHLIST_CACHE_KEY]) ? allData[EXTENSION_WISHLIST_CACHE_KEY] : {},
+      metaCache: isObject(allData[EXTENSION_META_CACHE_KEY]) ? allData[EXTENSION_META_CACHE_KEY] : {},
+      tagCounts: isObject(allData[EXTENSION_TAG_COUNTS_KEY]) ? allData[EXTENSION_TAG_COUNTS_KEY] : {},
+      typeCounts: isObject(allData[EXTENSION_TYPE_COUNTS_KEY]) ? allData[EXTENSION_TYPE_COUNTS_KEY] : {},
+      extraCounts: isObject(allData[EXTENSION_EXTRA_COUNTS_KEY]) ? allData[EXTENSION_EXTRA_COUNTS_KEY] : {},
+      importedAt: now()
+    };
+    applyExtensionCachesToState(nextState);
+    nextState = await writeState(nextState);
+
     return {
       content: [{ type: "text", text: `Backup file imported (${mode}): ${filePath}` }],
       structuredContent: {
@@ -1370,7 +1618,7 @@ registerTool(
 registerTool(
   "swm_refresh_wishlist_rank",
   {
-    description: "Refresh wishlist rank (priority/date_added) from IWishlistService/GetWishlist/v1.",
+    description: "Refresh wishlist rank from extension caches first (fallback to Steam API only if needed).",
     inputSchema: {
       steamId: z.string().regex(STEAM_ID_RE),
       force: z.boolean().default(false)
@@ -1379,6 +1627,32 @@ registerTool(
   async ({ steamId, force }) => {
     const sid = validateSteamId(steamId);
     const state = await readState();
+    const extWishlist = isObject(state.extensionCaches?.wishlistAdded) ? state.extensionCaches.wishlistAdded : {};
+    const extHasRank = Array.isArray(extWishlist.orderedAppIds) && extWishlist.orderedAppIds.length > 0;
+    if (extHasRank && (!force || state.wishlistRank.totalCount === 0)) {
+      extWishlist.steamId = sid;
+      const applied = applyExtensionCachesToState(state);
+      state.wishlistRank.steamId = sid;
+      state.wishlistRank.lastError = "";
+      await updateSyncStatus(state, {
+        phase: "idle",
+        done: applied.rankCount,
+        total: applied.rankCount,
+        lastError: ""
+      });
+      await writeState(state);
+      return {
+        content: [{ type: "text", text: `Wishlist rank refreshed from extension cache: ${applied.rankCount} items.` }],
+        structuredContent: {
+          steamId: sid,
+          source: "extension-cache",
+          totalCount: applied.rankCount,
+          first10: state.wishlistRank.orderedAppIds.slice(0, 10),
+          syncedAt: state.wishlistRank.syncedAt
+        }
+      };
+    }
+
     const ageMs = now() - Number(state.wishlistRank?.syncedAt || 0);
     if (!force && state.wishlistRank?.steamId === sid && ageMs < 24 * 60 * 60 * 1000 && state.wishlistRank.orderedAppIds.length > 0) {
       return {
@@ -1460,7 +1734,7 @@ registerTool(
 registerTool(
   "swm_refresh_wishlist_data",
   {
-    description: "Refresh wishlist page metadata from /wishlistdata endpoint.",
+    description: "Refresh wishlist metadata from extension caches first (fallback to Steam endpoint only if needed).",
     inputSchema: {
       steamId: z.string().regex(STEAM_ID_RE),
       maxPages: z.number().int().min(1).max(500).default(60),
@@ -1470,6 +1744,32 @@ registerTool(
   async ({ steamId, maxPages, force }) => {
     const sid = validateSteamId(steamId);
     const state = await readState();
+    const hasExtensionMeta = isObject(state.extensionCaches?.metaCache) && Object.keys(state.extensionCaches.metaCache).length > 0;
+    if (hasExtensionMeta && (!force || Object.keys(state.wishlistData.byAppId || {}).length === 0)) {
+      if (isObject(state.extensionCaches.wishlistAdded)) {
+        state.extensionCaches.wishlistAdded.steamId = sid;
+      }
+      const applied = applyExtensionCachesToState(state);
+      state.wishlistData.steamId = sid;
+      await updateSyncStatus(state, {
+        phase: "idle",
+        done: Object.keys(state.wishlistData.byAppId || {}).length,
+        total: Object.keys(state.wishlistData.byAppId || {}).length,
+        lastError: ""
+      });
+      await writeState(state);
+      return {
+        content: [{ type: "text", text: `Wishlist data refreshed from extension cache: ${Object.keys(state.wishlistData.byAppId || {}).length} apps.` }],
+        structuredContent: {
+          steamId: sid,
+          source: "extension-cache",
+          appCount: Object.keys(state.wishlistData.byAppId || {}).length,
+          mergedMeta: applied.mergedMeta,
+          syncedAt: state.wishlistData.syncedAt
+        }
+      };
+    }
+
     const ageMs = now() - Number(state.wishlistData?.syncedAt || 0);
     if (!force && state.wishlistData?.steamId === sid && ageMs < 24 * 60 * 60 * 1000 && Object.keys(state.wishlistData.byAppId || {}).length > 0) {
       return {
@@ -1544,7 +1844,7 @@ registerTool(
 registerTool(
   "swm_refresh_appdetails",
   {
-    description: "Refresh appdetails metadata for selected app ids.",
+    description: "Refresh appdetails from extension meta cache first (fallback to Steam appdetails only if needed).",
     inputSchema: {
       source: z.enum(["wishlist-rank", "items", "all-known"]).default("wishlist-rank"),
       appIdsCsv: z.string().optional(),
@@ -1555,6 +1855,30 @@ registerTool(
   },
   async ({ source, appIdsCsv, offset, limit, onlyMissing }) => {
     const state = await readState();
+    const hasExtensionMeta = isObject(state.extensionCaches?.metaCache) && Object.keys(state.extensionCaches.metaCache).length > 0;
+    if (hasExtensionMeta) {
+      const applied = applyExtensionCachesToState(state);
+      state.appdetails.syncedAt = now();
+      state.appdetails.lastError = "";
+      await updateSyncStatus(state, {
+        phase: "idle",
+        done: applied.mergedMeta,
+        total: applied.mergedMeta,
+        lastError: ""
+      });
+      await writeState(state);
+      return {
+        content: [{ type: "text", text: `Appdetails refreshed from extension cache: ${applied.mergedMeta} apps.` }],
+        structuredContent: {
+          source: "extension-cache",
+          updated: applied.mergedMeta,
+          failed: 0,
+          total: applied.mergedMeta,
+          syncedAt: state.appdetails.syncedAt
+        }
+      };
+    }
+
     let appIds = [];
 
     if (cleanText(appIdsCsv || "")) {
@@ -1599,7 +1923,7 @@ registerTool(
           url.searchParams.set("l", STEAM_LANG);
           url.searchParams.set("cc", STEAM_CC);
 
-          const payload = await fetchJsonWithRetry(url.toString(), {
+          const payload = await fetchJsonSmart(url.toString(), {
             headers: {
               Accept: "application/json"
             }
@@ -1682,13 +2006,48 @@ registerTool(
 registerTool(
   "swm_refresh_frequencies",
   {
-    description: "Recompute local frequency indexes from cached item metadata.",
+    description: "Recompute frequencies using extension cache seeds when present, otherwise from item metadata.",
     inputSchema: {
       source: z.enum(["wishlist-rank", "items", "all-known"]).default("wishlist-rank")
     }
   },
   async ({ source }) => {
     const state = await readState();
+    const hasExtensionCounts =
+      (isObject(state.extensionCaches?.tagCounts) && Object.keys(state.extensionCaches.tagCounts).length > 0) ||
+      (isObject(state.extensionCaches?.typeCounts) && Object.keys(state.extensionCaches.typeCounts).length > 0) ||
+      (isObject(state.extensionCaches?.extraCounts) && Object.keys(state.extensionCaches.extraCounts).length > 0);
+    if (hasExtensionCounts) {
+      applyExtensionCachesToState(state);
+      state.frequencies.syncedAt = now();
+      state.frequencies.source = "extension-caches";
+      await updateSyncStatus(state, {
+        phase: "idle",
+        done: 1,
+        total: 1,
+        lastError: ""
+      });
+      await writeState(state);
+      return {
+        content: [{ type: "text", text: "Frequencies loaded from extension caches." }],
+        structuredContent: {
+          source: "extension-caches",
+          syncedAt: state.frequencies.syncedAt,
+          bucketSizes: {
+            tags: Object.keys(state.frequencies.tags).length,
+            type: Object.keys(state.frequencies.type).length,
+            languages: Object.keys(state.frequencies.languages).length,
+            fullAudioLanguages: Object.keys(state.frequencies.fullAudioLanguages).length,
+            platforms: Object.keys(state.frequencies.platforms).length,
+            features: Object.keys(state.frequencies.features).length,
+            developers: Object.keys(state.frequencies.developers).length,
+            publishers: Object.keys(state.frequencies.publishers).length,
+            releaseYears: Object.keys(state.frequencies.releaseYears).length
+          }
+        }
+      };
+    }
+
     const appIds = collectTargetAppIds(state, source);
 
     await updateSyncStatus(state, {
@@ -2006,7 +2365,7 @@ async function runRefreshAllPipeline({
         url.searchParams.set("appids", appId);
         url.searchParams.set("l", STEAM_LANG);
         url.searchParams.set("cc", STEAM_CC);
-        const payload = await fetchJsonWithRetry(url.toString(), {
+        const payload = await fetchJsonSmart(url.toString(), {
           headers: { Accept: "application/json" }
         });
         const parsed = parseAppdetailsPayload(appId, payload);
