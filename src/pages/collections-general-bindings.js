@@ -8,6 +8,7 @@
     const onTextFilterInput = options?.onTextFilterInput || (() => {});
     const onRefreshPage = options?.onRefreshPage || (() => {});
     const onTriageFilterChange = options?.onTriageFilterChange || (async () => {});
+    const onHideMutedChange = options?.onHideMutedChange || (async () => {});
 
     document.getElementById("search-input")?.addEventListener("input", async (event) => {
       await onSearchInput(String(event.target.value || ""));
@@ -49,6 +50,10 @@
 
     document.getElementById("triage-filter-select")?.addEventListener("change", async (event) => {
       await onTriageFilterChange(String(event.target.value || "all"));
+    });
+
+    document.getElementById("hide-muted-checkbox")?.addEventListener("change", async (event) => {
+      await onHideMutedChange(Boolean(event.target.checked));
     });
   }
 

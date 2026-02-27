@@ -62,6 +62,7 @@ let sourceMode = "collections";
 let page = 1;
 let searchQuery = "";
 let triageFilter = "all";
+let hideMuted = false;
 let sortMode = "position";
 let viewMode = "card";
 
@@ -236,19 +237,24 @@ function getItemIntentState(appId) {
   const buy = buyRaw >= 2 ? 2 : (buyRaw > 0 ? 1 : 0);
   const bucketRaw = String(item.bucket || "").trim().toUpperCase();
   const bucket = bucketRaw || (buy > 0 ? (buy >= 2 ? "BUY" : "MAYBE") : (track > 0 ? "TRACK" : "INBOX"));
+  const muted = Boolean(item.muted);
   return {
     track,
     buy,
-    bucket
+    bucket,
+    muted
   };
 }
 
 function matchesTriageFilter(appId) {
+  const intent = getItemIntentState(appId);
+  if (hideMuted && intent.muted) {
+    return false;
+  }
   const filter = String(triageFilter || "all").toLowerCase();
   if (filter === "all") {
     return true;
   }
-  const intent = getItemIntentState(appId);
   const bucket = String(intent.bucket || "INBOX").toLowerCase();
   if (filter === "track") {
     return bucket === "track";
@@ -344,7 +350,8 @@ function exportCurrentFilterSnapshot() {
     releaseTextEnabled,
     releaseYearRangeEnabled,
     releaseYearMin,
-    releaseYearMax
+    releaseYearMax,
+    hideMuted
   };
 }
 
@@ -375,6 +382,7 @@ function applyFilterSnapshot(snapshot) {
   releaseYearRangeEnabled = Boolean(data.releaseYearRangeEnabled);
   releaseYearMin = Number.isFinite(Number(data.releaseYearMin)) ? Number(data.releaseYearMin) : RELEASE_YEAR_DEFAULT_MIN;
   releaseYearMax = Number.isFinite(Number(data.releaseYearMax)) ? Number(data.releaseYearMax) : getReleaseYearMaxBound();
+  hideMuted = Boolean(data.hideMuted);
 }
 
 function buildDynamicDefinitionFromCurrentView() {
@@ -2837,6 +2845,8 @@ function createLineRow(options) {
   const selectedCollectionNames = new Set(Array.isArray(options?.selectedCollectionNames) ? options.selectedCollectionNames : []);
   const onToggleCollection = options?.onToggleCollection || (() => Promise.resolve());
   const onSetIntent = options?.onSetIntent || (() => Promise.resolve());
+  const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
+  const isMuted = Boolean(itemIntent.muted);
 
   const row = document.createElement("article");
   row.className = "line-row";
@@ -2984,6 +2994,17 @@ function createLineRow(options) {
   wfWrap.appendChild(promoteBtn);
   wfWrap.appendChild(trackBtn);
   wfWrap.appendChild(ownedBtn);
+
+  const muteBtn = document.createElement("button");
+  muteBtn.type = "button";
+  muteBtn.className = "line-btn";
+  muteBtn.textContent = isMuted ? "Unmute" : "Mute";
+  muteBtn.addEventListener("click", () => {
+    onSetIntent(appId, { muted: !isMuted })
+      .then(() => setStatus(isMuted ? "Unmuted." : "Muted."))
+      .catch(() => setStatus("Failed to toggle mute.", true));
+  });
+  wfWrap.appendChild(muteBtn);
   left.appendChild(wfWrap);
 
   const center = document.createElement("div");
@@ -3266,6 +3287,7 @@ async function renderCards() {
         title,
         link: getAppLink(appId),
         imageUrl: getCardImageUrl(appId),
+        itemIntent: getItemIntentState(appId),
         reorderEnabled: manualReorderEnabled,
         itemPosition: Number(orderIndex.get(appId) || 0),
         totalItems: activeOrder.length,
@@ -3531,6 +3553,8 @@ async function deleteCollectionByName(rawName) {
 async function render() {
   const sortSelect = document.getElementById("sort-select");
   const viewSelect = document.getElementById("view-select");
+  const triageFilterSelect = document.getElementById("triage-filter-select");
+  const hideMutedCheckbox = document.getElementById("hide-muted-checkbox");
   const renameActionBtn = document.getElementById("menu-action-rename");
   const deleteActionBtn = document.getElementById("menu-action-delete");
   const deleteSelect = document.getElementById("delete-collection-select");
@@ -3539,6 +3563,12 @@ async function render() {
   }
   if (viewSelect) {
     viewSelect.value = viewMode;
+  }
+  if (triageFilterSelect) {
+    triageFilterSelect.value = triageFilter;
+  }
+  if (hideMutedCheckbox) {
+    hideMutedCheckbox.checked = hideMuted;
   }
 
   renderSortMenu();
@@ -3849,6 +3879,11 @@ function bindFilterControls() {
     },
     onTriageFilterChange: async (value) => {
       triageFilter = String(value || "all");
+      page = 1;
+      await renderCards();
+    },
+    onHideMutedChange: async (checked) => {
+      hideMuted = Boolean(checked);
       page = 1;
       await renderCards();
     }

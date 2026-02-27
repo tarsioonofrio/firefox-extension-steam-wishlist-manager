@@ -78,6 +78,7 @@
       wfPromoteBtn: fragment.querySelector(".wf-promote-btn"),
       wfConvertTrackBtn: fragment.querySelector(".wf-convert-track-btn"),
       wfOwnedBtn: fragment.querySelector(".wf-owned-btn"),
+      wfMuteBtn: fragment.querySelector(".wf-mute-btn"),
       refreshItemBtn: fragment.querySelector(".refresh-item-btn"),
       collectionsToggleBtn: fragment.querySelector(".collections-toggle-btn"),
       collectionsDropdown: fragment.querySelector(".collections-dropdown"),
@@ -126,6 +127,7 @@
     const confirmFn = options?.confirmFn || ((message) => window.confirm(message));
     const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
     const currentBucket = String(itemIntent.bucket || "INBOX").toUpperCase();
+    const isMuted = Boolean(itemIntent.muted);
     if (!card) {
       return;
     }
@@ -185,6 +187,17 @@
           setStatus(entry.ok);
         } catch (error) {
           setStatus(String(error?.message || "Failed to apply workflow action."), true);
+        }
+      });
+    }
+    if (card.wfMuteBtn) {
+      card.wfMuteBtn.textContent = isMuted ? "Unmute" : "Mute";
+      card.wfMuteBtn.addEventListener("click", async () => {
+        try {
+          await onSetIntent(appId, { muted: !isMuted });
+          setStatus(isMuted ? "Unmuted." : "Muted.");
+        } catch (error) {
+          setStatus(String(error?.message || "Failed to toggle mute."), true);
         }
       });
     }

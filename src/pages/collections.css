@@ -649,7 +649,7 @@ main {
 
 .workflow-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 4px;
   margin-bottom: 6px;
 }
@@ -797,6 +797,14 @@ main {
   grid-auto-flow: column;
   gap: 4px;
   align-items: center;
+}
+
+.top-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #c7d5e0;
+  font-size: 13px;
 }
 
 .line-btn {
