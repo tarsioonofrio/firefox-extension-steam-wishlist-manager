@@ -133,6 +133,7 @@ let batchMode = false;
 let batchAddTargetCollection = "";
 let batchSelectedIds = new Set();
 let dynamicCollectionSizes = {};
+let keyboardFocusIndex = 0;
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -1285,6 +1286,133 @@ async function refreshSingleItem(appId) {
   invalidateWishlistPrecomputedSorts();
   await render();
   setStatus("Item refreshed.");
+}
+
+async function setItemIntent(appId, intentPatch = {}) {
+  const id = String(appId || "").trim();
+  if (!id) {
+    return;
+  }
+  const titleForPatch = state?.items?.[id]?.title || metaCache?.[id]?.titleText || `App ${id}`;
+  const response = await browser.runtime.sendMessage({
+    type: "set-item-intent",
+    appId: id,
+    title: titleForPatch,
+    ...intentPatch
+  });
+  if (!response?.ok) {
+    throw new Error(String(response?.error || "Failed to update triage intent."));
+  }
+  await refreshState();
+  await render();
+}
+
+function clampFocusIndex(index, length) {
+  const size = Math.max(0, Number(length || 0));
+  if (size === 0) {
+    return 0;
+  }
+  const n = Number(index || 0);
+  if (!Number.isFinite(n) || n < 0) {
+    return 0;
+  }
+  if (n >= size) {
+    return size - 1;
+  }
+  return n;
+}
+
+function applyKeyboardFocusVisual() {
+  const focusId = currentRenderedPageIds[keyboardFocusIndex] || "";
+  const allCards = document.querySelectorAll("#cards .card, #cards .line-row");
+  for (const node of allCards) {
+    node.classList.remove("keyboard-focused");
+    if (focusId && String(node.dataset.appId || "") === String(focusId)) {
+      node.classList.add("keyboard-focused");
+    }
+  }
+}
+
+function bindKeyboardFocusClickTargets() {
+  const allCards = document.querySelectorAll("#cards .card, #cards .line-row");
+  for (const node of allCards) {
+    node.addEventListener("click", () => {
+      const appId = String(node.dataset.appId || "");
+      if (!appId) {
+        return;
+      }
+      const nextIndex = currentRenderedPageIds.indexOf(appId);
+      if (nextIndex >= 0) {
+        keyboardFocusIndex = nextIndex;
+        applyKeyboardFocusVisual();
+      }
+    });
+  }
+}
+
+function isEditableTarget(target) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  const tag = target.tagName.toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") {
+    return true;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+async function handleKeyboardTriageIntent(actionKey) {
+  const appId = currentRenderedPageIds[keyboardFocusIndex];
+  if (!appId) {
+    return;
+  }
+  const intentByKey = {
+    "1": { track: 1, buy: 0, bucket: "TRACK" },
+    "2": { track: 0, buy: 1, bucket: "MAYBE" },
+    "3": { track: 0, buy: 2, bucket: "BUY" },
+    "4": { track: 0, buy: 0, bucket: "ARCHIVE" }
+  };
+  const patch = intentByKey[actionKey];
+  if (!patch) {
+    return;
+  }
+  await setItemIntent(appId, patch);
+  setStatus(`Updated ${appId} -> ${patch.bucket}`);
+}
+
+function bindKeyboardShortcuts() {
+  document.addEventListener("keydown", (event) => {
+    if (!currentRenderedPageIds.length) {
+      return;
+    }
+    if (isEditableTarget(event.target)) {
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) {
+      return;
+    }
+
+    const key = String(event.key || "").toLowerCase();
+    if (key === "j") {
+      event.preventDefault();
+      keyboardFocusIndex = clampFocusIndex(keyboardFocusIndex + 1, currentRenderedPageIds.length);
+      applyKeyboardFocusVisual();
+      return;
+    }
+    if (key === "k") {
+      event.preventDefault();
+      keyboardFocusIndex = clampFocusIndex(keyboardFocusIndex - 1, currentRenderedPageIds.length);
+      applyKeyboardFocusVisual();
+      return;
+    }
+    if (key === "1" || key === "2" || key === "3" || key === "4") {
+      event.preventDefault();
+      handleKeyboardTriageIntent(key).catch(() => setStatus("Failed to apply triage shortcut.", true));
+    }
+  });
 }
 
 async function loadMetaCache() {
@@ -2650,6 +2778,7 @@ function createLineRow(options) {
 
   const row = document.createElement("article");
   row.className = "line-row";
+  row.dataset.appId = appId;
   if (batchModeEnabled) {
     row.classList.add("line-row-batch");
   }
@@ -3015,6 +3144,7 @@ async function renderCards() {
   const maxPositionInPage = start + pageIds.length;
   const maxPositionDigits = String(Math.max(1, maxPositionInPage)).length;
   currentRenderedPageIds = [...pageIds];
+  keyboardFocusIndex = clampFocusIndex(keyboardFocusIndex, currentRenderedPageIds.length);
   if (!shouldSkipHeavyMetaHydration && (needsMetaForSort || needsMetaForSearch)) {
     setStatus("");
   }
@@ -3094,6 +3224,8 @@ async function renderCards() {
         line.discountEl.textContent = meta?.discountText || "-";
       }).catch(() => {});
     }
+    bindKeyboardFocusClickTargets();
+    applyKeyboardFocusVisual();
     return;
   }
 
@@ -3106,6 +3238,9 @@ async function renderCards() {
       title,
       link: getAppLink(appId)
     });
+    if (card.cardEl) {
+      card.cardEl.dataset.appId = appId;
+    }
     cardRenderUtils.fillCardStatic({
       card,
       appId,
@@ -3177,18 +3312,7 @@ async function renderCards() {
         await render();
       },
       onSetIntent: async (id, intentPatch) => {
-        const titleForPatch = state?.items?.[id]?.title || metaCache?.[id]?.titleText || `App ${id}`;
-        const response = await browser.runtime.sendMessage({
-          type: "set-item-intent",
-          appId: id,
-          title: titleForPatch,
-          ...intentPatch
-        });
-        if (!response?.ok) {
-          throw new Error(String(response?.error || "Failed to update triage intent."));
-        }
-        await refreshState();
-        await render();
+        await setItemIntent(id, intentPatch);
       }
     });
     cardsEl.appendChild(card.fragment);
@@ -3199,6 +3323,8 @@ async function renderCards() {
       fetchMeta: (id) => fetchAppMeta(id)
     });
   }
+  bindKeyboardFocusClickTargets();
+  applyKeyboardFocusVisual();
 }
 
 async function refreshState() {
@@ -3738,6 +3864,7 @@ function attachEvents() {
   bindBatchControls();
   bindFilterControls();
   bindGlobalPanelClose();
+  bindKeyboardShortcuts();
 }
 
 initUtils.run({
