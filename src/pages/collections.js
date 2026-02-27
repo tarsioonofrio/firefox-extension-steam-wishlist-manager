@@ -302,17 +302,32 @@ function formatFeedDate(timestampSec) {
   return new Date(n * 1000).toLocaleString("pt-BR");
 }
 
+function deriveBucketFromState(track, buy, owned) {
+  if (owned) {
+    return "ARCHIVE";
+  }
+  if (buy >= 2) {
+    return "BUY";
+  }
+  if (buy === 1) {
+    return "MAYBE";
+  }
+  if (track > 0) {
+    return "TRACK";
+  }
+  return "INBOX";
+}
+
 function getItemIntentState(appId) {
   const item = state?.items?.[appId] || {};
   const track = Number(item.track || 0) > 0 ? 1 : 0;
   const buyRaw = Number(item.buy || 0);
   const buy = buyRaw >= 2 ? 2 : (buyRaw > 0 ? 1 : 0);
-  const bucketRaw = String(item.bucket || "").trim().toUpperCase();
-  const bucket = bucketRaw || (buy > 0 ? (buy >= 2 ? "BUY" : "MAYBE") : (track > 0 ? "TRACK" : "INBOX"));
   const muted = Boolean(item.muted);
   const note = String(item.note || "").trim();
   const labels = Array.isArray(item.labels) ? item.labels.map((label) => String(label || "").trim().toLowerCase()).filter(Boolean) : [];
   const owned = labels.includes("owned");
+  const bucket = deriveBucketFromState(track, buy, owned);
   const targetPriceCents = Number.isFinite(Number(item.targetPriceCents))
     ? Math.max(0, Math.floor(Number(item.targetPriceCents)))
     : null;
@@ -724,7 +739,7 @@ function getCurrentSourceAppIds() {
     const out = [];
     for (const appId of Object.keys(state.items || {})) {
       const intent = getItemIntentState(appId);
-      if (String(intent.bucket || "INBOX").toUpperCase() === "INBOX") {
+      if (intent.bucket === "INBOX") {
         out.push(appId);
       }
     }
@@ -737,7 +752,7 @@ function getCurrentSourceAppIds() {
     const cutoffMs = windowDays > 0 ? (Date.now() - (windowDays * 24 * 60 * 60 * 1000)) : 0;
     for (const appId of Object.keys(state.items || {})) {
       const intent = getItemIntentState(appId);
-      if (String(intent.bucket || "INBOX").toUpperCase() === "TRACK") {
+      if (intent.track > 0 && !intent.owned) {
         if (cutoffMs > 0) {
           const triagedAt = Number(state?.items?.[appId]?.triagedAt || 0);
           if (!Number.isFinite(triagedAt) || triagedAt < cutoffMs) {
@@ -755,8 +770,7 @@ function getCurrentSourceAppIds() {
     const out = [];
     for (const appId of Object.keys(state.items || {})) {
       const intent = getItemIntentState(appId);
-      const bucket = String(intent.bucket || "INBOX").toUpperCase();
-      if (bucket === "BUY" || bucket === "MAYBE") {
+      if (!intent.owned && intent.buy > 0) {
         out.push(appId);
       }
     }
@@ -767,7 +781,7 @@ function getCurrentSourceAppIds() {
     const out = [];
     for (const appId of Object.keys(state.items || {})) {
       const intent = getItemIntentState(appId);
-      if (String(intent.bucket || "INBOX").toUpperCase() === "ARCHIVE") {
+      if (intent.owned) {
         out.push(appId);
       }
     }
@@ -811,7 +825,7 @@ function getTrackSourceAppIds() {
   const out = [];
   for (const appId of Object.keys(state?.items || {})) {
     const intent = getItemIntentState(appId);
-    if (String(intent.bucket || "INBOX").toUpperCase() === "TRACK") {
+    if (intent.track > 0 && !intent.owned) {
       out.push(appId);
     }
   }
@@ -1802,18 +1816,20 @@ async function handleKeyboardTriageIntent(actionKey) {
   if (!appId) {
     return;
   }
+  const currentIntent = getItemIntentState(appId);
   const intentByKey = {
-    "1": { track: 1, buy: 0, bucket: "TRACK" },
-    "2": { track: 0, buy: 1, bucket: "MAYBE" },
-    "3": { track: 0, buy: 2, bucket: "BUY" },
-    "4": { track: 0, buy: 0, bucket: "ARCHIVE" }
+    "1": { track: currentIntent.track > 0 ? 0 : 1 },
+    "2": { buy: 1 },
+    "3": { buy: 2 },
+    "4": { track: 0, buy: 0, owned: true }
   };
   const patch = intentByKey[actionKey];
   if (!patch) {
     return;
   }
   await setItemIntent(appId, patch);
-  setStatus(`Updated ${appId} -> ${patch.bucket}`);
+  const nextIntent = getItemIntentState(appId);
+  setStatus(`Updated ${appId} -> ${nextIntent.bucket}`);
 }
 
 async function handleKeyboardBatchIntent(actionCode) {
@@ -1823,21 +1839,21 @@ async function handleKeyboardBatchIntent(actionCode) {
   }
   if (actionCode === "Digit1") {
     await applyBatchIntent(
-      { track: 0, buy: 2, bucket: "BUY" },
-      "Selected games promoted to Buy radar."
+      { buy: 2 },
+      "Selected games set to Buy."
     );
     return;
   }
   if (actionCode === "Digit2") {
     await applyBatchIntent(
-      { track: 1, buy: 0, bucket: "TRACK" },
-      "Selected games converted to Track."
+      { track: 1 },
+      "Selected games set to Track."
     );
     return;
   }
   if (actionCode === "Digit3") {
     await applyBatchIntent(
-      { track: 0, buy: 0, bucket: "ARCHIVE", owned: true },
+      { track: 0, buy: 0, owned: true },
       "Selected games marked as bought (owned).",
       true,
       `Mark ${batchSelectedIds.size} selected game(s) as bought (owned)?`
@@ -3268,20 +3284,19 @@ function renderCollectionSelect() {
     trackFeedSelectValue: TRACK_FEED_SELECT_VALUE,
     inboxCount: Object.keys(state?.items || {}).filter((appId) => {
       const intent = getItemIntentState(appId);
-      return String(intent.bucket || "INBOX").toUpperCase() === "INBOX";
+      return intent.bucket === "INBOX";
     }).length,
     trackCount: Object.keys(state?.items || {}).filter((appId) => {
       const intent = getItemIntentState(appId);
-      return String(intent.bucket || "INBOX").toUpperCase() === "TRACK";
+      return intent.track > 0 && !intent.owned;
     }).length,
     buyCount: Object.keys(state?.items || {}).filter((appId) => {
       const intent = getItemIntentState(appId);
-      const bucket = String(intent.bucket || "INBOX").toUpperCase();
-      return bucket === "BUY" || bucket === "MAYBE";
+      return !intent.owned && intent.buy > 0;
     }).length,
     archiveCount: Object.keys(state?.items || {}).filter((appId) => {
       const intent = getItemIntentState(appId);
-      return String(intent.bucket || "INBOX").toUpperCase() === "ARCHIVE";
+      return intent.owned;
     }).length,
     ownedCount: Object.keys(state?.items || {}).filter((appId) => {
       const intent = getItemIntentState(appId);
@@ -3447,24 +3462,44 @@ function createLineRow(options) {
   const wfWrap = document.createElement("div");
   wfWrap.className = "line-workflow-actions";
 
-  const promoteBtn = document.createElement("button");
-  promoteBtn.type = "button";
-  promoteBtn.className = "line-btn";
-  promoteBtn.textContent = "Promote";
-  promoteBtn.addEventListener("click", () => {
-    onSetIntent(appId, { track: 0, buy: 2, bucket: "BUY" })
-      .then(() => setStatus("Promoted to Buy radar."))
-      .catch(() => setStatus("Failed to promote item.", true));
+  const buyBtn = document.createElement("button");
+  buyBtn.type = "button";
+  buyBtn.className = "line-btn";
+  buyBtn.textContent = "Buy";
+  buyBtn.addEventListener("click", () => {
+    onSetIntent(appId, { buy: 2 })
+      .then(() => setStatus("Set to Buy."))
+      .catch(() => setStatus("Failed to set Buy.", true));
+  });
+
+  const maybeBtn = document.createElement("button");
+  maybeBtn.type = "button";
+  maybeBtn.className = "line-btn";
+  maybeBtn.textContent = "Maybe";
+  maybeBtn.addEventListener("click", () => {
+    onSetIntent(appId, { buy: 1 })
+      .then(() => setStatus("Set to Maybe."))
+      .catch(() => setStatus("Failed to set Maybe.", true));
+  });
+
+  const clearBuyBtn = document.createElement("button");
+  clearBuyBtn.type = "button";
+  clearBuyBtn.className = "line-btn";
+  clearBuyBtn.textContent = "Clear buy";
+  clearBuyBtn.addEventListener("click", () => {
+    onSetIntent(appId, { buy: 0 })
+      .then(() => setStatus("Buy priority cleared."))
+      .catch(() => setStatus("Failed to clear buy.", true));
   });
 
   const trackBtn = document.createElement("button");
   trackBtn.type = "button";
   trackBtn.className = "line-btn";
-  trackBtn.textContent = "Track";
+  trackBtn.textContent = itemIntent.track > 0 ? "Untrack" : "Track";
   trackBtn.addEventListener("click", () => {
-    onSetIntent(appId, { track: 1, buy: 0, bucket: "TRACK" })
-      .then(() => setStatus("Converted to Track."))
-      .catch(() => setStatus("Failed to convert item to track.", true));
+    onSetIntent(appId, { track: itemIntent.track > 0 ? 0 : 1 })
+      .then(() => setStatus(itemIntent.track > 0 ? "Untracked." : "Tracked."))
+      .catch(() => setStatus("Failed to toggle track.", true));
   });
 
   const ownedBtn = document.createElement("button");
@@ -3472,12 +3507,14 @@ function createLineRow(options) {
   ownedBtn.className = "line-btn";
   ownedBtn.textContent = "Bought";
   ownedBtn.addEventListener("click", () => {
-    onSetIntent(appId, { track: 0, buy: 0, bucket: "ARCHIVE", owned: true })
+    onSetIntent(appId, { track: 0, buy: 0, owned: true })
       .then(() => setStatus("Marked as bought (owned)."))
       .catch(() => setStatus("Failed to archive item.", true));
   });
 
-  wfWrap.appendChild(promoteBtn);
+  wfWrap.appendChild(buyBtn);
+  wfWrap.appendChild(maybeBtn);
+  wfWrap.appendChild(clearBuyBtn);
   wfWrap.appendChild(trackBtn);
   wfWrap.appendChild(ownedBtn);
 
@@ -3605,8 +3642,8 @@ function renderBatchMenuState() {
   if (batchHint) {
     const count = batchSelectedIds.size;
     batchHint.textContent = count > 0
-      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Promote, Shift+2 Track, Shift+3 Bought, Shift+4 Mute, Shift+5 Unmute`
-      : "Batch mode active | Select cards to use shortcuts: Shift+1 Promote, Shift+2 Track, Shift+3 Bought, Shift+4 Mute, Shift+5 Unmute";
+      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Buy, Shift+2 Track, Shift+3 Bought, Shift+4 Mute, Shift+5 Unmute`
+      : "Batch mode active | Select cards to use shortcuts: Shift+1 Buy, Shift+2 Track, Shift+3 Bought, Shift+4 Mute, Shift+5 Unmute";
     batchHint.classList.toggle("hidden", !batchMode);
   }
   if (collectionSelect) {
@@ -3637,8 +3674,7 @@ function renderRadarStats() {
   let owned = 0;
   for (const appId of ids) {
     const intent = getItemIntentState(appId);
-    const bucket = String(intent.bucket || "INBOX").toUpperCase();
-    if (bucket === "BUY" || bucket === "MAYBE") {
+    if (!intent.owned && intent.buy > 0) {
       buyRadar += 1;
     }
     if (intent.owned) {
@@ -4084,7 +4120,7 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
       return false;
     }
     const intent = getItemIntentState(appId);
-    if (String(intent.bucket || "INBOX").toUpperCase() !== "TRACK") {
+    if (!(intent.track > 0) || intent.owned) {
       return false;
     }
     if (hideMuted && intent.muted) {
@@ -4142,17 +4178,29 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     openBtn.type = "button";
     openBtn.textContent = "Open post";
     openBtn.addEventListener("click", () => window.open(String(entry.url || "#"), "_blank", "noopener"));
-    const promoteBtn = document.createElement("button");
-    promoteBtn.type = "button";
-    promoteBtn.textContent = "Promote";
-    promoteBtn.addEventListener("click", () => {
-      setItemIntent(appId, { track: 0, buy: 2, bucket: "BUY" }).catch(() => setStatus("Failed to promote item.", true));
+    const buyBtn = document.createElement("button");
+    buyBtn.type = "button";
+    buyBtn.textContent = "Buy";
+    buyBtn.addEventListener("click", () => {
+      setItemIntent(appId, { buy: 2 }).catch(() => setStatus("Failed to set Buy.", true));
+    });
+    const maybeBtn = document.createElement("button");
+    maybeBtn.type = "button";
+    maybeBtn.textContent = "Maybe";
+    maybeBtn.addEventListener("click", () => {
+      setItemIntent(appId, { buy: 1 }).catch(() => setStatus("Failed to set Maybe.", true));
+    });
+    const clearBuyBtn = document.createElement("button");
+    clearBuyBtn.type = "button";
+    clearBuyBtn.textContent = "Clear buy";
+    clearBuyBtn.addEventListener("click", () => {
+      setItemIntent(appId, { buy: 0 }).catch(() => setStatus("Failed to clear buy.", true));
     });
     const archiveBtn = document.createElement("button");
     archiveBtn.type = "button";
     archiveBtn.textContent = "Archive";
     archiveBtn.addEventListener("click", () => {
-      setItemIntent(appId, { track: 0, buy: 0, bucket: "ARCHIVE" }).catch(() => setStatus("Failed to archive item.", true));
+      setItemIntent(appId, { track: 0, buy: 0, owned: true }).catch(() => setStatus("Failed to archive item.", true));
     });
     const intent = getItemIntentState(appId);
     const muteBtn = document.createElement("button");
@@ -4175,7 +4223,9 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
         .catch(() => setStatus("Failed to dismiss feed item.", true));
     });
     actions.appendChild(openBtn);
-    actions.appendChild(promoteBtn);
+    actions.appendChild(buyBtn);
+    actions.appendChild(maybeBtn);
+    actions.appendChild(clearBuyBtn);
     actions.appendChild(archiveBtn);
     actions.appendChild(muteBtn);
     actions.appendChild(dismissBtn);
@@ -4592,7 +4642,9 @@ function bindBatchControls() {
   const batchBtn = document.getElementById("batch-menu-btn");
   const addActionBtn = document.getElementById("batch-action-add");
   const removeActionBtn = document.getElementById("batch-action-remove");
-  const promoteActionBtn = document.getElementById("batch-action-promote");
+  const buyActionBtn = document.getElementById("batch-action-buy");
+  const maybeActionBtn = document.getElementById("batch-action-maybe");
+  const clearBuyActionBtn = document.getElementById("batch-action-clear-buy");
   const trackActionBtn = document.getElementById("batch-action-track");
   const ownedActionBtn = document.getElementById("batch-action-owned");
   const muteActionBtn = document.getElementById("batch-action-mute");
@@ -4638,23 +4690,37 @@ function bindBatchControls() {
     applyBatchRemoveFromCurrentCollection().catch(() => setStatus("Failed to apply batch remove.", true));
   });
 
-  promoteActionBtn?.addEventListener("click", () => {
+  buyActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
-      { track: 0, buy: 2, bucket: "BUY" },
-      "Selected games promoted to Buy radar."
-    ).catch(() => setStatus("Failed to apply batch promote.", true));
+      { buy: 2 },
+      "Selected games set to Buy."
+    ).catch(() => setStatus("Failed to apply batch buy.", true));
+  });
+
+  maybeActionBtn?.addEventListener("click", () => {
+    applyBatchIntent(
+      { buy: 1 },
+      "Selected games set to Maybe."
+    ).catch(() => setStatus("Failed to apply batch maybe.", true));
+  });
+
+  clearBuyActionBtn?.addEventListener("click", () => {
+    applyBatchIntent(
+      { buy: 0 },
+      "Selected games cleared from buy priority."
+    ).catch(() => setStatus("Failed to apply batch clear buy.", true));
   });
 
   trackActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
-      { track: 1, buy: 0, bucket: "TRACK" },
-      "Selected games converted to Track."
+      { track: 1 },
+      "Selected games set to Track."
     ).catch(() => setStatus("Failed to apply batch track.", true));
   });
 
   ownedActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
-      { track: 0, buy: 0, bucket: "ARCHIVE", owned: true },
+      { track: 0, buy: 0, owned: true },
       "Selected games marked as bought (owned).",
       true,
       `Mark ${batchSelectedIds.size} selected game(s) as bought (owned)?`

@@ -74,10 +74,10 @@
       triageBucketEl: fragment.querySelector(".triage-bucket"),
       triageBuyBtn: fragment.querySelector(".triage-buy-btn"),
       triageMaybeBtn: fragment.querySelector(".triage-maybe-btn"),
+      triageClearBuyBtn: fragment.querySelector(".triage-clear-buy-btn"),
       triageTrackBtn: fragment.querySelector(".triage-track-btn"),
       triageArchiveBtn: fragment.querySelector(".triage-archive-btn"),
-      wfPromoteBtn: fragment.querySelector(".wf-promote-btn"),
-      wfConvertTrackBtn: fragment.querySelector(".wf-convert-track-btn"),
+      wfClearBuyBtn: fragment.querySelector(".wf-clear-buy-btn"),
       wfOwnedBtn: fragment.querySelector(".wf-owned-btn"),
       wfMuteBtn: fragment.querySelector(".wf-mute-btn"),
       targetPriceInput: fragment.querySelector(".target-price-input"),
@@ -153,30 +153,26 @@
       card.triageBucketEl.textContent = `Bucket: ${currentBucket}`;
     }
 
-    const bucketByAction = {
-      buy: "BUY",
-      maybe: "MAYBE",
-      track: "TRACK",
-      archive: "ARCHIVE"
-    };
     const triageActions = [
-      { key: "buy", btn: card.triageBuyBtn, track: 0, buy: 2 },
-      { key: "maybe", btn: card.triageMaybeBtn, track: 0, buy: 1 },
-      { key: "track", btn: card.triageTrackBtn, track: 1, buy: 0 },
-      { key: "archive", btn: card.triageArchiveBtn, track: 0, buy: 0 }
+      { key: "buy", btn: card.triageBuyBtn, patch: { buy: 2 }, isActive: (intent) => intent.buy === 2 },
+      { key: "maybe", btn: card.triageMaybeBtn, patch: { buy: 1 }, isActive: (intent) => intent.buy === 1 },
+      { key: "clear-buy", btn: card.triageClearBuyBtn, patch: { buy: 0 }, isActive: (intent) => intent.buy === 0 },
+      {
+        key: "track",
+        btn: card.triageTrackBtn,
+        patch: { track: itemIntent.track > 0 ? 0 : 1 },
+        isActive: (intent) => intent.track > 0
+      },
+      { key: "archive", btn: card.triageArchiveBtn, patch: { track: 0, buy: 0, owned: true }, isActive: (intent) => intent.owned }
     ];
     for (const action of triageActions) {
       if (!action.btn) {
         continue;
       }
-      action.btn.classList.toggle("active", currentBucket === bucketByAction[action.key]);
+      action.btn.classList.toggle("active", Boolean(action.isActive?.(itemIntent)));
       action.btn.addEventListener("click", async () => {
         try {
-          await onSetIntent(appId, {
-            track: action.track,
-            buy: action.buy,
-            bucket: bucketByAction[action.key]
-          });
+          await onSetIntent(appId, action.patch || {});
         } catch (error) {
           setStatus(String(error?.message || "Failed to update intent."), true);
         }
@@ -184,9 +180,8 @@
     }
 
     const workflowActions = [
-      { btn: card.wfPromoteBtn, patch: { track: 0, buy: 2, bucket: "BUY" }, ok: "Promoted to Buy radar." },
-      { btn: card.wfConvertTrackBtn, patch: { track: 1, buy: 0, bucket: "TRACK" }, ok: "Converted to Track." },
-      { btn: card.wfOwnedBtn, patch: { track: 0, buy: 0, bucket: "ARCHIVE", owned: true }, ok: "Marked as bought (owned)." }
+      { btn: card.wfClearBuyBtn, patch: { buy: 0 }, ok: "Buy priority cleared." },
+      { btn: card.wfOwnedBtn, patch: { track: 0, buy: 0, owned: true }, ok: "Marked as bought (owned)." }
     ];
     for (const entry of workflowActions) {
       if (!entry.btn) {

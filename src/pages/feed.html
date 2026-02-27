@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Track Feed</title>
+  <link rel="stylesheet" href="feed.css">
+</head>
+<body>
+  <main class="container">
+    <header class="top">
+      <h1>Feed / Acompanhar</h1>
+      <div class="controls">
+        <button id="refresh-btn" type="button">Refresh feed</button>
+        <label><input id="hide-muted" type="checkbox"> Hide muted</label>
+        <select id="window-days">
+          <option value="7">Last 7d</option>
+          <option value="30" selected>Last 30d</option>
+          <option value="0">All time</option>
+        </select>
+        <input id="search" type="search" placeholder="Search by title/app/post">
+      </div>
+    </header>
+    <p id="status" class="status"></p>
+    <section id="list" class="list"></section>
+    <p id="empty" class="empty hidden">No tracked feed items for current filters.</p>
+  </main>
+  <script src="steam-fetch.js"></script>
+  <script src="feed.js"></script>
+</body>
+</html>

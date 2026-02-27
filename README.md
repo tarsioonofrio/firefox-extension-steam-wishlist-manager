@@ -16,22 +16,20 @@ Main goal: make prioritization practical without changing your Steam account dat
 ## What It Does (User View)
 
 - Opens a dedicated **Collections** page from the extension icon.
+- Opens a dedicated **Feed / Acompanhar** page from the extension icon.
 - Reads your wishlist rank from Steam API (`Your rank`), and enriches game metadata locally.
 - Lets you add/remove a game to/from static collections from card and line views.
 - Supports batch add/remove for multiple visible games.
-- Supports batch triage actions (`Promote`, `Track`, `Bought`, `Mute`, `Unmute`).
+- Supports batch triage actions (`Buy`, `Maybe`, `Track`, `Clear buy`, `Bought`, `Mute`, `Unmute`).
 - Keyboard shortcuts:
   - Navigation: `j` / `k`
-  - Triage focused item: `1` Track, `2` Maybe, `3` Buy, `4` Archive
-  - Batch triage on selected items: `Shift+1` Promote, `Shift+2` Track, `Shift+3` Bought, `Shift+4` Mute, `Shift+5` Unmute
+  - Triage focused item: `1` Track toggle, `2` Maybe, `3` Buy, `4` Bought
+  - Batch triage on selected items: `Shift+1` Buy, `Shift+2` Track, `Shift+3` Bought, `Shift+4` Mute, `Shift+5` Unmute
 - When Batch mode is active, a top hint shows available batch shortcuts and selected count.
 - Supports saved dynamic collections based on current filters/sort.
-- Includes triage workflow (`Promote`, `Track`, `Bought`) with local mute/unmute.
-- Adds virtual views (`Inbox`, `Track`, `Track feed`, `Buy radar`, `Archive`, `Owned`) and Track time window (`7d`, `30d`, `all`).
-- `Refresh` updates the Track feed when `Track feed` is selected.
-- `Refresh track feed` button shows sync progress and last refresh timestamp.
-- Track feed auto-refreshes when stale (best effort) when you open the `Track feed` source.
-- Track feed supports per-event `Dismiss` and `Reset dismissed` to control local noise.
+- Includes independent intent workflow (`Buy`, `Maybe`, `Track`, `Clear buy`, `Bought`) with local mute/unmute.
+- Adds virtual views (`Inbox`, `Track`, `Buy radar`, `Archive`, `Owned`) in Collections.
+- Track feed is available in a dedicated page (`Feed / Acompanhar`) focused on tracked games.
 - Supports per-game target price and filter for games at/under target.
 - Highlights cards/rows when current price hits target.
 - Supports local per-game notes (saved in browser storage); search matches title, appid, and notes.

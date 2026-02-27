@@ -58,11 +58,8 @@
           <option value="line">Line</option>
         </select>
         <button id="refresh-page-btn" type="button" class="header-btn">Refresh</button>
-        <button id="refresh-track-feed-btn" type="button" class="header-btn hidden">Refresh track feed</button>
-        <button id="reset-track-feed-dismissed-btn" type="button" class="header-btn hidden">Reset dismissed</button>
       </div>
       <p id="radar-stats" class="radar-stats"></p>
-      <p id="track-feed-progress" class="track-feed-progress hidden"></p>
       <p id="batch-shortcuts-hint" class="batch-shortcuts-hint hidden"></p>
       <div id="collection-select-panel" class="collection-menu-panel hidden">
         <div id="collection-select-options" class="menu-actions"></div>
@@ -104,7 +101,9 @@
           <button id="batch-action-remove" type="button" class="danger">Remover da coleção atual</button>
         </div>
         <div class="menu-actions">
-          <button id="batch-action-promote" type="button">Promote</button>
+          <button id="batch-action-buy" type="button">Buy</button>
+          <button id="batch-action-maybe" type="button">Maybe</button>
+          <button id="batch-action-clear-buy" type="button">Clear buy</button>
           <button id="batch-action-track" type="button">Track</button>
           <button id="batch-action-owned" type="button">Bought</button>
         </div>
@@ -320,12 +319,12 @@
           <div class="triage-actions">
             <button class="triage-buy-btn" type="button">Buy</button>
             <button class="triage-maybe-btn" type="button">Maybe</button>
+            <button class="triage-clear-buy-btn" type="button">Clear buy</button>
             <button class="triage-track-btn" type="button">Track</button>
             <button class="triage-archive-btn" type="button">Archive</button>
           </div>
           <div class="workflow-actions">
-            <button class="wf-promote-btn" type="button">Promote</button>
-            <button class="wf-convert-track-btn" type="button">Track</button>
+            <button class="wf-clear-buy-btn" type="button">Clear buy</button>
             <button class="wf-owned-btn" type="button">Bought</button>
             <button class="wf-mute-btn" type="button">Mute</button>
           </div>

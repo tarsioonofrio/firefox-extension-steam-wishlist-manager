@@ -11,6 +11,36 @@ Non-negotiable UX:
 - Fast triage with minimal clicks.
 - Graceful degradation: if a Steam action is unreliable, open the correct Steam page and keep local state consistent.
 
+## Collections Contract (Do Not Break)
+Keep the current `Collections` UI, labels, and behavior exactly as-is.
+
+Required action semantics:
+- `Buy`: `buy=2`, `bucket=BUY`.
+- `Maybe`: `buy=1`, `bucket=MAYBE`.
+- `Track`: toggle `track` independently (`track=1/0`), without changing `buy`.
+- `Clear buy`: explicit action to set `buy=0`.
+- `Mute`: toggle local mute only (no Steam-side mutation).
+- `Bought`: `owned=true`, `track=0`, `buy=0`, `bucket=ARCHIVE`.
+
+Do not:
+- Rename or repurpose existing buttons.
+- Change current layout/flow in `Collections`.
+- Change existing filter semantics (`Hide muted`, `At/under target`, etc.).
+- Reintroduce `Promote`.
+
+When adding features:
+- Add them as optional pages/areas (for example, dedicated feed page), not as disruptive replacements.
+- Preserve local-state consistency even when Steam integrations fail.
+- Use assisted fallback (open Steam page for manual action) where automation is unreliable.
+- Keep bucket/view classification derived from local intent state (`track`, `buy`, `owned`).
+
+Acceptance criteria:
+- Existing `Collections` workflow remains unchanged for current users.
+- New features are additive and optional.
+- `Mute` remains local.
+- `Track` never clears `buy`.
+- Failures in Steam integrations never break local state.
+
 ## Steam Feature Strategy
 Use Steam resources as separate signals:
 - Wishlist: purchase intent and discount signal.
