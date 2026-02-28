@@ -19,6 +19,7 @@ const BACKUP_DATA_KEYS = [
   EXTRA_FILTER_COUNTS_CACHE_KEY,
   BACKUP_SETTINGS_KEY
 ];
+let lastQueueRunResult = null;
 
 function setStatus(text, isError = false) {
   const el = document.getElementById("status");
@@ -60,6 +61,14 @@ function setQueueRunSummary(text, isError = false) {
   }
   el.textContent = String(text || "");
   el.style.color = isError ? "#ff9696" : "#9ab8d3";
+}
+
+function setQueueDiagnosticsCopyEnabled(enabled) {
+  const btn = document.getElementById("copy-queue-diagnostics");
+  if (!btn) {
+    return;
+  }
+  btn.disabled = !enabled;
 }
 
 function formatDateTime(timestamp) {
@@ -286,6 +295,27 @@ function buildQueueRunSummary(result) {
   };
 }
 
+async function copyTextToClipboard(text) {
+  const content = String(text || "");
+  if (!content) {
+    return false;
+  }
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(content);
+    return true;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = content;
+  ta.setAttribute("readonly", "readonly");
+  ta.style.position = "fixed";
+  ta.style.top = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  ta.remove();
+  return Boolean(ok);
+}
+
 async function restoreFromParsedBackup(parsed) {
   const backup = validateBackupPayload(parsed);
   const incomingData = backup.data || {};
@@ -492,12 +522,33 @@ document.getElementById("run-queue-now")?.addEventListener("click", async () => 
     if (!response?.ok) {
       throw new Error(String(response?.error || "Queue automation failed."));
     }
+    lastQueueRunResult = response;
+    setQueueDiagnosticsCopyEnabled(true);
     const summary = buildQueueRunSummary(response);
     setQueueRunSummary(summary.text, summary.isError);
     setStatus("Queue automation finished.");
   } catch (error) {
+    lastQueueRunResult = null;
+    setQueueDiagnosticsCopyEnabled(false);
     setQueueRunSummary("", false);
     setStatus(`Failed to run queue automation: ${String(error?.message || error || "unknown error")}`, true);
+  }
+});
+
+document.getElementById("copy-queue-diagnostics")?.addEventListener("click", async () => {
+  try {
+    if (!lastQueueRunResult || typeof lastQueueRunResult !== "object") {
+      throw new Error("Run queue automation first.");
+    }
+    const payload = {
+      copiedAt: Date.now(),
+      source: "configurations-page",
+      result: lastQueueRunResult
+    };
+    await copyTextToClipboard(JSON.stringify(payload, null, 2));
+    setStatus("Queue diagnostics JSON copied.");
+  } catch (error) {
+    setStatus(`Failed to copy queue diagnostics: ${String(error?.message || error || "unknown error")}`, true);
   }
 });
 
@@ -531,6 +582,7 @@ refreshQueuePolicySummary().catch(() => {
   applyQueuePolicyToUI({});
 });
 setQueueRunSummary("");
+setQueueDiagnosticsCopyEnabled(false);
 refreshLogsView().catch(() => {
   setLogsOutput("Could not load logs.");
 });
