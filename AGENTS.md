@@ -119,3 +119,14 @@ Use it for structure and resilience patterns when there is no strong reason to d
 - Native bridge snapshot default: `/tmp/steam-wishlist-manager-extension-bridge-snapshot.json`.
 - MCP should prioritize extension-origin local data.
 - Non-update MCP queries should read local cache/DB, not call Steam directly.
+
+## Firefox MCP Runbook
+For Firefox DevTools MCP setup/troubleshooting, use:
+- `docs/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
+
+Automation scripts:
+- `scripts/setup-firefox-devtools-mcp.sh`
+- `scripts/reset-firefox-devtools-mcp-runtime.sh`
+- `scripts/doctor-firefox-devtools-mcp.sh`
+
+When MCP transport issues occur, prefer runbook flow over ad-hoc retries.

@@ -224,3 +224,20 @@ Automated smoke coverage:
 - `test:logic`: rank/sort/filter/actions + fetch telemetry sanity.
 - `test:ui`: selector/menu/range/general bindings.
 - `test:e2e`: collection load, source switch, reorder, batch add/remove, wishlist discount filter, dynamic update flow.
+
+## Firefox DevTools MCP (Operational)
+
+Complete process mapping, troubleshooting, and automation scripts are documented in:
+- `docs/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
+
+Automation scripts:
+- `bash scripts/setup-firefox-devtools-mcp.sh`
+- `bash scripts/reset-firefox-devtools-mcp-runtime.sh`
+- `bash scripts/doctor-firefox-devtools-mcp.sh`
+
+Recommended flow:
+1. Run setup script.
+2. Reset stale processes.
+3. Restart Codex CLI.
+4. Validate with `mcp__firefox-devtools__list_pages`.
+5. Monitor `/tmp/firefox-devtools-mcp.stderr.log`.

@@ -2,6 +2,7 @@
 logs/
 *.log
 mcp/data/*.json
+.mcp/
 
 # Build/package artifacts
 *.zip
