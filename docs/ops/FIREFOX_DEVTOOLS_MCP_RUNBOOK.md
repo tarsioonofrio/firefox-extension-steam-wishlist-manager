@@ -2,6 +2,11 @@
 
 This runbook captures the full process used to stabilize `firefox-devtools` MCP with Codex CLI.
 
+## Repository Rule
+
+For this repository, always run Firefox MCP with this extension loaded in the same MCP-controlled Firefox instance.
+Do not treat `steam-dev` profile runs (`npm run dev:steam`) as MCP validation.
+
 ## Symptoms
 
 - Tool call fails with `Transport closed`.
@@ -53,17 +58,22 @@ This runbook captures the full process used to stabilize `firefox-devtools` MCP 
 1. Run setup:
    - `bash scripts/mcp/setup-firefox-devtools-mcp.sh`
 2. Pick mode:
-   - Headless: `bash scripts/mcp/use-firefox-devtools-mcp-headless.sh`
-   - Normal window: `bash scripts/mcp/use-firefox-devtools-mcp-headful.sh`
+   - Headless: `bash scripts/mcp/use-firefox-devtools-mcp-headless.sh` (without extension UI)
+   - Normal window: `bash scripts/mcp/use-firefox-devtools-mcp-headful.sh` (required for extension flow)
 3. Reset stale processes:
    - `bash scripts/mcp/reset-firefox-devtools-mcp-runtime.sh`
 4. Restart Codex CLI completely.
-5. Validate:
+5. Load extension in MCP Firefox window:
+   - Open `about:debugging#/runtime/this-firefox`
+   - Click `Load Temporary Add-on...`
+   - Select `<repo>/manifest.json`
+   - Confirm `firefox-extension-steam-wishlist-manager` is listed
+6. Validate:
    - `codex mcp list`
    - In Codex, call `mcp__firefox-devtools__list_pages`
-6. If needed, inspect log:
+7. If needed, inspect log:
    - `tail -f /tmp/firefox-devtools-mcp.stderr.log`
-7. If headful mode does not open Firefox window, inspect GUI env:
+8. If headful mode does not open Firefox window, inspect GUI env:
    - `bash scripts/mcp/firefox-devtools-mcp-env-check.sh`
 
 ## Expected Healthy Output
@@ -79,3 +89,4 @@ On successful tool initialization, log should show:
 
 - If tool still fails but log shows full successful initialization, restart Codex CLI (stale session).
 - Keep wrapper stderr-only logging; avoid writing protocol output to stdout.
+- Extension loaded via `web-ext` in `steam-dev` is isolated from MCP profile (`/tmp/firefox-devtools-mcp-profile`).

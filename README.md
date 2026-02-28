@@ -258,6 +258,24 @@ Complete process mapping, troubleshooting, and automation scripts are documented
 - `docs/architecture/ARCHITECTURE.md`
 - `docs/ops/OPERATIONS.md`
 
+### Required in This Repository: MCP Firefox With Extension Loaded
+
+For this repository, when using Firefox DevTools MCP, always use the Firefox instance started by MCP with this extension loaded in that same instance.
+
+Required flow:
+1. Set MCP to normal window mode:
+   - `npm run mcp:headful`
+2. Restart Codex CLI (required after MCP mode/config changes).
+3. Open the MCP Firefox window and go to:
+   - `about:debugging#/runtime/this-firefox`
+4. Click **Load Temporary Add-on...** and select:
+   - `<repo>/manifest.json`
+5. Verify `firefox-extension-steam-wishlist-manager` appears in **This Firefox**.
+
+Important:
+- `npm run dev:steam` uses profile `steam-dev` and is a separate workflow from MCP.
+- Loading the extension in `steam-dev` does not load it in the MCP runtime profile (`/tmp/firefox-devtools-mcp-profile`).
+
 Automation scripts:
 - `bash scripts/mcp/setup-firefox-devtools-mcp.sh`
 - `bash scripts/mcp/use-firefox-devtools-mcp-headless.sh`

@@ -30,6 +30,10 @@ Optional:
 
 ## Firefox DevTools MCP
 
+### Repository rule (must follow)
+
+In this repository, MCP usage must run with the extension loaded in the same Firefox instance controlled by `firefox-devtools`.
+
 ### Initial setup
 
 - `npm run mcp:setup`
@@ -44,6 +48,22 @@ Optional:
 - Reset stale runtime processes: `npm run mcp:reset`
 - Environment diagnostics: `npm run mcp:env-check`
 - Consolidated health report: `npm run mcp:doctor`
+
+### Mandatory MCP + extension flow
+
+1. Switch MCP to normal/headful mode:
+   - `npm run mcp:headful`
+2. Restart Codex CLI.
+3. In the MCP Firefox window, open:
+   - `about:debugging#/runtime/this-firefox`
+4. Load temporary add-on:
+   - **Load Temporary Add-on...** -> `<repo>/manifest.json`
+5. Confirm extension is listed:
+   - `firefox-extension-steam-wishlist-manager`
+
+Important:
+- `npm run dev:steam` is still valid for extension-only development in profile `steam-dev`.
+- It is not the MCP runtime browser/profile, so do not use it as substitute for MCP validation.
 
 For full operational details and troubleshooting, see:
 - `docs/ops/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
