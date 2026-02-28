@@ -443,6 +443,7 @@ async function main() {
     "src/pages/steam-fetch.js",
     "src/pages/wishlist-rank.js",
     "src/pages/wishlist-sort.js",
+    "src/pages/wishlist-loader-utils.js",
     "src/pages/meta-parsers.js",
     "src/pages/collections-filters.js",
     "src/pages/collections-ui-controls.js",
@@ -490,6 +491,23 @@ async function main() {
 
   const cardsAfterWishlist = dom.window.document.querySelectorAll("#cards .card");
   assert.equal(cardsAfterWishlist.length, 2);
+
+  const sortSelectWishlist = dom.window.document.getElementById("sort-select");
+  sortSelectWishlist.value = "position";
+  sortSelectWishlist.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await waitFor(() => {
+    const firstDownBtn = dom.window.document.querySelector("#cards .card .order-down-btn");
+    return firstDownBtn && !firstDownBtn.disabled;
+  });
+  const firstWishlistDown = dom.window.document.querySelector("#cards .card .order-down-btn");
+  firstWishlistDown?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  await waitFor(() => {
+    const first = dom.window.document.querySelector("#cards .card .title")?.textContent || "";
+    return first === "Dota 2";
+  });
+  const wishlistStoredAfterReorder = await storage.get("steamWishlistAddedMapV3");
+  const wishlistOrderAfterReorder = Array.from(wishlistStoredAfterReorder?.steamWishlistAddedMapV3?.orderedAppIds || []);
+  assert.deepEqual(wishlistOrderAfterReorder, ["570", "730"]);
 
   collectionSelect.value = "favorites";
   collectionSelect.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
