@@ -1285,6 +1285,23 @@ async function performQueueAutomationSweep(force = false) {
   let maybeProcessed = 0;
   let archiveProcessed = 0;
   const errors = [];
+  const errorDetails = [];
+
+  function pushQueueError(queue, appId, error) {
+    const data = getSteamWriteErrorData(error);
+    const queueName = String(queue || "unknown");
+    const app = String(appId || "");
+    errors.push(`${queueName}:${app}:${data.message}`);
+    errorDetails.push({
+      queue: queueName,
+      appId: app,
+      message: data.message,
+      stage: data.stage,
+      code: data.code,
+      target: data.target,
+      diagnostics: data.diagnostics || null
+    });
+  }
 
   for (const appId of Object.keys(state.items || {})) {
     const current = normalizeItemRecord(appId, state.items[appId] || {});
@@ -1316,7 +1333,7 @@ async function performQueueAutomationSweep(force = false) {
           inboxProcessed += 1;
           changed = true;
         } catch (error) {
-          errors.push(`inbox:${appId}:${String(error?.message || error || "failed")}`);
+          pushQueueError("inbox", appId, error);
         }
       }
     } else if (next.inboxQueuedAt > 0) {
@@ -1344,7 +1361,7 @@ async function performQueueAutomationSweep(force = false) {
           maybeProcessed += 1;
           changed = true;
         } catch (error) {
-          errors.push(`maybe:${appId}:${String(error?.message || error || "failed")}`);
+          pushQueueError("maybe", appId, error);
         }
       }
     } else if (next.maybeQueuedAt > 0) {
@@ -1384,7 +1401,7 @@ async function performQueueAutomationSweep(force = false) {
           archiveProcessed += 1;
           changed = true;
         } catch (error) {
-          errors.push(`archive:${appId}:${String(error?.message || error || "failed")}`);
+          pushQueueError("archive", appId, error);
         }
       }
     } else if (next.archiveQueuedAt > 0 || next.archiveLastActivityAt > 0) {
@@ -1401,11 +1418,26 @@ async function performQueueAutomationSweep(force = false) {
   }
 
   if (errors.length > 0) {
+    const queueCounts = errorDetails.reduce((acc, entry) => {
+      const key = String(entry?.queue || "unknown");
+      acc[key] = Number(acc[key] || 0) + 1;
+      return acc;
+    }, {});
     await logWarn("queue-automation", "Queue automation finished with errors.", {
       inboxProcessed,
       maybeProcessed,
       archiveProcessed,
-      errors: errors.slice(0, 20)
+      errorCount: errors.length,
+      queueCounts,
+      errors: errors.slice(0, 20),
+      errorDetails: errorDetails.slice(0, 20).map((entry) => ({
+        queue: entry.queue,
+        appId: entry.appId,
+        stage: entry.stage,
+        code: entry.code,
+        target: entry.target,
+        message: entry.message
+      }))
     });
   }
 
@@ -1415,7 +1447,8 @@ async function performQueueAutomationSweep(force = false) {
     inboxProcessed,
     maybeProcessed,
     archiveProcessed,
-    errors
+    errors,
+    errorDetails
   };
 }
 
