@@ -3955,12 +3955,12 @@ function createLineRow(options) {
   row.appendChild(left);
   row.appendChild(imageCol);
   row.appendChild(nameCol);
-  row.appendChild(discountEl);
   row.appendChild(reviewEl);
   row.appendChild(buyBtn);
   row.appendChild(maybeBtn);
   row.appendChild(trackBtn);
   row.appendChild(collectionsWrap);
+  row.appendChild(discountEl);
   row.appendChild(priceEl);
 
   return {

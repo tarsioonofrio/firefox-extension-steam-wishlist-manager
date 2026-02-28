@@ -819,7 +819,7 @@ main {
 
 .line-row {
   display: grid;
-  grid-template-columns: 92px 84px minmax(0, 1fr) 64px 52px 52px 62px 76px 72px 72px;
+  grid-template-columns: 112px 84px minmax(0, 1fr) 64px 52px 52px 62px 76px 72px 72px;
   gap: 8px;
   align-items: center;
   border: 1px solid #2f445a;
@@ -830,7 +830,7 @@ main {
 }
 
 .line-row.line-row-batch {
-  grid-template-columns: 24px 92px 84px minmax(0, 1fr) 64px 52px 52px 62px 76px 72px 72px;
+  grid-template-columns: 24px 112px 84px minmax(0, 1fr) 64px 52px 52px 62px 76px 72px 72px;
 }
 
 .line-row > * {
@@ -857,8 +857,8 @@ main {
   grid-template-columns: 28px 28px auto;
   gap: 4px;
   align-items: center;
-  width: 92px;
-  min-width: 92px;
+  width: 112px;
+  min-width: 112px;
   position: relative;
 }
 
