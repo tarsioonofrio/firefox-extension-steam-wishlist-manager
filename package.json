@@ -5,6 +5,7 @@
   "description": "Firefox extension to organize Steam wishlist into custom collections",
   "scripts": {
     "dev": "web-ext run --source-dir . --target=firefox-desktop",
+    "dev:steam": "bash scripts/run-web-ext-steam-dev.sh",
     "build": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts",
     "mcp:server": "node mcp/server.mjs",
     "native:host:install": "bash scripts/install-native-host-firefox.sh",

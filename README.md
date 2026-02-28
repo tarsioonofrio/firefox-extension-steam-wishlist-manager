@@ -92,22 +92,22 @@ Manual load alternative:
 
 Use this flow when you need the extension in the dedicated Steam-logged developer profile.
 
-1. Confirm profile name/path:
+1. Run the one-command workflow:
+   - `npm run dev:steam`
+2. Confirm profile name/path (if needed for troubleshooting):
    - `cat ~/.mozilla/firefox/profiles.ini`
    - Expected profile entry:
      - `Name=steam-dev`
-     - `Path=39ophcv1.steam-dev` (path can vary per machine)
-2. Open Firefox with that profile as a separate instance:
-   - `firefox --new-instance -P steam-dev --no-remote about:blank`
-3. Load this extension as a temporary add-on into that same profile:
-   - `npx web-ext run --source-dir . --target=firefox-desktop --firefox-profile ~/.mozilla/firefox/39ophcv1.steam-dev --keep-profile-changes`
-4. Verify:
+     - `Path=<varies-per-machine>`
+3. Verify:
    - Open `about:debugging#/runtime/this-firefox`
    - Check `firefox-extension-steam-wishlist-manager` is listed
 
 Notes:
 - Keep `web-ext run` process alive while testing (it handles reload on source changes).
-- If your profile directory is different, replace `39ophcv1.steam-dev` with your actual path from `profiles.ini`.
+- Script used by `npm run dev:steam`: `scripts/run-web-ext-steam-dev.sh`.
+- Override profile name when needed:
+  - `SWM_FIREFOX_PROFILE_NAME=another-profile npm run dev:steam`
 
 ## Collections Page Architecture
 
