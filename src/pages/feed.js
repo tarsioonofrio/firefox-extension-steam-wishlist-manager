@@ -7,6 +7,7 @@ let state = null;
 let feedEntries = [];
 let windowDays = 30;
 let searchQuery = "";
+let lastSteamWriteDiagnostics = null;
 
 function setStatus(message, isError = false) {
   const el = document.getElementById("status");
@@ -15,6 +16,35 @@ function setStatus(message, isError = false) {
   }
   el.textContent = String(message || "");
   el.style.color = isError ? "#ff9696" : "#9db5c9";
+}
+
+function setSteamWriteDiagnosticsSnapshot(snapshot) {
+  lastSteamWriteDiagnostics = snapshot && typeof snapshot === "object" ? snapshot : null;
+  const btn = document.getElementById("copy-steam-write-diagnostics");
+  if (btn) {
+    btn.disabled = !lastSteamWriteDiagnostics;
+  }
+}
+
+async function copyTextToClipboard(text) {
+  const content = String(text || "");
+  if (!content) {
+    return false;
+  }
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(content);
+    return true;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = content;
+  ta.setAttribute("readonly", "readonly");
+  ta.style.position = "fixed";
+  ta.style.top = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  ta.remove();
+  return Boolean(ok);
 }
 
 function getIntent(appId) {
@@ -157,6 +187,13 @@ async function setIntent(appId, patch) {
     ? response.steamWrite.errors.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   if (steamErrors.length > 0) {
+    setSteamWriteDiagnosticsSnapshot({
+      source: "feed.set-item-intent",
+      at: Date.now(),
+      appId: String(appId || ""),
+      patch,
+      steamWrite: response?.steamWrite || null
+    });
     const formatted = window?.SWMSteamWriteErrorUtils?.formatSingle
       ? window.SWMSteamWriteErrorUtils.formatSingle(response?.steamWrite)
       : steamErrors[0];
@@ -281,8 +318,30 @@ async function init() {
     searchQuery = String(event?.target?.value || "");
     render();
   });
+  const copyBtn = document.getElementById("copy-steam-write-diagnostics");
+  if (copyBtn) {
+    copyBtn.disabled = !lastSteamWriteDiagnostics;
+    copyBtn.addEventListener("click", async () => {
+      try {
+        if (!lastSteamWriteDiagnostics) {
+          throw new Error("No Steam diagnostics available yet.");
+        }
+        const payload = {
+          copiedAt: Date.now(),
+          source: "feed-page",
+          diagnostics: lastSteamWriteDiagnostics
+        };
+        await copyTextToClipboard(JSON.stringify(payload, null, 2));
+        setStatus("Steam diagnostics JSON copied.");
+      } catch (error) {
+        setStatus(`Failed to copy Steam diagnostics: ${String(error?.message || error || "unknown error")}`, true);
+      }
+    });
+  }
 }
 
 init().catch((error) => {
   setStatus(String(error?.message || "Failed to load feed page."), true);
 });
+
+setSteamWriteDiagnosticsSnapshot(null);

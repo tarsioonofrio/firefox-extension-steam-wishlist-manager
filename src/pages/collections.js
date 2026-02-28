@@ -156,6 +156,7 @@ let batchAddTargetCollection = "";
 let batchSelectedIds = new Set();
 let dynamicCollectionSizes = {};
 let keyboardFocusIndex = 0;
+let lastSteamWriteDiagnostics = null;
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -324,6 +325,35 @@ function setTrackFeedProgress(text) {
   el.textContent = next;
   const shouldShow = activeCollection === TRACK_FEED_SELECT_VALUE && Boolean(next);
   el.classList.toggle("hidden", !shouldShow);
+}
+
+function setSteamWriteDiagnosticsSnapshot(snapshot) {
+  lastSteamWriteDiagnostics = snapshot && typeof snapshot === "object" ? snapshot : null;
+  const btn = document.getElementById("copy-steam-write-diagnostics");
+  if (btn) {
+    btn.disabled = !lastSteamWriteDiagnostics;
+  }
+}
+
+async function copyTextToClipboard(text) {
+  const content = String(text || "");
+  if (!content) {
+    return false;
+  }
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(content);
+    return true;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = content;
+  ta.setAttribute("readonly", "readonly");
+  ta.style.position = "fixed";
+  ta.style.top = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  const ok = document.execCommand("copy");
+  ta.remove();
+  return Boolean(ok);
 }
 
 function renderTrackFeedMeta() {
@@ -1967,6 +1997,13 @@ async function setItemIntent(appId, intentPatch = {}) {
     ? response.steamWrite.errors.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   if (steamErrors.length > 0) {
+    setSteamWriteDiagnosticsSnapshot({
+      source: "collections.set-item-intent",
+      at: Date.now(),
+      appId: id,
+      intentPatch,
+      steamWrite: response?.steamWrite || null
+    });
     const formatted = window?.SWMSteamWriteErrorUtils?.formatSingle
       ? window.SWMSteamWriteErrorUtils.formatSingle(response?.steamWrite)
       : steamErrors[0];
@@ -4120,6 +4157,13 @@ async function applyBatchIntent(intentPatch, successMessage, requireConfirm = fa
   await render();
   if (failures.length > 0) {
     const first = failures[0];
+    setSteamWriteDiagnosticsSnapshot({
+      source: "collections.batch-set-item-intent",
+      at: Date.now(),
+      selectedCount: payload.appIds.length,
+      failedCount: failures.length,
+      steamWriteResults: response?.steamWriteResults || []
+    });
     const firstError = window?.SWMSteamWriteErrorUtils?.formatBatch
       ? window.SWMSteamWriteErrorUtils.formatBatch(first)
       : String(first?.errors?.[0] || "Steam write failed");
@@ -5291,6 +5335,26 @@ function attachEvents() {
   bindFilterControls();
   bindGlobalPanelClose();
   bindKeyboardShortcuts();
+  const copyBtn = document.getElementById("copy-steam-write-diagnostics");
+  if (copyBtn) {
+    copyBtn.disabled = !lastSteamWriteDiagnostics;
+    copyBtn.addEventListener("click", async () => {
+      try {
+        if (!lastSteamWriteDiagnostics) {
+          throw new Error("No Steam diagnostics available yet.");
+        }
+        const payload = {
+          copiedAt: Date.now(),
+          source: "collections-page",
+          diagnostics: lastSteamWriteDiagnostics
+        };
+        await copyTextToClipboard(JSON.stringify(payload, null, 2));
+        setStatus("Steam diagnostics JSON copied.");
+      } catch (error) {
+        setStatus(`Failed to copy Steam diagnostics: ${String(error?.message || error || "unknown error")}`, true);
+      }
+    });
+  }
 }
 
 async function syncFollowedFromSteam() {
@@ -5338,3 +5402,5 @@ initUtils.run({
   const message = String(error?.message || error || "unknown init error");
   setStatus(`Failed to load collections page: ${message}`, true, { withNetworkHint: true });
 });
+
+setSteamWriteDiagnosticsSnapshot(null);
