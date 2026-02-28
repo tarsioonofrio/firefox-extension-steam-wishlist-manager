@@ -1963,19 +1963,14 @@ async function setItemIntent(appId, intentPatch = {}) {
   if (!response?.ok) {
     throw new Error(String(response?.error || "Failed to update triage intent."));
   }
-  const firstSteamErrorDetail = Array.isArray(response?.steamWrite?.errorDetails)
-    ? response.steamWrite.errorDetails[0]
-    : null;
   const steamErrors = Array.isArray(response?.steamWrite?.errors)
     ? response.steamWrite.errors.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   if (steamErrors.length > 0) {
-    const target = String(firstSteamErrorDetail?.target || "").trim();
-    const stage = String(firstSteamErrorDetail?.stage || "").trim();
-    const code = String(firstSteamErrorDetail?.code || "").trim();
-    const detailSuffix = [target, stage, code].filter(Boolean).join("/");
-    const detailText = detailSuffix ? ` (${detailSuffix})` : "";
-    setStatus(`Local state saved, but Steam write failed${detailText}: ${steamErrors[0]}`, true, { withNetworkHint: true });
+    const formatted = window?.SWMSteamWriteErrorUtils?.formatSingle
+      ? window.SWMSteamWriteErrorUtils.formatSingle(response?.steamWrite)
+      : steamErrors[0];
+    setStatus(`Local state saved, but Steam write failed: ${formatted}`, true, { withNetworkHint: true });
   }
   await refreshState();
   await render();
@@ -4125,14 +4120,10 @@ async function applyBatchIntent(intentPatch, successMessage, requireConfirm = fa
   await render();
   if (failures.length > 0) {
     const first = failures[0];
-    const firstDetail = Array.isArray(first?.errorDetails) ? first.errorDetails[0] : null;
-    const firstError = String(first?.errors?.[0] || "Steam write failed");
-    const target = String(firstDetail?.target || "").trim();
-    const stage = String(firstDetail?.stage || "").trim();
-    const code = String(firstDetail?.code || "").trim();
-    const detailSuffix = [target, stage, code].filter(Boolean).join("/");
-    const detailText = detailSuffix ? ` (${detailSuffix})` : "";
-    setStatus(`${successMessage || "Batch action applied."} Steam write failed for ${failures.length} item(s)${detailText}: ${firstError}`, true, { withNetworkHint: true });
+    const firstError = window?.SWMSteamWriteErrorUtils?.formatBatch
+      ? window.SWMSteamWriteErrorUtils.formatBatch(first)
+      : String(first?.errors?.[0] || "Steam write failed");
+    setStatus(`${successMessage || "Batch action applied."} Steam write failed for ${failures.length} item(s): ${firstError}`, true, { withNetworkHint: true });
   } else {
     setStatus(successMessage || "Batch action applied.");
   }
