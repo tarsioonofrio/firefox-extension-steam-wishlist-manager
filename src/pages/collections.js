@@ -5105,6 +5105,16 @@ function bindBatchControls() {
 
 }
 
+function scrollToTopAfterPageChange() {
+  const content = document.querySelector(".content");
+  if (content && typeof content.scrollTo === "function") {
+    content.scrollTo({ top: 0, behavior: "auto" });
+  }
+  if (typeof window.scrollTo === "function") {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+}
+
 function bindFilterControls() {
   generalBindingsUtils.bindGeneralControls({
     onSearchInput: async (value) => {
@@ -5115,10 +5125,12 @@ function bindFilterControls() {
     onPrevPage: async () => {
       page = Math.max(1, page - 1);
       await renderCards();
+      scrollToTopAfterPageChange();
     },
     onNextPage: async () => {
       page += 1;
       await renderCards();
+      scrollToTopAfterPageChange();
     },
     onTagSearchInput: (value) => {
       tagSearchQuery = value;
