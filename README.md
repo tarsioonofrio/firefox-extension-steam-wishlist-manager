@@ -68,6 +68,7 @@ Notes:
 
 - Install: `npm install`
 - Dev (auto-reload): `npm run dev`
+- Dev (steam profile auto-detected): `npm run dev:steam`
 - Build package: `npm run build`
 - Start MCP server (local JSON DB): `npm run mcp:server`
 - MCP direct CLI (debug/easier local use):
@@ -84,6 +85,8 @@ Notes:
 - UI binding smoke test: `npm run test:ui`
 - End-to-end smoke test (collections page jsdom): `npm run test:e2e`
 - Full test suite: `npm test`
+- Centralized developer workflows:
+  - `docs/DEV_WORKFLOWS.md`
 
 Manual load alternative:
 - `about:debugging` -> **This Firefox** -> **Load Temporary Add-on...** -> `manifest.json`
@@ -250,6 +253,7 @@ Automated smoke coverage:
 
 Complete process mapping, troubleshooting, and automation scripts are documented in:
 - `docs/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
+- `docs/DEV_WORKFLOWS.md`
 
 Automation scripts:
 - `bash scripts/setup-firefox-devtools-mcp.sh`
