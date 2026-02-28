@@ -60,6 +60,35 @@ function trimLogString(value, max = 400) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+function steamId64FromAccountId(accountId) {
+  const raw = String(accountId || "").trim();
+  if (!/^\d+$/.test(raw)) {
+    return "";
+  }
+  try {
+    const value = BigInt(raw);
+    if (value <= 0n) {
+      return "";
+    }
+    return (value + 76561197960265728n).toString();
+  } catch {
+    return "";
+  }
+}
+
+function extractSteamIdFromStoreHtml(html) {
+  const text = String(html || "");
+  const steamIdMatch = text.match(/g_steamID\s*=\s*"(\d{10,20})"/);
+  if (steamIdMatch?.[1]) {
+    return steamIdMatch[1];
+  }
+  const accountIdMatch = text.match(/g_AccountID\s*=\s*(\d+)/);
+  if (accountIdMatch?.[1]) {
+    return steamId64FromAccountId(accountIdMatch[1]);
+  }
+  return "";
+}
+
 function normalizeLogLevel(value) {
   const level = String(value || "").trim().toLowerCase();
   if (level === "error") {
@@ -851,15 +880,45 @@ async function readSteamObservedSignals() {
       throw new Error(`Could not read Steam userdata (${userDataResponse.status}).`);
     }
     const userData = await userDataResponse.json();
-    return {
+    const direct = {
+      steamId: String(
+        userData?.steamid
+        || userData?.strSteamId
+        || userData?.str_steamid
+        || userData?.webapi_token_steamid
+        || ""
+      ).trim(),
       wishlistIds: sanitizeSteamObservedAppIds(userData?.rgWishlist),
       followedIds: sanitizeSteamObservedAppIds(userData?.rgFollowedApps)
     };
+    const shouldTryProxy = !direct.steamId
+      && direct.wishlistIds.length === 0
+      && direct.followedIds.length === 0;
+    if (!shouldTryProxy) {
+      return direct;
+    }
+    try {
+      const proxied = await sendMessageToStoreTabWithFallback({
+        type: "steam-proxy-read-userdata"
+      }, { allowCreateTab: false });
+      const proxiedSignals = {
+        steamId: String(proxied?.steamid || "").trim(),
+        wishlistIds: sanitizeSteamObservedAppIds(proxied?.rgWishlist),
+        followedIds: sanitizeSteamObservedAppIds(proxied?.rgFollowedApps)
+      };
+      if (proxiedSignals.steamId || proxiedSignals.wishlistIds.length > 0 || proxiedSignals.followedIds.length > 0) {
+        return proxiedSignals;
+      }
+    } catch {
+      // keep direct
+    }
+    return direct;
   } catch {
     const proxied = await sendMessageToStoreTabWithFallback({
       type: "steam-proxy-read-userdata"
-    });
+    }, { allowCreateTab: false });
     return {
+      steamId: String(proxied?.steamid || "").trim(),
       wishlistIds: sanitizeSteamObservedAppIds(proxied?.rgWishlist),
       followedIds: sanitizeSteamObservedAppIds(proxied?.rgFollowedApps)
     };
@@ -873,6 +932,23 @@ async function resolveSteamIdForObservedSignals() {
     const fromCache = String(cached.steamId || "").trim();
     if (/^\d{10,20}$/.test(fromCache)) {
       return fromCache;
+    }
+  } catch {
+    // continue
+  }
+
+  try {
+    const proxiedIdentity = await sendMessageToStoreTabWithFallback({
+      type: "steam-proxy-read-steamid"
+    }, { allowCreateTab: false });
+    const proxiedSteamId = String(proxiedIdentity?.steamId || "").trim();
+    if (/^\d{10,20}$/.test(proxiedSteamId)) {
+      return proxiedSteamId;
+    }
+    const proxiedAccountId = String(proxiedIdentity?.accountId || "").trim();
+    const converted = steamId64FromAccountId(proxiedAccountId);
+    if (/^\d{10,20}$/.test(converted)) {
+      return converted;
     }
   } catch {
     // continue
@@ -894,13 +970,26 @@ async function resolveSteamIdForObservedSignals() {
   }
 
   try {
+    const tabs = await browser.tabs.query({ url: "*://store.steampowered.com/wishlist/profiles/*" });
+    for (const tab of tabs || []) {
+      const url = String(tab?.url || "");
+      const match = url.match(/\/wishlist\/profiles\/(\d{10,20})/);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+  } catch {
+    // continue
+  }
+
+  try {
     const html = await fetch("https://store.steampowered.com/", {
       cache: "no-store",
       credentials: "include"
     }).then((r) => r.text());
-    const match = html.match(/g_steamID\s*=\s*"(\d{10,20})"/);
-    if (match?.[1]) {
-      return match[1];
+    const steamIdFromHtml = extractSteamIdFromStoreHtml(html);
+    if (/^\d{10,20}$/.test(steamIdFromHtml)) {
+      return steamIdFromHtml;
     }
   } catch {
     // continue
@@ -919,6 +1008,40 @@ async function fetchPublicWishlistIdsBySteamId(steamId) {
   for (let pageIndex = 0; pageIndex < 200; pageIndex += 1) {
     const response = await fetch(
       `https://store.steampowered.com/wishlist/profiles/${sid}/wishlistdata/?p=${pageIndex}`,
+      {
+        cache: "no-store",
+        credentials: "include"
+      }
+    );
+    if (!response.ok) {
+      break;
+    }
+    const raw = await response.text();
+    const idsInOrder = extractWishlistAppIdsInTextOrder(raw);
+    if (idsInOrder.length === 0) {
+      break;
+    }
+    for (const appId of idsInOrder) {
+      if (seen.has(appId)) {
+        continue;
+      }
+      seen.add(appId);
+      ordered.push(appId);
+    }
+  }
+  return ordered;
+}
+
+async function fetchPublicWishlistIdsByProfilePath(profilePath) {
+  const basePath = String(profilePath || "").trim().replace(/^\/+|\/+$/g, "");
+  if (!basePath) {
+    return [];
+  }
+  const ordered = [];
+  const seen = new Set();
+  for (let pageIndex = 0; pageIndex < 200; pageIndex += 1) {
+    const response = await fetch(
+      `https://store.steampowered.com/wishlist/${basePath}/wishlistdata/?p=${pageIndex}`,
       {
         cache: "no-store",
         credentials: "include"
@@ -1044,7 +1167,7 @@ async function syncFollowedAppsFromSteam(state, force = false) {
   } catch {
     const proxied = await sendMessageToStoreTabWithFallback({
       type: "steam-proxy-read-userdata"
-    });
+    }, { allowCreateTab: false });
     followedIds = sanitizeFollowedAppIds(proxied?.rgFollowedApps);
     if (followedIds.length === 0) {
       throw new Error("Could not read followed apps from Steam.");
@@ -1363,6 +1486,47 @@ async function fetchSteamSessionId(force = false) {
   return sessionId;
 }
 
+async function getSteamSessionStatus() {
+  try {
+    const response = await fetch("https://store.steampowered.com/account/preferences", {
+      method: "GET",
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        Accept: "text/html"
+      }
+    });
+    if (!response.ok) {
+      return {
+        ok: true,
+        loggedIn: false,
+        reason: `http-${response.status}`
+      };
+    }
+    const html = await response.text();
+    const hasSessionId = /g_sessionID\s*=\s*"([^"]+)"/i.test(html);
+    if (hasSessionId) {
+      return {
+        ok: true,
+        loggedIn: true,
+        reason: "session-ok"
+      };
+    }
+    const hasLoginForm = /login\/home|Sign In|steamcommunity\.com\/login/i.test(html);
+    return {
+      ok: true,
+      loggedIn: false,
+      reason: hasLoginForm ? "logged-out" : "session-missing"
+    };
+  } catch (error) {
+    return {
+      ok: true,
+      loggedIn: null,
+      reason: String(error?.message || error || "session-check-failed")
+    };
+  }
+}
+
 async function postSteamForm(url, formValues, retryOn401 = true) {
   await rateLimitSteamWrite();
   const response = await fetch(url, {
@@ -1421,7 +1585,7 @@ async function setSteamWishlist(appId, enabled) {
       type: "steam-proxy-write-action",
       action: enabled ? "wishlist-add" : "wishlist-remove",
       appId
-    });
+    }, { allowCreateTab: true });
     if (!fallback?.ok) {
       throw new Error(`Steam wishlist write rejected (${fallback?.status || 0}).`);
     }
@@ -1448,7 +1612,7 @@ async function setSteamFollow(appId, enabled) {
       type: "steam-proxy-write-action",
       action: enabled ? "follow-on" : "follow-off",
       appId
-    });
+    }, { allowCreateTab: true });
     if (!fallback?.ok) {
       throw new Error(`Steam follow write rejected (${fallback?.status || 0}).`);
     }
@@ -1734,6 +1898,7 @@ async function syncWishlistOrderCache(force = false) {
     || userData?.webapi_access_token
     || ""
   ).trim();
+  let resolvedProfilePath = "";
 
   if (!steamId) {
     try {
@@ -1747,6 +1912,10 @@ async function syncWishlistOrderCache(force = false) {
       if (profileMatch?.[1]) {
         steamId = profileMatch[1];
       }
+      const pathMatch = redirectedUrl.match(/\/wishlist\/((?:profiles\/\d{10,20})|(?:id\/[^/?#]+))/);
+      if (pathMatch?.[1]) {
+        resolvedProfilePath = pathMatch[1];
+      }
     } catch {
       // fallback below
     }
@@ -1758,9 +1927,9 @@ async function syncWishlistOrderCache(force = false) {
         cache: "no-store",
         credentials: "include"
       }).then((r) => r.text());
-      const htmlMatch = storeHtml.match(/g_steamID\s*=\s*"(\d{10,20})"/);
-      if (htmlMatch?.[1]) {
-        steamId = htmlMatch[1];
+      const steamIdFromHtml = extractSteamIdFromStoreHtml(storeHtml);
+      if (/^\d{10,20}$/.test(steamIdFromHtml)) {
+        steamId = steamIdFromHtml;
       }
     } catch {
       // fallback below
@@ -1771,6 +1940,93 @@ async function syncWishlistOrderCache(force = false) {
     steamId = String(cached?.steamId || "").trim();
   }
   if (!steamId) {
+    steamId = await resolveSteamIdForObservedSignals();
+  }
+  if (!steamId && !resolvedProfilePath) {
+    try {
+      const wishlistResponse = await fetch("https://store.steampowered.com/wishlist/", {
+        cache: "no-store",
+        credentials: "include",
+        redirect: "follow"
+      });
+      const redirectedUrl = String(wishlistResponse?.url || "");
+      const pathMatch = redirectedUrl.match(/\/wishlist\/((?:profiles\/\d{10,20})|(?:id\/[^/?#]+))/);
+      if (pathMatch?.[1]) {
+        resolvedProfilePath = pathMatch[1];
+      }
+    } catch {
+      // keep going
+    }
+  }
+  if (!steamId && resolvedProfilePath) {
+    try {
+      const publicIds = await fetchPublicWishlistIdsByProfilePath(resolvedProfilePath);
+      if (publicIds.length > 0) {
+        const priorityMapFallback = {};
+        for (let i = 0; i < publicIds.length; i += 1) {
+          priorityMapFallback[publicIds[i]] = i;
+        }
+        await browser.storage.local.set({
+          [WISHLIST_ADDED_CACHE_KEY]: {
+            ...cached,
+            orderedAppIds: [...publicIds],
+            priorityMap: priorityMapFallback,
+            priorityCachedAt: now,
+            priorityLastError: "",
+            steamId: ""
+          }
+        });
+        return {
+          ok: true,
+          updated: publicIds.length,
+          cachedAt: now,
+          mode: "wishlistdata-profilepath-fallback"
+        };
+      }
+    } catch {
+      // continue
+    }
+  }
+  if (!steamId && wishlistNowIds.length === 0) {
+    try {
+      const proxied = await sendMessageToStoreTabWithFallback({
+        type: "steam-proxy-read-userdata"
+      }, { allowCreateTab: true });
+      const proxiedIds = sanitizeSteamObservedAppIds(proxied?.rgWishlist);
+      if (proxiedIds.length > 0) {
+        wishlistNowIds.splice(0, wishlistNowIds.length, ...proxiedIds);
+      }
+      const proxiedSteamId = String(proxied?.steamid || "").trim();
+      if (/^\d{10,20}$/.test(proxiedSteamId)) {
+        steamId = proxiedSteamId;
+      }
+    } catch {
+      // continue
+    }
+  }
+  if (!steamId) {
+    if (wishlistNowIds.length > 0) {
+      const fallbackPriorityMap = {};
+      for (let i = 0; i < wishlistNowIds.length; i += 1) {
+        fallbackPriorityMap[wishlistNowIds[i]] = i;
+      }
+      await browser.storage.local.set({
+        [WISHLIST_ADDED_CACHE_KEY]: {
+          ...cached,
+          orderedAppIds: [...wishlistNowIds],
+          priorityMap: fallbackPriorityMap,
+          priorityCachedAt: now,
+          priorityLastError: "steamId unavailable; using userdata order fallback",
+          steamId: ""
+        }
+      });
+      return {
+        ok: true,
+        updated: wishlistNowIds.length,
+        cachedAt: now,
+        mode: "userdata-fallback-no-steamid"
+      };
+    }
     throw new Error("Could not resolve steamid for wishlist order sync.");
   }
 
@@ -1891,7 +2147,48 @@ async function sendMessageToTabWithRetry(tabId, message, retries = 30, delayMs =
   throw lastError || new Error("Could not send message to wishlist tab.");
 }
 
-async function sendMessageToStoreTabWithFallback(message) {
+async function hasOpenSteamStoreTab() {
+  const queryUrls = [
+    "*://store.steampowered.com/wishlist/*",
+    "*://store.steampowered.com/app/*",
+    "*://store.steampowered.com/*"
+  ];
+  for (const pattern of queryUrls) {
+    const tabs = await browser.tabs.query({ url: pattern });
+    if (Array.isArray(tabs) && tabs.length > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function ensureOpenSteamStoreTab() {
+  const queryUrls = [
+    "*://store.steampowered.com/wishlist/*",
+    "*://store.steampowered.com/app/*",
+    "*://store.steampowered.com/*"
+  ];
+  for (const pattern of queryUrls) {
+    const tabs = await browser.tabs.query({ url: pattern });
+    if (Array.isArray(tabs) && tabs.length > 0) {
+      const tabId = Number(tabs[0]?.id || 0);
+      return { opened: false, tabId: tabId > 0 ? tabId : null };
+    }
+  }
+
+  const created = await browser.tabs.create({
+    url: "https://store.steampowered.com/",
+    active: false
+  });
+  const createdId = Number(created?.id || 0);
+  if (!(createdId > 0)) {
+    throw new Error("Could not open Steam Store tab.");
+  }
+  return { opened: true, tabId: createdId };
+}
+
+async function sendMessageToStoreTabWithFallback(message, options = {}) {
+  const allowCreateTab = options?.allowCreateTab !== false;
   const queryUrls = [
     "*://store.steampowered.com/wishlist/*",
     "*://store.steampowered.com/app/*",
@@ -1910,6 +2207,9 @@ async function sendMessageToStoreTabWithFallback(message) {
   let targetTabId = Number(existingTabs?.[0]?.id || 0);
 
   if (!(targetTabId > 0)) {
+    if (!allowCreateTab) {
+      throw new Error("No open Steam tab available for proxy message.");
+    }
     const createdTab = await browser.tabs.create({
       url: "https://store.steampowered.com/",
       active: false
@@ -2634,6 +2934,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
       }
 
       case "get-steam-observed-signals": {
+        const hasOpenSteamTab = await hasOpenSteamStoreTab();
         let observed = { wishlistIds: [], followedIds: [] };
         try {
           observed = await readSteamObservedSignals();
@@ -2642,7 +2943,12 @@ browser.runtime.onMessage.addListener((message, sender) => {
             error: String(error?.message || error || "userdata read failed")
           });
         }
-        const steamId = await resolveSteamIdForObservedSignals();
+        let steamId = /^\d{10,20}$/.test(String(observed?.steamId || ""))
+          ? String(observed.steamId)
+          : "";
+        if (!steamId) {
+          steamId = await resolveSteamIdForObservedSignals();
+        }
         let wishlistIds = Array.isArray(observed?.wishlistIds) ? observed.wishlistIds : [];
         if (wishlistIds.length === 0 && /^\d{10,20}$/.test(steamId)) {
           try {
@@ -2656,9 +2962,34 @@ browser.runtime.onMessage.addListener((message, sender) => {
         }
         return {
           ok: true,
+          hasOpenSteamTab,
           steamId: /^\d{10,20}$/.test(steamId) ? steamId : "",
           wishlistIds,
           followedIds: Array.isArray(observed?.followedIds) ? observed.followedIds : []
+        };
+      }
+
+      case "get-steam-session-status": {
+        const status = await getSteamSessionStatus();
+        return {
+          ok: true,
+          status
+        };
+      }
+
+      case "has-open-steam-tab": {
+        const hasOpenSteamTab = await hasOpenSteamStoreTab();
+        return {
+          ok: true,
+          hasOpenSteamTab
+        };
+      }
+
+      case "ensure-open-steam-tab": {
+        const result = await ensureOpenSteamStoreTab();
+        return {
+          ok: true,
+          ...result
         };
       }
 

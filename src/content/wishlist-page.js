@@ -637,8 +637,57 @@ async function proxyReadUserdata() {
   }
   const data = await withTimeout(response.json(), 12000, "userdata json timeout");
   return {
+    steamid: String(
+      data?.steamid
+      || data?.strSteamId
+      || data?.str_steamid
+      || data?.webapi_token_steamid
+      || ""
+    ).trim(),
     rgWishlist: Array.isArray(data?.rgWishlist) ? data.rgWishlist : [],
     rgFollowedApps: Array.isArray(data?.rgFollowedApps) ? data.rgFollowedApps : []
+  };
+}
+
+function steamId64FromAccountId(accountId) {
+  const raw = String(accountId || "").trim();
+  if (!/^\d+$/.test(raw)) {
+    return "";
+  }
+  try {
+    const value = BigInt(raw);
+    if (value <= 0n) {
+      return "";
+    }
+    return (value + 76561197960265728n).toString();
+  } catch {
+    return "";
+  }
+}
+
+function proxyReadSteamIdentity() {
+  const fromPath = String(window.location.pathname || "").match(/\/wishlist\/profiles\/(\d{10,20})/);
+  if (fromPath?.[1]) {
+    return { steamId: fromPath[1], accountId: "" };
+  }
+
+  const profileHref = document.querySelector("#global_action_menu .playerAvatar a")?.getAttribute("href") || "";
+  const fromProfileHref = String(profileHref).match(/\/profiles\/(\d{10,20})/);
+  if (fromProfileHref?.[1]) {
+    return { steamId: fromProfileHref[1], accountId: "" };
+  }
+
+  const html = String(document.documentElement?.innerHTML || "");
+  const steamMatch = html.match(/g_steamID\s*=\s*"(\d{10,20})"/);
+  if (steamMatch?.[1]) {
+    return { steamId: steamMatch[1], accountId: "" };
+  }
+  const accountMatch = html.match(/g_AccountID\s*=\s*(\d+)/);
+  const accountId = String(accountMatch?.[1] || "").trim();
+  const steamId = steamId64FromAccountId(accountId);
+  return {
+    steamId: steamId || "",
+    accountId
   };
 }
 
@@ -705,6 +754,9 @@ browser.runtime.onMessage.addListener((message) => {
   }
   if (message.type === "steam-proxy-read-userdata") {
     return proxyReadUserdata();
+  }
+  if (message.type === "steam-proxy-read-steamid") {
+    return proxyReadSteamIdentity();
   }
   if (message.type === "steam-proxy-write-action") {
     return proxyWriteSteamAction(String(message.action || ""), String(message.appId || ""));

@@ -184,7 +184,8 @@
       const hasTextFilter = releaseTextEnabled;
       const hasRangeFilter = releaseYearRangeEnabled;
       if (!hasTextFilter && !hasRangeFilter) {
-        return false;
+        // Both toggles disabled means "do not filter by release".
+        return true;
       }
 
       const info = getReleaseFilterData(appId) || {};

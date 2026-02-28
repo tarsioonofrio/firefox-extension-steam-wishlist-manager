@@ -94,6 +94,8 @@ let trackFeedRefreshing = false;
 let trackFeedLastRefreshedAt = 0;
 let trackFeedLastAutoRefreshAttemptAt = 0;
 let trackFeedDismissedEventIds = new Set();
+let steamSessionStatusCache = null;
+let steamSessionStatusCachedAt = 0;
 let lastErrorStatusLogKey = "";
 let lastErrorStatusLoggedAt = 0;
 
@@ -254,6 +256,25 @@ function setStatus(text, isError = false, options = {}) {
         message: key
       }).catch(() => {});
     }
+  }
+}
+
+async function getSteamSessionStatusCached(force = false) {
+  const now = Date.now();
+  if (!force && steamSessionStatusCache && (now - steamSessionStatusCachedAt) < 30_000) {
+    return steamSessionStatusCache;
+  }
+  try {
+    const response = await browser.runtime.sendMessage({ type: "get-steam-session-status" });
+    const status = response?.status || { loggedIn: null, reason: "unknown" };
+    steamSessionStatusCache = status;
+    steamSessionStatusCachedAt = now;
+    return status;
+  } catch {
+    const status = { loggedIn: null, reason: "session-status-unavailable" };
+    steamSessionStatusCache = status;
+    steamSessionStatusCachedAt = now;
+    return status;
   }
 }
 
@@ -1334,9 +1355,11 @@ async function loadWishlistAddedMap() {
       ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
       : [];
     let observedSteamId = "";
+    let hasOpenSteamTab = true;
     if (nowIds.length === 0 || !userdata) {
       try {
         const observed = await browser.runtime.sendMessage({ type: "get-steam-observed-signals" });
+        hasOpenSteamTab = Boolean(observed?.hasOpenSteamTab !== false);
         const observedIds = Array.isArray(observed?.wishlistIds)
           ? observed.wishlistIds.map((id) => String(id || "").trim()).filter(Boolean)
           : [];
@@ -1408,6 +1431,36 @@ async function loadWishlistAddedMap() {
       return;
     }
     if (nowIds.length === 0 && cachedOrderedIds.length === 0) {
+      if (!hasOpenSteamTab) {
+        setStatus("Opening Steam tab in background to sync wishlist IDs...");
+        try {
+          await browser.runtime.sendMessage({ type: "ensure-open-steam-tab" });
+          await sleep(1200);
+          try {
+            const observedAfterOpen = await browser.runtime.sendMessage({ type: "get-steam-observed-signals" });
+            const observedAfterOpenIds = Array.isArray(observedAfterOpen?.wishlistIds)
+              ? observedAfterOpen.wishlistIds.map((id) => String(id || "").trim()).filter(Boolean)
+              : [];
+            if (observedAfterOpenIds.length > 0) {
+              nowIds = observedAfterOpenIds;
+              wishlistOrderedAppIds = [...observedAfterOpenIds];
+              if (Object.keys(wishlistAddedMap).length === 0) {
+                const fallbackMap = {};
+                for (const appId of observedAfterOpenIds) {
+                  fallbackMap[appId] = 0;
+                }
+                wishlistAddedMap = fallbackMap;
+              }
+              hasOpenSteamTab = true;
+            }
+          } catch {
+            // keep sync fallback below
+          }
+        } catch {
+          setStatus("Could not open Steam tab automatically. Open one tab manually.", true, { withNetworkHint: true });
+          return;
+        }
+      }
       try {
         const syncResult = await browser.runtime.sendMessage({
           type: "sync-wishlist-order-cache",
@@ -1540,7 +1593,12 @@ async function loadWishlistAddedMap() {
       }
     });
     if (wishlistOrderedAppIds.length === 0 && Object.keys(wishlistAddedMap || {}).length === 0) {
-      setStatus("Could not load wishlist IDs from Steam session.", true, { withNetworkHint: true });
+      const sessionStatus = await getSteamSessionStatusCached();
+      if (sessionStatus?.loggedIn === false) {
+        setStatus("Steam session expired. Please log in on store.steampowered.com and refresh.", true, { withNetworkHint: true });
+      } else {
+        setStatus("Could not load wishlist IDs from Steam session.", true, { withNetworkHint: true });
+      }
     }
   } catch {
     wishlistAddedMap = { ...cachedMap };
@@ -1551,7 +1609,12 @@ async function loadWishlistAddedMap() {
     wishlistSortOrders = {};
     wishlistSnapshotDay = "";
     if (wishlistOrderedAppIds.length === 0 && Object.keys(wishlistAddedMap || {}).length === 0) {
-      setStatus("Could not load wishlist IDs from Steam session.", true, { withNetworkHint: true });
+      const sessionStatus = await getSteamSessionStatusCached();
+      if (sessionStatus?.loggedIn === false) {
+        setStatus("Steam session expired. Please log in on store.steampowered.com and refresh.", true, { withNetworkHint: true });
+      } else {
+        setStatus("Could not load wishlist IDs from Steam session.", true, { withNetworkHint: true });
+      }
     }
   }
 }
@@ -4146,7 +4209,12 @@ async function renderCards() {
 
   const sourceIds = getCurrentSourceAppIds();
   if (sourceMode === "wishlist" && sourceIds.length === 0) {
-    setStatus("Steam wishlist is empty or unavailable for this session.", true, { withNetworkHint: true });
+    const sessionStatus = await getSteamSessionStatusCached();
+    if (sessionStatus?.loggedIn === false) {
+      setStatus("Steam session expired. Please log in on store.steampowered.com and refresh.", true, { withNetworkHint: true });
+    } else {
+      setStatus("Steam wishlist is empty or unavailable for this session.", true, { withNetworkHint: true });
+    }
   }
   const needsMetaForSort = sortMode !== "position";
   const needsMetaForSearch = Boolean(String(searchQuery || "").trim());
