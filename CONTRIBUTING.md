@@ -10,9 +10,14 @@ Contributions should improve:
 
 ## Development Setup
 - `npm install`
-- `npm run dev` for Firefox dev run (auto-reload)
+- `npm run check:env` to validate local prerequisites
+- `npm run dev` for Firefox dev run (auto-reload, default profile)
+- `npm run dev:steam` for Steam-logged dedicated profile workflow
+- `npm run dev:steam:dry-run` to validate profile resolution without launching `web-ext`
 - `npm run build` to create package artifact
 - `npm run check:manifest`
+- `npm run docs:check` to validate documentation links
+- `npm run test:smoke:dev` for local dev smoke checks
 - `npm run test:logic`
 
 Load temporary add-on manually:
@@ -70,4 +75,16 @@ A contribution is done when:
 - implementation matches intended behavior,
 - edge/failure paths are handled,
 - manual checklist passes,
-- docs are updated (`README.md`, `AGENTS.md`, `CONTRIBUTING.md` if needed).
+- docs are updated (`README.md`, `AGENTS.md`, `CONTRIBUTING.md` if needed),
+- documentation links pass (`npm run docs:check`).
+
+## Project Organization
+- Scripts are grouped by domain:
+  - `scripts/dev/*`
+  - `scripts/mcp/*`
+  - `scripts/native/*`
+- Documentation is grouped by area:
+  - `docs/dev/*`
+  - `docs/ops/*`
+  - `docs/architecture/*`
+  - `docs/decisions/*` (ADR)

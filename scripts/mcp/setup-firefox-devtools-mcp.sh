@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+EX_UNAVAILABLE=69
+EX_CONFIG=78
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MCP_ROOT="$HOME/.local/share/firefox-devtools-mcp"
 WRAPPER_DIR="$REPO_ROOT/.mcp"
@@ -13,6 +16,15 @@ PROFILE_DIR="${PROFILE_BASE}-profile"
 RUNTIME_DIR="${PROFILE_BASE}-runtime"
 BIN="$MCP_ROOT/node_modules/.bin/firefox-devtools-mcp"
 
+if ! command -v npm >/dev/null 2>&1; then
+  echo "error: npm is required but not found in PATH" >&2
+  exit "$EX_UNAVAILABLE"
+fi
+if ! command -v codex >/dev/null 2>&1; then
+  echo "error: codex CLI is required but not found in PATH" >&2
+  exit "$EX_UNAVAILABLE"
+fi
+
 mkdir -p "$MCP_ROOT" "$WRAPPER_DIR" "$PROFILE_DIR" "$RUNTIME_DIR"
 
 if [[ ! -f "$MCP_ROOT/package.json" ]]; then
@@ -23,7 +35,7 @@ fi
 
 if [[ ! -x "$BIN" ]]; then
   echo "error: MCP binary not found at $BIN" >&2
-  exit 1
+  exit "$EX_CONFIG"
 fi
 
 write_wrapper() {

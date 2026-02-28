@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+EX_UNAVAILABLE=69
+EX_CONFIG=78
+
 PROFILE_NAME="${SWM_FIREFOX_PROFILE_NAME:-steam-dev}"
 PROFILES_INI="${SWM_FIREFOX_PROFILES_INI:-$HOME/.mozilla/firefox/profiles.ini}"
 
@@ -9,8 +12,8 @@ require_cmd() {
   if command -v "$cmd" >/dev/null 2>&1; then
     echo "ok: $cmd"
   else
-    echo "missing: $cmd" >&2
-    return 1
+    echo "error: missing required command '$cmd'" >&2
+    return "$EX_UNAVAILABLE"
   fi
 }
 
@@ -25,8 +28,8 @@ echo "[files]"
 if [[ -f "$PROFILES_INI" ]]; then
   echo "ok: profiles.ini found at $PROFILES_INI"
 else
-  echo "missing: $PROFILES_INI" >&2
-  exit 1
+  echo "error: missing file '$PROFILES_INI'" >&2
+  exit "$EX_CONFIG"
 fi
 
 if awk -v target="$PROFILE_NAME" '

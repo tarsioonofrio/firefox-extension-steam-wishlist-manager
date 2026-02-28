@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+EX_CONFIG=78
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="$REPO_ROOT/.mcp/firefox-devtools-mcp-wrapper-headful.sh"
 DST="$REPO_ROOT/.mcp/firefox-devtools-mcp-wrapper.sh"
 
 if [[ ! -x "$SRC" ]]; then
-  echo "missing: $SRC" >&2
+  echo "error: missing executable wrapper '$SRC'" >&2
   echo "run: bash scripts/mcp/setup-firefox-devtools-mcp.sh" >&2
-  exit 1
+  exit "$EX_CONFIG"
 fi
 
 cp "$SRC" "$DST"

@@ -51,3 +51,5 @@ UI wiring modules:
   - `docs/dev/DEV_WORKFLOWS.md`
   - `docs/ops/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
   - `docs/ops/OPERATIONS.md`
+- Decisions (ADR):
+  - `docs/decisions/README.md`

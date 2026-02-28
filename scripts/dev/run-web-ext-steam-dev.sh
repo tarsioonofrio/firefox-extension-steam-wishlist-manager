@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+EX_USAGE=64
+EX_CONFIG=78
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROFILE_NAME="${SWM_FIREFOX_PROFILE_NAME:-steam-dev}"
 PROFILES_INI="${SWM_FIREFOX_PROFILES_INI:-$HOME/.mozilla/firefox/profiles.ini}"
 FIREFOX_BIN="${FIREFOX_BIN:-firefox}"
 LAUNCH_FIREFOX=1
+DRY_RUN=0
 
 while (($#)); do
   case "$1" in
@@ -21,21 +25,25 @@ while (($#)); do
       LAUNCH_FIREFOX=0
       shift
       ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
     --)
       shift
       break
       ;;
     *)
       echo "error: unknown argument '$1'" >&2
-      echo "usage: $0 [--profile-name NAME] [--profiles-ini PATH] [--no-launch] [-- <web-ext args>]" >&2
-      exit 1
+      echo "usage: $0 [--profile-name NAME] [--profiles-ini PATH] [--no-launch] [--dry-run] [-- <web-ext args>]" >&2
+      exit "$EX_USAGE"
       ;;
   esac
 done
 
 if [[ ! -f "$PROFILES_INI" ]]; then
   echo "error: profiles.ini not found at $PROFILES_INI" >&2
-  exit 1
+  exit "$EX_CONFIG"
 fi
 
 PROFILE_MATCH="$(
@@ -75,7 +83,7 @@ if [[ -z "$PROFILE_MATCH" ]]; then
   echo "error: profile '$PROFILE_NAME' not found in $PROFILES_INI" >&2
   echo "available profiles:" >&2
   awk -F= '/^\[Profile[0-9]+\]/{p=1; next} /^\[/{p=0} p && /^Name=/{print "  - " $2}' "$PROFILES_INI" >&2
-  exit 1
+  exit "$EX_CONFIG"
 fi
 
 PROFILE_IS_RELATIVE="${PROFILE_MATCH%%|*}"
@@ -90,7 +98,7 @@ fi
 
 if [[ ! -d "$FIREFOX_PROFILE_PATH" ]]; then
   echo "error: resolved profile path does not exist: $FIREFOX_PROFILE_PATH" >&2
-  exit 1
+  exit "$EX_CONFIG"
 fi
 
 if ((LAUNCH_FIREFOX)); then
@@ -100,6 +108,12 @@ fi
 echo "profile: $PROFILE_NAME"
 echo "path: $FIREFOX_PROFILE_PATH"
 echo "launch_firefox: $LAUNCH_FIREFOX"
+
+if ((DRY_RUN)); then
+  echo "dry_run: 1"
+  echo "would run: npx web-ext run --source-dir \"$REPO_ROOT\" --target=firefox-desktop --firefox-profile \"$FIREFOX_PROFILE_PATH\" --keep-profile-changes $*"
+  exit 0
+fi
 
 exec npx web-ext run \
   --source-dir "$REPO_ROOT" \

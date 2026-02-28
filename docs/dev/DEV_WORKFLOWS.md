@@ -8,6 +8,8 @@ Operational workflows for local development and MCP runtime management.
 
 - `npm run dev`
 - `npm run check:env`
+- `npm run docs:check`
+- `npm run test:smoke:dev`
 
 Runs `web-ext` against your default Firefox profile/session.
 
