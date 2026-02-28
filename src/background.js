@@ -1565,12 +1565,76 @@ async function postSteamForm(url, formValues, retryOn401 = true) {
   };
 }
 
+function createSteamWriteDiagnostics(target, appId, enabled) {
+  return {
+    target: String(target || "unknown"),
+    appId: String(appId || ""),
+    enabled: Boolean(enabled),
+    startedAt: Date.now(),
+    finishedAt: 0,
+    durationMs: 0,
+    stages: []
+  };
+}
+
+function addSteamWriteStage(diag, stage, status, details = {}) {
+  if (!diag || !Array.isArray(diag.stages)) {
+    return;
+  }
+  diag.stages.push({
+    stage: String(stage || "unknown"),
+    status: String(status || "ok"),
+    at: Date.now(),
+    ...details
+  });
+}
+
+function finalizeSteamWriteDiagnostics(diag) {
+  if (!diag) {
+    return null;
+  }
+  const finishedAt = Date.now();
+  return {
+    ...diag,
+    finishedAt,
+    durationMs: Math.max(0, finishedAt - Number(diag.startedAt || finishedAt))
+  };
+}
+
+function makeSteamWriteError(target, stage, message, cause = null, diagnostics = null) {
+  const err = new Error(String(message || "steam write failed"));
+  err.target = String(target || "unknown");
+  err.stage = String(stage || "unknown");
+  err.code = `steam-write:${err.target}:${err.stage}`;
+  if (cause) {
+    err.cause = cause;
+  }
+  if (diagnostics) {
+    err.diagnostics = diagnostics;
+  }
+  return err;
+}
+
+function getSteamWriteErrorData(error) {
+  return {
+    message: String(error?.message || error || "steam sync failed"),
+    target: String(error?.target || "unknown"),
+    stage: String(error?.stage || "unknown"),
+    code: String(error?.code || "steam-write:unknown:unknown"),
+    diagnostics: error?.diagnostics || null
+  };
+}
+
 async function setSteamWishlist(appId, enabled) {
+  const diagnostics = createSteamWriteDiagnostics("wishlist", appId, enabled);
   try {
+    addSteamWriteStage(diagnostics, "session-id", "start");
     const sessionId = await fetchSteamSessionId(false);
+    addSteamWriteStage(diagnostics, "session-id", "ok");
     const url = enabled
       ? "https://store.steampowered.com/api/addtowishlist"
       : "https://store.steampowered.com/api/removefromwishlist";
+    addSteamWriteStage(diagnostics, "primary-write", "start", { url });
     const response = await postSteamForm(url, { sessionid: sessionId, appid: appId });
     const body = response?.body;
     const success = body === true
@@ -1578,46 +1642,132 @@ async function setSteamWishlist(appId, enabled) {
       || Number(body?.success) > 0
       || body?.result === 1;
     if (!success) {
-      throw new Error(`Steam wishlist write rejected${response?.bodyText ? `: ${String(response.bodyText).slice(0, 180)}` : ""}`);
+      throw makeSteamWriteError(
+        "wishlist",
+        "primary-validate",
+        `Steam wishlist write rejected${response?.bodyText ? `: ${String(response.bodyText).slice(0, 180)}` : ""}`,
+        null,
+        finalizeSteamWriteDiagnostics(diagnostics)
+      );
     }
-  } catch {
-    const fallback = await sendMessageToStoreTabWithFallback({
-      type: "steam-proxy-write-action",
-      action: enabled ? "wishlist-add" : "wishlist-remove",
-      appId
-    }, { allowCreateTab: true });
-    if (!fallback?.ok) {
-      throw new Error(`Steam wishlist write rejected (${fallback?.status || 0}).`);
+    addSteamWriteStage(diagnostics, "primary-write", "ok");
+    return {
+      target: "wishlist",
+      enabled: Boolean(enabled),
+      appId,
+      mode: "primary",
+      diagnostics: finalizeSteamWriteDiagnostics(diagnostics)
+    };
+  } catch (primaryError) {
+    addSteamWriteStage(diagnostics, "primary-write", "fallback", {
+      error: String(primaryError?.message || primaryError || "primary write failed")
+    });
+    try {
+      addSteamWriteStage(diagnostics, "proxy-write", "start");
+      const fallback = await sendMessageToStoreTabWithFallback({
+        type: "steam-proxy-write-action",
+        action: enabled ? "wishlist-add" : "wishlist-remove",
+        appId
+      }, { allowCreateTab: true });
+      if (!fallback?.ok) {
+        throw makeSteamWriteError(
+          "wishlist",
+          "proxy-validate",
+          `Steam wishlist write rejected (${fallback?.status || 0}).`,
+          null,
+          finalizeSteamWriteDiagnostics(diagnostics)
+        );
+      }
+      addSteamWriteStage(diagnostics, "proxy-write", "ok");
+      return {
+        target: "wishlist",
+        enabled: Boolean(enabled),
+        appId,
+        mode: "proxy",
+        diagnostics: finalizeSteamWriteDiagnostics(diagnostics)
+      };
+    } catch (fallbackError) {
+      throw makeSteamWriteError(
+        "wishlist",
+        "proxy-write",
+        String(fallbackError?.message || fallbackError || "Steam wishlist write failed"),
+        primaryError,
+        finalizeSteamWriteDiagnostics(diagnostics)
+      );
     }
   }
-  return { target: "wishlist", enabled: Boolean(enabled), appId };
 }
 
 async function setSteamFollow(appId, enabled) {
+  const diagnostics = createSteamWriteDiagnostics("follow", appId, enabled);
   try {
+    addSteamWriteStage(diagnostics, "session-id", "start");
     const sessionId = await fetchSteamSessionId(false);
+    addSteamWriteStage(diagnostics, "session-id", "ok");
     const payload = {
       sessionid: sessionId,
       appid: appId,
       ...(enabled ? {} : { unfollow: "1" })
     };
+    addSteamWriteStage(diagnostics, "primary-write", "start");
     const response = await postSteamForm("https://store.steampowered.com/explore/followgame/", payload);
     const body = response?.body;
     const success = body === true || body?.success === true || Number(body?.success) > 0;
     if (!success) {
-      throw new Error(`Steam follow write rejected${response?.bodyText ? `: ${String(response.bodyText).slice(0, 180)}` : ""}`);
+      throw makeSteamWriteError(
+        "follow",
+        "primary-validate",
+        `Steam follow write rejected${response?.bodyText ? `: ${String(response.bodyText).slice(0, 180)}` : ""}`,
+        null,
+        finalizeSteamWriteDiagnostics(diagnostics)
+      );
     }
-  } catch {
-    const fallback = await sendMessageToStoreTabWithFallback({
-      type: "steam-proxy-write-action",
-      action: enabled ? "follow-on" : "follow-off",
-      appId
-    }, { allowCreateTab: true });
-    if (!fallback?.ok) {
-      throw new Error(`Steam follow write rejected (${fallback?.status || 0}).`);
+    addSteamWriteStage(diagnostics, "primary-write", "ok");
+    return {
+      target: "follow",
+      enabled: Boolean(enabled),
+      appId,
+      mode: "primary",
+      diagnostics: finalizeSteamWriteDiagnostics(diagnostics)
+    };
+  } catch (primaryError) {
+    addSteamWriteStage(diagnostics, "primary-write", "fallback", {
+      error: String(primaryError?.message || primaryError || "primary write failed")
+    });
+    try {
+      addSteamWriteStage(diagnostics, "proxy-write", "start");
+      const fallback = await sendMessageToStoreTabWithFallback({
+        type: "steam-proxy-write-action",
+        action: enabled ? "follow-on" : "follow-off",
+        appId
+      }, { allowCreateTab: true });
+      if (!fallback?.ok) {
+        throw makeSteamWriteError(
+          "follow",
+          "proxy-validate",
+          `Steam follow write rejected (${fallback?.status || 0}).`,
+          null,
+          finalizeSteamWriteDiagnostics(diagnostics)
+        );
+      }
+      addSteamWriteStage(diagnostics, "proxy-write", "ok");
+      return {
+        target: "follow",
+        enabled: Boolean(enabled),
+        appId,
+        mode: "proxy",
+        diagnostics: finalizeSteamWriteDiagnostics(diagnostics)
+      };
+    } catch (fallbackError) {
+      throw makeSteamWriteError(
+        "follow",
+        "proxy-write",
+        String(fallbackError?.message || fallbackError || "Steam follow write failed"),
+        primaryError,
+        finalizeSteamWriteDiagnostics(diagnostics)
+      );
     }
   }
-  return { target: "follow", enabled: Boolean(enabled), appId };
 }
 
 async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent) {
@@ -1654,12 +1804,15 @@ async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent
 
   const applied = [];
   const errors = [];
+  const errorDetails = [];
   for (const action of actions) {
     try {
       const result = await action();
       applied.push(result);
     } catch (error) {
-      errors.push(String(error?.message || error || "steam sync failed"));
+      const errorData = getSteamWriteErrorData(error);
+      errors.push(`${errorData.message} [${errorData.stage}]`);
+      errorDetails.push(errorData);
     }
   }
 
@@ -1667,7 +1820,8 @@ async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent
     ok: errors.length === 0,
     changed: true,
     applied,
-    errors
+    errors,
+    errorDetails
   };
 }
 
@@ -1864,239 +2018,412 @@ function buildWishlistSortedFilteredRequest(steamId, startIndex = 0, pageSize = 
   ]);
 }
 
-async function syncWishlistOrderCache(force = false) {
-  const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
-  const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
-  const now = Date.now();
-  const last = Number(cached.priorityCachedAt || 0);
-  if (!force && now - last < WISHLIST_ORDER_SYNC_INTERVAL_MS) {
-    return { ok: true, skipped: true };
-  }
+function createWishlistSyncDiagnostics(force) {
+  return {
+    force: Boolean(force),
+    startedAt: Date.now(),
+    finishedAt: 0,
+    durationMs: 0,
+    stages: []
+  };
+}
 
-  const userDataResponse = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
-    cache: "no-store",
-    credentials: "include"
+function addWishlistSyncStage(diag, stage, status, details = {}) {
+  if (!diag || !Array.isArray(diag.stages)) {
+    return;
+  }
+  diag.stages.push({
+    stage: String(stage || "unknown"),
+    status: String(status || "ok"),
+    at: Date.now(),
+    ...details
   });
-  if (!userDataResponse.ok) {
-    throw new Error(`Failed to fetch userdata (${userDataResponse.status})`);
-  }
-  const userData = await userDataResponse.json();
-  let steamId = String(
-    userData?.steamid
-    || userData?.strSteamId
-    || userData?.str_steamid
-    || userData?.webapi_token_steamid
-    || ""
-  ).trim();
-  const wishlistNowIds = Array.isArray(userData?.rgWishlist)
-    ? userData.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
-    : [];
-  const wishlistNowSet = new Set(wishlistNowIds);
-  const accessToken = String(
-    userData?.webapi_token
-    || userData?.webapiToken
-    || userData?.webapi_access_token
-    || ""
-  ).trim();
-  let resolvedProfilePath = "";
+}
 
-  if (!steamId) {
-    try {
-      const wishlistResponse = await fetch("https://store.steampowered.com/wishlist/", {
-        cache: "no-store",
-        credentials: "include",
-        redirect: "follow"
-      });
-      const redirectedUrl = String(wishlistResponse?.url || "");
-      const profileMatch = redirectedUrl.match(/\/wishlist\/profiles\/(\d{10,20})/);
-      if (profileMatch?.[1]) {
-        steamId = profileMatch[1];
-      }
-      const pathMatch = redirectedUrl.match(/\/wishlist\/((?:profiles\/\d{10,20})|(?:id\/[^/?#]+))/);
-      if (pathMatch?.[1]) {
-        resolvedProfilePath = pathMatch[1];
-      }
-    } catch {
-      // fallback below
-    }
+function finalizeWishlistSyncDiagnostics(diag) {
+  if (!diag) {
+    return null;
   }
+  const finishedAt = Date.now();
+  return {
+    ...diag,
+    finishedAt,
+    durationMs: Math.max(0, finishedAt - Number(diag.startedAt || finishedAt))
+  };
+}
 
-  if (!steamId) {
-    try {
-      const storeHtml = await fetch("https://store.steampowered.com/", {
-        cache: "no-store",
-        credentials: "include"
-      }).then((r) => r.text());
-      const steamIdFromHtml = extractSteamIdFromStoreHtml(storeHtml);
-      if (/^\d{10,20}$/.test(steamIdFromHtml)) {
-        steamId = steamIdFromHtml;
-      }
-    } catch {
-      // fallback below
-    }
+function makeWishlistSyncError(stage, message, cause = null, diagnostics = null) {
+  const err = new Error(String(message || "wishlist order sync failed"));
+  err.stage = String(stage || "unknown");
+  err.code = `wishlist-sync:${err.stage}`;
+  if (cause) {
+    err.cause = cause;
   }
+  if (diagnostics) {
+    err.diagnostics = diagnostics;
+  }
+  return err;
+}
 
-  if (!steamId) {
-    steamId = String(cached?.steamId || "").trim();
-  }
-  if (!steamId) {
-    steamId = await resolveSteamIdForObservedSignals();
-  }
-  if (!steamId && !resolvedProfilePath) {
-    try {
-      const wishlistResponse = await fetch("https://store.steampowered.com/wishlist/", {
-        cache: "no-store",
-        credentials: "include",
-        redirect: "follow"
-      });
-      const redirectedUrl = String(wishlistResponse?.url || "");
-      const pathMatch = redirectedUrl.match(/\/wishlist\/((?:profiles\/\d{10,20})|(?:id\/[^/?#]+))/);
-      if (pathMatch?.[1]) {
-        resolvedProfilePath = pathMatch[1];
-      }
-    } catch {
-      // keep going
+function getWishlistSyncErrorData(error) {
+  return {
+    message: String(error?.message || error || "unknown sync error"),
+    stage: String(error?.stage || "unknown"),
+    code: String(error?.code || "wishlist-sync:unknown"),
+    diagnostics: error?.diagnostics || null
+  };
+}
+
+async function syncWishlistOrderCache(force = false) {
+  const diagnostics = createWishlistSyncDiagnostics(force);
+  try {
+    addWishlistSyncStage(diagnostics, "load-cache", "start");
+    const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+    const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
+    const now = Date.now();
+    const last = Number(cached.priorityCachedAt || 0);
+    if (!force && now - last < WISHLIST_ORDER_SYNC_INTERVAL_MS) {
+      addWishlistSyncStage(diagnostics, "load-cache", "skip", { reason: "fresh-priority-cache" });
+      return { ok: true, skipped: true, diagnostics: finalizeWishlistSyncDiagnostics(diagnostics) };
     }
-  }
-  if (!steamId && resolvedProfilePath) {
-    try {
-      const publicIds = await fetchPublicWishlistIdsByProfilePath(resolvedProfilePath);
-      if (publicIds.length > 0) {
-        const priorityMapFallback = {};
-        for (let i = 0; i < publicIds.length; i += 1) {
-          priorityMapFallback[publicIds[i]] = i;
+    addWishlistSyncStage(diagnostics, "load-cache", "ok");
+
+    addWishlistSyncStage(diagnostics, "userdata-fetch", "start");
+    const userDataResponse = await fetch("https://store.steampowered.com/dynamicstore/userdata/", {
+      cache: "no-store",
+      credentials: "include"
+    });
+    if (!userDataResponse.ok) {
+      throw makeWishlistSyncError(
+        "userdata-fetch",
+        `Failed to fetch userdata (${userDataResponse.status})`,
+        null,
+        finalizeWishlistSyncDiagnostics(diagnostics)
+      );
+    }
+    const userData = await userDataResponse.json();
+    addWishlistSyncStage(diagnostics, "userdata-fetch", "ok");
+
+    let steamId = String(
+      userData?.steamid
+      || userData?.strSteamId
+      || userData?.str_steamid
+      || userData?.webapi_token_steamid
+      || ""
+    ).trim();
+    const wishlistNowIds = Array.isArray(userData?.rgWishlist)
+      ? userData.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+    const wishlistNowSet = new Set(wishlistNowIds);
+    const accessToken = String(
+      userData?.webapi_token
+      || userData?.webapiToken
+      || userData?.webapi_access_token
+      || ""
+    ).trim();
+    let resolvedProfilePath = "";
+
+    if (!steamId) {
+      addWishlistSyncStage(diagnostics, "steamid-from-wishlist-redirect", "start");
+      try {
+        const wishlistResponse = await fetch("https://store.steampowered.com/wishlist/", {
+          cache: "no-store",
+          credentials: "include",
+          redirect: "follow"
+        });
+        const redirectedUrl = String(wishlistResponse?.url || "");
+        const profileMatch = redirectedUrl.match(/\/wishlist\/profiles\/(\d{10,20})/);
+        if (profileMatch?.[1]) {
+          steamId = profileMatch[1];
+        }
+        const pathMatch = redirectedUrl.match(/\/wishlist\/((?:profiles\/\d{10,20})|(?:id\/[^/?#]+))/);
+        if (pathMatch?.[1]) {
+          resolvedProfilePath = pathMatch[1];
+        }
+        addWishlistSyncStage(diagnostics, "steamid-from-wishlist-redirect", "ok", {
+          resolvedSteamId: Boolean(steamId),
+          resolvedProfilePath: Boolean(resolvedProfilePath)
+        });
+      } catch (error) {
+        addWishlistSyncStage(diagnostics, "steamid-from-wishlist-redirect", "fallback", {
+          error: String(error?.message || error || "redirect lookup failed")
+        });
+      }
+    }
+
+    if (!steamId) {
+      addWishlistSyncStage(diagnostics, "steamid-from-store-html", "start");
+      try {
+        const storeHtml = await fetch("https://store.steampowered.com/", {
+          cache: "no-store",
+          credentials: "include"
+        }).then((r) => r.text());
+        const steamIdFromHtml = extractSteamIdFromStoreHtml(storeHtml);
+        if (/^\d{10,20}$/.test(steamIdFromHtml)) {
+          steamId = steamIdFromHtml;
+        }
+        addWishlistSyncStage(diagnostics, "steamid-from-store-html", "ok", {
+          resolvedSteamId: Boolean(steamId)
+        });
+      } catch (error) {
+        addWishlistSyncStage(diagnostics, "steamid-from-store-html", "fallback", {
+          error: String(error?.message || error || "store html lookup failed")
+        });
+      }
+    }
+
+    if (!steamId) {
+      steamId = String(cached?.steamId || "").trim();
+      if (steamId) {
+        addWishlistSyncStage(diagnostics, "steamid-from-cached", "ok");
+      }
+    }
+    if (!steamId) {
+      addWishlistSyncStage(diagnostics, "steamid-from-observed-signals", "start");
+      try {
+        steamId = await resolveSteamIdForObservedSignals();
+        addWishlistSyncStage(diagnostics, "steamid-from-observed-signals", "ok", {
+          resolvedSteamId: Boolean(steamId)
+        });
+      } catch (error) {
+        addWishlistSyncStage(diagnostics, "steamid-from-observed-signals", "fallback", {
+          error: String(error?.message || error || "observed signals lookup failed")
+        });
+      }
+    }
+    if (!steamId && !resolvedProfilePath) {
+      addWishlistSyncStage(diagnostics, "profile-path-from-wishlist-redirect", "start");
+      try {
+        const wishlistResponse = await fetch("https://store.steampowered.com/wishlist/", {
+          cache: "no-store",
+          credentials: "include",
+          redirect: "follow"
+        });
+        const redirectedUrl = String(wishlistResponse?.url || "");
+        const pathMatch = redirectedUrl.match(/\/wishlist\/((?:profiles\/\d{10,20})|(?:id\/[^/?#]+))/);
+        if (pathMatch?.[1]) {
+          resolvedProfilePath = pathMatch[1];
+        }
+        addWishlistSyncStage(diagnostics, "profile-path-from-wishlist-redirect", "ok", {
+          resolvedProfilePath: Boolean(resolvedProfilePath)
+        });
+      } catch (error) {
+        addWishlistSyncStage(diagnostics, "profile-path-from-wishlist-redirect", "fallback", {
+          error: String(error?.message || error || "profile path redirect lookup failed")
+        });
+      }
+    }
+    if (!steamId && resolvedProfilePath) {
+      addWishlistSyncStage(diagnostics, "fallback-public-wishlist-by-profile-path", "start");
+      try {
+        const publicIds = await fetchPublicWishlistIdsByProfilePath(resolvedProfilePath);
+        if (publicIds.length > 0) {
+          const priorityMapFallback = {};
+          for (let i = 0; i < publicIds.length; i += 1) {
+            priorityMapFallback[publicIds[i]] = i;
+          }
+          await browser.storage.local.set({
+            [WISHLIST_ADDED_CACHE_KEY]: {
+              ...cached,
+              orderedAppIds: [...publicIds],
+              priorityMap: priorityMapFallback,
+              priorityCachedAt: now,
+              priorityLastError: "",
+              steamId: ""
+            }
+          });
+          addWishlistSyncStage(diagnostics, "fallback-public-wishlist-by-profile-path", "ok", {
+            updated: publicIds.length
+          });
+          return {
+            ok: true,
+            updated: publicIds.length,
+            cachedAt: now,
+            mode: "wishlistdata-profilepath-fallback",
+            diagnostics: finalizeWishlistSyncDiagnostics(diagnostics)
+          };
+        }
+        addWishlistSyncStage(diagnostics, "fallback-public-wishlist-by-profile-path", "fallback", {
+          reason: "empty-public-list"
+        });
+      } catch (error) {
+        addWishlistSyncStage(diagnostics, "fallback-public-wishlist-by-profile-path", "fallback", {
+          error: String(error?.message || error || "public wishlist profile path failed")
+        });
+      }
+    }
+    if (!steamId && wishlistNowIds.length === 0) {
+      addWishlistSyncStage(diagnostics, "proxy-userdata-read", "start");
+      try {
+        const proxied = await sendMessageToStoreTabWithFallback({
+          type: "steam-proxy-read-userdata"
+        }, { allowCreateTab: true });
+        const proxiedIds = sanitizeSteamObservedAppIds(proxied?.rgWishlist);
+        if (proxiedIds.length > 0) {
+          wishlistNowIds.splice(0, wishlistNowIds.length, ...proxiedIds);
+        }
+        const proxiedSteamId = String(proxied?.steamid || "").trim();
+        if (/^\d{10,20}$/.test(proxiedSteamId)) {
+          steamId = proxiedSteamId;
+        }
+        addWishlistSyncStage(diagnostics, "proxy-userdata-read", "ok", {
+          resolvedSteamId: Boolean(steamId),
+          wishlistCount: wishlistNowIds.length
+        });
+      } catch (error) {
+        addWishlistSyncStage(diagnostics, "proxy-userdata-read", "fallback", {
+          error: String(error?.message || error || "proxy userdata read failed")
+        });
+      }
+    }
+    if (!steamId) {
+      if (wishlistNowIds.length > 0) {
+        addWishlistSyncStage(diagnostics, "fallback-userdata-order-no-steamid", "start", {
+          wishlistCount: wishlistNowIds.length
+        });
+        const fallbackPriorityMap = {};
+        for (let i = 0; i < wishlistNowIds.length; i += 1) {
+          fallbackPriorityMap[wishlistNowIds[i]] = i;
         }
         await browser.storage.local.set({
           [WISHLIST_ADDED_CACHE_KEY]: {
             ...cached,
-            orderedAppIds: [...publicIds],
-            priorityMap: priorityMapFallback,
+            orderedAppIds: [...wishlistNowIds],
+            priorityMap: fallbackPriorityMap,
             priorityCachedAt: now,
-            priorityLastError: "",
+            priorityLastError: "steamId unavailable; using userdata order fallback",
             steamId: ""
           }
         });
+        addWishlistSyncStage(diagnostics, "fallback-userdata-order-no-steamid", "ok", {
+          updated: wishlistNowIds.length
+        });
         return {
           ok: true,
-          updated: publicIds.length,
+          updated: wishlistNowIds.length,
           cachedAt: now,
-          mode: "wishlistdata-profilepath-fallback"
+          mode: "userdata-fallback-no-steamid",
+          diagnostics: finalizeWishlistSyncDiagnostics(diagnostics)
         };
       }
-    } catch {
-      // continue
+      throw makeWishlistSyncError(
+        "steamid-resolve",
+        "Could not resolve steamid for wishlist order sync.",
+        null,
+        finalizeWishlistSyncDiagnostics(diagnostics)
+      );
     }
-  }
-  if (!steamId && wishlistNowIds.length === 0) {
-    try {
-      const proxied = await sendMessageToStoreTabWithFallback({
-        type: "steam-proxy-read-userdata"
-      }, { allowCreateTab: true });
-      const proxiedIds = sanitizeSteamObservedAppIds(proxied?.rgWishlist);
-      if (proxiedIds.length > 0) {
-        wishlistNowIds.splice(0, wishlistNowIds.length, ...proxiedIds);
+
+    addWishlistSyncStage(diagnostics, "wishlist-order-fetch", "start", { steamId });
+    const orderedAppIds = [];
+    const priorityMap = {};
+    const seen = new Set();
+    const pageSize = 500;
+
+    for (let page = 0; page < 20; page += 1) {
+      const requestBytes = buildWishlistSortedFilteredRequest(steamId, page * pageSize, pageSize);
+      const url = new URL("https://api.steampowered.com/IWishlistService/GetWishlistSortedFiltered/v1");
+      url.searchParams.set("origin", "https://store.steampowered.com");
+      url.searchParams.set("input_protobuf_encoded", toBase64(requestBytes));
+      if (accessToken) {
+        url.searchParams.set("access_token", accessToken);
       }
-      const proxiedSteamId = String(proxied?.steamid || "").trim();
-      if (/^\d{10,20}$/.test(proxiedSteamId)) {
-        steamId = proxiedSteamId;
-      }
-    } catch {
-      // continue
-    }
-  }
-  if (!steamId) {
-    if (wishlistNowIds.length > 0) {
-      const fallbackPriorityMap = {};
-      for (let i = 0; i < wishlistNowIds.length; i += 1) {
-        fallbackPriorityMap[wishlistNowIds[i]] = i;
-      }
-      await browser.storage.local.set({
-        [WISHLIST_ADDED_CACHE_KEY]: {
-          ...cached,
-          orderedAppIds: [...wishlistNowIds],
-          priorityMap: fallbackPriorityMap,
-          priorityCachedAt: now,
-          priorityLastError: "steamId unavailable; using userdata order fallback",
-          steamId: ""
-        }
+
+      const response = await fetch(url.toString(), {
+        cache: "no-store",
+        credentials: "omit"
       });
-      return {
-        ok: true,
-        updated: wishlistNowIds.length,
-        cachedAt: now,
-        mode: "userdata-fallback-no-steamid"
-      };
-    }
-    throw new Error("Could not resolve steamid for wishlist order sync.");
-  }
+      if (!response.ok) {
+        throw makeWishlistSyncError(
+          "wishlist-order-page-fetch",
+          `Wishlist order request failed (${response.status})`,
+          null,
+          finalizeWishlistSyncDiagnostics(diagnostics)
+        );
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const items = decodeWishlistSortedFilteredResponse(bytes);
+      if (items.length === 0) {
+        break;
+      }
 
-  const orderedAppIds = [];
-  const priorityMap = {};
-  const seen = new Set();
-  const pageSize = 500;
-
-  for (let page = 0; page < 20; page += 1) {
-    const requestBytes = buildWishlistSortedFilteredRequest(steamId, page * pageSize, pageSize);
-    const url = new URL("https://api.steampowered.com/IWishlistService/GetWishlistSortedFiltered/v1");
-    url.searchParams.set("origin", "https://store.steampowered.com");
-    url.searchParams.set("input_protobuf_encoded", toBase64(requestBytes));
-    if (accessToken) {
-      url.searchParams.set("access_token", accessToken);
-    }
-
-    const response = await fetch(url.toString(), {
-      cache: "no-store",
-      credentials: "omit"
-    });
-    if (!response.ok) {
-      throw new Error(`Wishlist order request failed (${response.status})`);
-    }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    const items = decodeWishlistSortedFilteredResponse(bytes);
-    if (items.length === 0) {
-      break;
-    }
-
-    for (const item of items) {
-      const rawIdNum = Number(item.appid || 0);
-      let appId = String(rawIdNum || "").trim();
-      if (rawIdNum > 0 && !wishlistNowSet.has(appId) && rawIdNum % 10 === 0) {
-        const div10 = String(Math.floor(rawIdNum / 10));
-        if (wishlistNowSet.has(div10)) {
-          appId = div10;
+      for (const item of items) {
+        const rawIdNum = Number(item.appid || 0);
+        let appId = String(rawIdNum || "").trim();
+        if (rawIdNum > 0 && !wishlistNowSet.has(appId) && rawIdNum % 10 === 0) {
+          const div10 = String(Math.floor(rawIdNum / 10));
+          if (wishlistNowSet.has(div10)) {
+            appId = div10;
+          }
         }
+        if (!appId || seen.has(appId)) {
+          continue;
+        }
+        seen.add(appId);
+        orderedAppIds.push(appId);
+        priorityMap[appId] = Number.isFinite(item.priority)
+          ? Number(item.priority)
+          : (orderedAppIds.length - 1);
       }
-      if (!appId || seen.has(appId)) {
-        continue;
+
+      addWishlistSyncStage(diagnostics, "wishlist-order-page", "ok", {
+        page,
+        pageItems: items.length,
+        totalItems: orderedAppIds.length
+      });
+
+      if (items.length < pageSize) {
+        break;
       }
-      seen.add(appId);
-      orderedAppIds.push(appId);
-      priorityMap[appId] = Number.isFinite(item.priority)
-        ? Number(item.priority)
-        : (orderedAppIds.length - 1);
     }
 
-    if (items.length < pageSize) {
-      break;
+    if (orderedAppIds.length === 0) {
+      throw makeWishlistSyncError(
+        "wishlist-order-empty",
+        "Wishlist order response had no items.",
+        null,
+        finalizeWishlistSyncDiagnostics(diagnostics)
+      );
     }
+
+    addWishlistSyncStage(diagnostics, "wishlist-order-cache-write", "start", {
+      totalItems: orderedAppIds.length
+    });
+    await browser.storage.local.set({
+      [WISHLIST_ADDED_CACHE_KEY]: {
+        ...cached,
+        orderedAppIds,
+        priorityMap,
+        priorityCachedAt: now,
+        priorityLastError: "",
+        steamId
+      }
+    });
+    addWishlistSyncStage(diagnostics, "wishlist-order-cache-write", "ok", {
+      totalItems: orderedAppIds.length
+    });
+
+    return {
+      ok: true,
+      updated: orderedAppIds.length,
+      cachedAt: now,
+      diagnostics: finalizeWishlistSyncDiagnostics(diagnostics)
+    };
+  } catch (error) {
+    const err = error instanceof Error
+      ? error
+      : new Error(String(error || "wishlist order sync failed"));
+    if (!err.stage) {
+      err.stage = "sync-unhandled";
+    }
+    if (!err.code) {
+      err.code = `wishlist-sync:${err.stage}`;
+    }
+    if (!err.diagnostics) {
+      err.diagnostics = finalizeWishlistSyncDiagnostics(diagnostics);
+    }
+    throw err;
   }
-
-  if (orderedAppIds.length === 0) {
-    throw new Error("Wishlist order response had no items.");
-  }
-
-  await browser.storage.local.set({
-    [WISHLIST_ADDED_CACHE_KEY]: {
-      ...cached,
-      orderedAppIds,
-      priorityMap,
-      priorityCachedAt: now,
-      priorityLastError: "",
-      steamId
-    }
-  });
-
-  return { ok: true, updated: orderedAppIds.length, cachedAt: now };
 }
 
 function wait(ms) {
@@ -2880,20 +3207,30 @@ browser.runtime.onMessage.addListener((message, sender) => {
           scheduleNativeBridgePublish("sync-wishlist-order-cache");
           return result;
         } catch (error) {
+          const errorData = getWishlistSyncErrorData(error);
           await logWarn("sync-wishlist-order-cache", "Wishlist order cache sync failed.", {
             force: Boolean(message.force),
-            error: String(error?.message || error || "unknown sync error")
+            error: errorData.message,
+            stage: errorData.stage,
+            code: errorData.code,
+            diagnostics: errorData?.diagnostics?.stages || []
           });
           const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
           const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
           await browser.storage.local.set({
             [WISHLIST_ADDED_CACHE_KEY]: {
               ...cached,
-              priorityLastError: String(error?.message || error || "unknown sync error")
+              priorityLastError: `${errorData.message} [${errorData.stage}]`
             }
           });
           scheduleNativeBridgePublish("sync-wishlist-order-cache-error");
-          return { ok: false, error: String(error?.message || error || "unknown sync error") };
+          return {
+            ok: false,
+            error: errorData.message,
+            stage: errorData.stage,
+            code: errorData.code,
+            diagnostics: errorData.diagnostics
+          };
         }
       }
 

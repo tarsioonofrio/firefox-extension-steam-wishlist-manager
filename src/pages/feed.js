@@ -153,11 +153,19 @@ async function setIntent(appId, patch) {
     title: String(item?.title || ""),
     ...patch
   });
+  const firstSteamErrorDetail = Array.isArray(response?.steamWrite?.errorDetails)
+    ? response.steamWrite.errorDetails[0]
+    : null;
   const steamErrors = Array.isArray(response?.steamWrite?.errors)
     ? response.steamWrite.errors.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
   if (steamErrors.length > 0) {
-    setStatus(`Local state saved, but Steam write failed: ${steamErrors[0]}`, true);
+    const target = String(firstSteamErrorDetail?.target || "").trim();
+    const stage = String(firstSteamErrorDetail?.stage || "").trim();
+    const code = String(firstSteamErrorDetail?.code || "").trim();
+    const detailSuffix = [target, stage, code].filter(Boolean).join("/");
+    const detailText = detailSuffix ? ` (${detailSuffix})` : "";
+    setStatus(`Local state saved, but Steam write failed${detailText}: ${steamErrors[0]}`, true);
   }
   await loadState();
 }
