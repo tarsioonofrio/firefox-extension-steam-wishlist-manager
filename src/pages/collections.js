@@ -3745,10 +3745,6 @@ function createLineRow(options) {
   const onToggleCollection = options?.onToggleCollection || (() => Promise.resolve());
   const onSetIntent = options?.onSetIntent || (() => Promise.resolve());
   const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
-  const noteText = String(itemIntent.note || "");
-  const targetPriceCents = Number.isFinite(Number(itemIntent.targetPriceCents))
-    ? Math.max(0, Math.floor(Number(itemIntent.targetPriceCents)))
-    : null;
 
   const row = document.createElement("article");
   row.className = "line-row";
@@ -3812,7 +3808,6 @@ function createLineRow(options) {
   collectionsBtn.className = "line-btn line-collections-btn";
   collectionsBtn.textContent = "Collections";
   collectionsBtn.disabled = allCollectionNames.length === 0;
-  left.appendChild(collectionsBtn);
 
   const collectionsDropdown = document.createElement("div");
   collectionsDropdown.className = "collections-dropdown line-collections-dropdown hidden";
@@ -3858,92 +3853,70 @@ function createLineRow(options) {
   });
   collectionsDropdown.addEventListener("click", (event) => event.stopPropagation());
   row.addEventListener("click", () => collectionsDropdown.classList.add("hidden"));
-  left.appendChild(collectionsDropdown);
-
-  const wfWrap = document.createElement("div");
-  wfWrap.className = "line-workflow-actions";
+  function bindLineAction(button, onClickAction) {
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await onClickAction();
+      } catch {
+        // Status is handled inside action blocks.
+      }
+    });
+  }
 
   const buyBtn = document.createElement("button");
   buyBtn.type = "button";
-  buyBtn.className = "line-btn";
+  buyBtn.className = "line-btn line-col-action";
   buyBtn.textContent = "Buy";
-  buyBtn.addEventListener("click", () => {
-    onSetIntent(appId, { buy: itemIntent.buy === 2 ? 0 : 2 })
-      .then(() => setStatus(itemIntent.buy === 2 ? "Buy cleared (removed from Steam wishlist)." : "Set to Buy (added to Steam wishlist)."))
-      .catch(() => setStatus("Failed to set Buy.", true));
+  buyBtn.classList.toggle("active", itemIntent.buy === 2);
+  bindLineAction(buyBtn, async () => {
+    try {
+      await onSetIntent(appId, { buy: itemIntent.buy === 2 ? 0 : 2 });
+      setStatus(itemIntent.buy === 2 ? "Buy cleared (removed from Steam wishlist)." : "Set to Buy (added to Steam wishlist).");
+    } catch {
+      setStatus("Failed to set Buy.", true);
+      throw new Error("buy-action-failed");
+    }
   });
 
   const maybeBtn = document.createElement("button");
   maybeBtn.type = "button";
-  maybeBtn.className = "line-btn";
+  maybeBtn.className = "line-btn line-col-action";
   maybeBtn.textContent = "Maybe";
-  maybeBtn.addEventListener("click", () => {
-    onSetIntent(appId, { buy: itemIntent.buy === 1 ? 0 : 1 })
-      .then(() => setStatus(itemIntent.buy === 1 ? "Maybe cleared (removed from Steam wishlist)." : "Set to Maybe (added to Steam wishlist)."))
-      .catch(() => setStatus("Failed to set Maybe.", true));
+  maybeBtn.classList.toggle("active", itemIntent.buy === 1);
+  bindLineAction(maybeBtn, async () => {
+    try {
+      await onSetIntent(appId, { buy: itemIntent.buy === 1 ? 0 : 1 });
+      setStatus(itemIntent.buy === 1 ? "Maybe cleared (removed from Steam wishlist)." : "Set to Maybe (added to Steam wishlist).");
+    } catch {
+      setStatus("Failed to set Maybe.", true);
+      throw new Error("maybe-action-failed");
+    }
   });
 
   const trackBtn = document.createElement("button");
   trackBtn.type = "button";
-  trackBtn.className = "line-btn";
+  trackBtn.className = "line-btn line-col-action";
   trackBtn.textContent = itemIntent.track > 0 ? "Unfollow" : "Follow";
-  trackBtn.addEventListener("click", () => {
-    onSetIntent(appId, { track: itemIntent.track > 0 ? 0 : 1 })
-      .then(() => setStatus(itemIntent.track > 0 ? "Untracked (unfollowed on Steam)." : "Tracked (followed on Steam)."))
-      .catch(() => setStatus("Failed to toggle track.", true));
+  trackBtn.classList.toggle("active", itemIntent.track > 0);
+  bindLineAction(trackBtn, async () => {
+    try {
+      await onSetIntent(appId, { track: itemIntent.track > 0 ? 0 : 1 });
+      setStatus(itemIntent.track > 0 ? "Untracked (unfollowed on Steam)." : "Tracked (followed on Steam).");
+    } catch {
+      setStatus("Failed to toggle track.", true);
+      throw new Error("track-action-failed");
+    }
   });
 
-  wfWrap.appendChild(buyBtn);
-  wfWrap.appendChild(maybeBtn);
-  wfWrap.appendChild(trackBtn);
+  const collectionsWrap = document.createElement("div");
+  collectionsWrap.className = "line-col-collections";
+  collectionsWrap.appendChild(collectionsBtn);
+  collectionsWrap.appendChild(collectionsDropdown);
 
-  const targetBtn = document.createElement("button");
-  targetBtn.type = "button";
-  targetBtn.className = "line-btn";
-  targetBtn.textContent = targetPriceCents > 0 ? "Target*" : "Target";
-  targetBtn.addEventListener("click", () => {
-    const defaultValue = targetPriceCents > 0 ? (targetPriceCents / 100).toFixed(2) : "";
-    const raw = window.prompt("Set target price (leave empty to clear):", defaultValue);
-    if (raw === null) {
-      return;
-    }
-    const normalized = String(raw || "").trim().replace(",", ".");
-    if (!normalized) {
-      onSetIntent(appId, { targetPriceCents: null })
-        .then(() => setStatus("Target price cleared."))
-        .catch(() => setStatus("Failed to clear target price.", true));
-      return;
-    }
-    const amount = Number(normalized);
-    if (!Number.isFinite(amount) || amount < 0) {
-      setStatus("Enter a valid target price.", true);
-      return;
-    }
-    const cents = Math.round(amount * 100);
-    onSetIntent(appId, { targetPriceCents: cents })
-      .then(() => setStatus("Target price saved."))
-      .catch(() => setStatus("Failed to save target price.", true));
-  });
-  wfWrap.appendChild(targetBtn);
-
-  const noteBtn = document.createElement("button");
-  noteBtn.type = "button";
-  noteBtn.className = "line-btn";
-  noteBtn.textContent = noteText ? "Note*" : "Note";
-  noteBtn.addEventListener("click", () => {
-    const raw = window.prompt("Set note (leave empty to clear):", noteText);
-    if (raw === null) {
-      return;
-    }
-    onSetIntent(appId, { note: String(raw || "").slice(0, 600) })
-      .then(() => setStatus(raw ? "Note saved." : "Note cleared."))
-      .catch(() => setStatus("Failed to update note.", true));
-  });
-  wfWrap.appendChild(noteBtn);
-  left.appendChild(wfWrap);
-
-  const center = document.createElement("div");
-  center.className = "line-center";
+  const imageCol = document.createElement("div");
+  imageCol.className = "line-col-image";
   const thumbWrap = document.createElement("a");
   thumbWrap.className = "line-thumb";
   thumbWrap.href = link;
@@ -3955,44 +3928,46 @@ function createLineRow(options) {
   thumbImg.loading = "lazy";
   attachImageFallback(thumbImg, getCardImageCandidates(appId).concat(imageUrl || []));
   thumbWrap.appendChild(thumbImg);
+  imageCol.appendChild(thumbWrap);
+
+  const nameCol = document.createElement("div");
+  nameCol.className = "line-col-name";
   const titleEl = document.createElement("a");
   titleEl.className = "line-title";
   titleEl.href = link;
   titleEl.target = "_blank";
   titleEl.rel = "noopener noreferrer";
   titleEl.textContent = title;
-  const reviewEl = document.createElement("span");
-  reviewEl.className = "line-review";
-  reviewEl.textContent = "-";
-  center.appendChild(thumbWrap);
-  center.appendChild(titleEl);
-  center.appendChild(reviewEl);
+  nameCol.appendChild(titleEl);
 
-  const right = document.createElement("div");
-  right.className = "line-right";
+  const reviewEl = document.createElement("span");
+  reviewEl.className = "line-review line-col-review";
+  reviewEl.textContent = "-";
+
   const priceEl = document.createElement("span");
-  priceEl.className = "line-price";
+  priceEl.className = "line-price line-col-price";
   priceEl.textContent = "-";
   const discountEl = document.createElement("span");
-  discountEl.className = "line-discount";
+  discountEl.className = "line-discount line-col-discount";
   discountEl.textContent = "-";
-  const targetEl = document.createElement("span");
-  targetEl.className = "line-target";
-  targetEl.textContent = targetPriceCents > 0 ? `Target: ${(targetPriceCents / 100).toFixed(2)}` : "Target: -";
-  right.appendChild(targetEl);
-  right.appendChild(discountEl);
-  right.appendChild(priceEl);
 
   row.appendChild(batchWrap);
   row.appendChild(left);
-  row.appendChild(center);
-  row.appendChild(right);
+  row.appendChild(imageCol);
+  row.appendChild(nameCol);
+  row.appendChild(discountEl);
+  row.appendChild(reviewEl);
+  row.appendChild(buyBtn);
+  row.appendChild(maybeBtn);
+  row.appendChild(trackBtn);
+  row.appendChild(collectionsWrap);
+  row.appendChild(priceEl);
 
   return {
     row,
     titleEl,
     reviewEl,
-    targetEl,
+    targetEl: null,
     priceEl,
     discountEl
   };

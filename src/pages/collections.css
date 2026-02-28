@@ -819,7 +819,7 @@ main {
 
 .line-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto 84px minmax(360px, 1fr) minmax(90px, 0.8fr) 64px auto auto auto auto minmax(90px, 0.8fr);
   gap: 8px;
   align-items: center;
   border: 1px solid #2f445a;
@@ -829,7 +829,7 @@ main {
 }
 
 .line-row.line-row-batch {
-  grid-template-columns: 24px auto minmax(0, 1fr) auto;
+  grid-template-columns: 24px auto 84px minmax(360px, 1fr) minmax(90px, 0.8fr) 64px auto auto auto auto minmax(90px, 0.8fr);
 }
 
 .line-batch {
@@ -849,7 +849,7 @@ main {
 
 .line-left {
   display: inline-grid;
-  grid-template-columns: 28px 28px auto auto auto;
+  grid-template-columns: 28px 28px auto;
   gap: 4px;
   align-items: center;
   width: fit-content;
@@ -857,10 +857,12 @@ main {
 }
 
 .line-workflow-actions {
-  display: inline-grid;
-  grid-auto-flow: column;
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   align-items: center;
+  position: relative;
+  min-width: 0;
 }
 
 .top-toggle {
@@ -960,14 +962,6 @@ main {
   width: 240px;
 }
 
-.line-center {
-  display: grid;
-  grid-template-columns: 78px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
 .line-thumb {
   display: flex;
   align-items: center;
@@ -997,17 +991,48 @@ main {
 .line-review {
   color: var(--muted);
   white-space: nowrap;
+  text-align: center;
 }
 
-.line-right {
+.line-col-image {
   display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  color: var(--muted);
+  align-items: center;
+}
+
+.line-col-name {
+  min-width: 0;
+}
+
+.line-col-review {
+  justify-self: center;
+}
+
+.line-col-action {
+  justify-self: end;
   white-space: nowrap;
 }
 
+.line-col-collections {
+  justify-self: end;
+  position: relative;
+}
+
+.line-col-discount,
+.line-col-price {
+  justify-self: end;
+  white-space: nowrap;
+  text-align: right;
+}
+
 .line-target {
+  color: var(--muted);
+  min-width: 110px;
+}
+
+.line-col-discount,
+.line-col-price {
+  display: flex;
+  justify-content: flex-end;
   color: var(--muted);
 }
 
@@ -1169,8 +1194,13 @@ main {
   }
 
   .line-left,
-  .line-center,
-  .line-right {
+  .line-col-image,
+  .line-col-name,
+  .line-col-review,
+  .line-col-action,
+  .line-col-collections,
+  .line-col-discount,
+  .line-col-price {
     width: 100%;
   }
 
@@ -1178,7 +1208,17 @@ main {
     height: 20px;
   }
 
-  .line-right {
+  .line-col-review,
+  .line-col-action,
+  .line-col-collections,
+  .line-col-discount,
+  .line-col-price {
+    justify-self: start;
+    text-align: left;
+  }
+
+  .line-col-discount,
+  .line-col-price {
     justify-content: flex-start;
   }
 }

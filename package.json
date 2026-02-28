@@ -4,8 +4,9 @@
   "private": true,
   "description": "Firefox extension to organize Steam wishlist into custom collections",
   "scripts": {
-    "dev": "web-ext run --source-dir . --target=firefox-desktop",
+    "dev": "bash scripts/dev/start-firefox-with-extension.sh",
     "dev:default": "npm run dev",
+    "dev:raw": "web-ext run --source-dir . --target=firefox-desktop",
     "dev:steam": "bash scripts/dev/run-web-ext-steam-dev.sh",
     "dev:steam:no-launch": "bash scripts/dev/run-web-ext-steam-dev.sh --no-launch",
     "dev:steam:dry-run": "bash scripts/dev/run-web-ext-steam-dev.sh --no-launch --dry-run",

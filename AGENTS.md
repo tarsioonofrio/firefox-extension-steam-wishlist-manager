@@ -132,3 +132,10 @@ Automation scripts:
 - `scripts/mcp/doctor-firefox-devtools-mcp.sh`
 
 When MCP transport issues occur, prefer runbook flow over ad-hoc retries.
+
+## Firefox Launch Rule (Repository Default)
+- In this repository, always launch Firefox with the extension loaded.
+- Default command: `npm run dev`
+- Default launcher script: `scripts/dev/start-firefox-with-extension.sh`
+- Under the hood this uses `scripts/dev/run-web-ext-steam-dev.sh` (profile `steam-dev`).
+- Do not launch plain `firefox` as the default workflow, because it starts without the temporary add-on.
