@@ -16,6 +16,7 @@ const LOG_BASE_DIR = process.env.SWM_NATIVE_BRIDGE_STATE_DIR
 const LOG_PATH = process.env.SWM_NATIVE_BRIDGE_LOG_PATH
   ? path.resolve(process.env.SWM_NATIVE_BRIDGE_LOG_PATH)
   : path.join(LOG_BASE_DIR, 'extension-warn-error.log.jsonl');
+const LOG_FALLBACK_PATH = path.join(os.tmpdir(), 'steam-wishlist-manager', 'extension-warn-error.log.jsonl');
 
 function sendMessage(obj) {
   const json = Buffer.from(JSON.stringify(obj), 'utf8');
@@ -77,6 +78,12 @@ function normalizeLogEntry(raw) {
   };
 }
 
+function appendLogEntryToPath(filePath, entry) {
+  const dir = path.dirname(filePath);
+  mkdirSync(dir, { recursive: true });
+  appendFileSync(filePath, `${JSON.stringify(entry)}\n`, 'utf8');
+}
+
 function appendLogEntry(payload) {
   const entry = normalizeLogEntry(payload?.entry);
   if (!(entry.level === 'warn' || entry.level === 'error')) {
@@ -88,40 +95,56 @@ function appendLogEntry(payload) {
       path: LOG_PATH
     };
   }
-  const dir = path.dirname(LOG_PATH);
-  mkdirSync(dir, { recursive: true });
-  appendFileSync(LOG_PATH, `${JSON.stringify(entry)}\n`, 'utf8');
+  let usedPath = LOG_PATH;
+  let usedFallback = false;
+  try {
+    appendLogEntryToPath(LOG_PATH, entry);
+  } catch {
+    appendLogEntryToPath(LOG_FALLBACK_PATH, entry);
+    usedPath = LOG_FALLBACK_PATH;
+    usedFallback = true;
+  }
   return {
     ok: true,
     type: 'log-entry-ack',
     written: true,
     at: entry.at,
     level: entry.level,
-    path: LOG_PATH
+    path: usedPath,
+    usedFallback
   };
 }
 
-function getLogMeta() {
+function getLogMetaForPath(filePath) {
   try {
-    const stat = statSync(LOG_PATH);
+    const stat = statSync(filePath);
     return {
-      ok: true,
-      type: 'log-meta',
       exists: true,
-      path: LOG_PATH,
+      path: filePath,
       size: Number(stat.size || 0),
       updatedAt: Number(stat.mtimeMs || 0)
     };
   } catch {
     return {
-      ok: true,
-      type: 'log-meta',
       exists: false,
-      path: LOG_PATH,
+      path: filePath,
       size: 0,
       updatedAt: 0
     };
   }
+}
+
+function getLogMeta() {
+  const primary = getLogMetaForPath(LOG_PATH);
+  const fallback = getLogMetaForPath(LOG_FALLBACK_PATH);
+  const active = primary.exists ? primary : (fallback.exists ? fallback : primary);
+  return {
+    ok: true,
+    type: 'log-meta',
+    ...active,
+    primaryPath: LOG_PATH,
+    fallbackPath: LOG_FALLBACK_PATH
+  };
 }
 
 function handle(msg) {
