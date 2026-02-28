@@ -7,6 +7,7 @@ Operational workflows for local development and MCP runtime management.
 ### Default profile
 
 - `npm run dev`
+- `npm run check:env`
 
 Runs `web-ext` against your default Firefox profile/session.
 
@@ -44,4 +45,5 @@ Optional:
 
 For full operational details and troubleshooting, see:
 - `docs/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
-
+- `docs/ARCHITECTURE.md`
+- `docs/OPERATIONS.md`

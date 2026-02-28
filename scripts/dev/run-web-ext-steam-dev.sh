@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PROFILE_NAME="${SWM_FIREFOX_PROFILE_NAME:-steam-dev}"
 PROFILES_INI="${SWM_FIREFOX_PROFILES_INI:-$HOME/.mozilla/firefox/profiles.ini}"
 FIREFOX_BIN="${FIREFOX_BIN:-firefox}"

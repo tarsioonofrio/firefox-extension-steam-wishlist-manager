@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC="$REPO_ROOT/.mcp/firefox-devtools-mcp-wrapper-headful.sh"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+SRC="$REPO_ROOT/.mcp/firefox-devtools-mcp-wrapper-headless.sh"
 DST="$REPO_ROOT/.mcp/firefox-devtools-mcp-wrapper.sh"
 
 if [[ ! -x "$SRC" ]]; then
   echo "missing: $SRC" >&2
-  echo "run: bash scripts/setup-firefox-devtools-mcp.sh" >&2
+  echo "run: bash scripts/mcp/setup-firefox-devtools-mcp.sh" >&2
   exit 1
 fi
 
@@ -20,5 +20,5 @@ codex mcp add \
   -c 'tool_timeout_sec=180' \
   firefox-devtools -- "$DST"
 
-echo "ok: firefox-devtools set to HEADFUL (normal window)"
+echo "ok: firefox-devtools set to HEADLESS"
 echo "restart Codex CLI to reload MCP process"

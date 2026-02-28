@@ -25,7 +25,7 @@ This runbook captures the full process used to stabilize `firefox-devtools` MCP 
 
 ## Automated Scripts
 
-- `scripts/setup-firefox-devtools-mcp.sh`
+- `scripts/mcp/setup-firefox-devtools-mcp.sh`
   - Installs local MCP binary in `~/.local/share/firefox-devtools-mcp`
   - Writes wrappers in `.mcp/` for both modes:
     - `firefox-devtools-mcp-wrapper-headless.sh`
@@ -33,30 +33,30 @@ This runbook captures the full process used to stabilize `firefox-devtools` MCP 
   - Sets active wrapper to headless by default
   - Registers `firefox-devtools` in Codex
 
-- `scripts/use-firefox-devtools-mcp-headless.sh`
+- `scripts/mcp/use-firefox-devtools-mcp-headless.sh`
   - Switches active wrapper to headless and re-registers MCP
 
-- `scripts/use-firefox-devtools-mcp-headful.sh`
+- `scripts/mcp/use-firefox-devtools-mcp-headful.sh`
   - Switches active wrapper to normal/headful and re-registers MCP
 
-- `scripts/reset-firefox-devtools-mcp-runtime.sh`
+- `scripts/mcp/reset-firefox-devtools-mcp-runtime.sh`
   - Kills stale MCP/Firefox test processes
 
-- `scripts/doctor-firefox-devtools-mcp.sh`
+- `scripts/mcp/doctor-firefox-devtools-mcp.sh`
   - Prints MCP config status, active mode (headless/headful), log tail, and active processes
 
-- `scripts/firefox-devtools-mcp-env-check.sh`
+- `scripts/mcp/firefox-devtools-mcp-env-check.sh`
   - Prints GUI/session variables used by headful mode (`XDG_SESSION_TYPE`, `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR`)
 
 ## Standard Recovery Flow
 
 1. Run setup:
-   - `bash scripts/setup-firefox-devtools-mcp.sh`
+   - `bash scripts/mcp/setup-firefox-devtools-mcp.sh`
 2. Pick mode:
-   - Headless: `bash scripts/use-firefox-devtools-mcp-headless.sh`
-   - Normal window: `bash scripts/use-firefox-devtools-mcp-headful.sh`
+   - Headless: `bash scripts/mcp/use-firefox-devtools-mcp-headless.sh`
+   - Normal window: `bash scripts/mcp/use-firefox-devtools-mcp-headful.sh`
 3. Reset stale processes:
-   - `bash scripts/reset-firefox-devtools-mcp-runtime.sh`
+   - `bash scripts/mcp/reset-firefox-devtools-mcp-runtime.sh`
 4. Restart Codex CLI completely.
 5. Validate:
    - `codex mcp list`
@@ -64,7 +64,7 @@ This runbook captures the full process used to stabilize `firefox-devtools` MCP 
 6. If needed, inspect log:
    - `tail -f /tmp/firefox-devtools-mcp.stderr.log`
 7. If headful mode does not open Firefox window, inspect GUI env:
-   - `bash scripts/firefox-devtools-mcp-env-check.sh`
+   - `bash scripts/mcp/firefox-devtools-mcp-env-check.sh`
 
 ## Expected Healthy Output
 

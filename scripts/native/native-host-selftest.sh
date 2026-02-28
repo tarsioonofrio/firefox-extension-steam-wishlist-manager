@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT_FILE="/tmp/swm-native-host-reply.bin"
 
 node - <<'NODE' | node "$ROOT_DIR/mcp/native-bridge-host.mjs" > "$OUT_FILE"

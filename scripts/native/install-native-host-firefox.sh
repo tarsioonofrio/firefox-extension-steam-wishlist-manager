@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOST_NAME="dev.tarsio.steam_wishlist_manager_bridge"
 EXT_ID="steam-wishlist-collections@tarsio.dev"
 HOST_PATH="$ROOT_DIR/mcp/native-bridge-host.mjs"

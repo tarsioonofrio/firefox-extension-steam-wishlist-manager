@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MCP_ROOT="$HOME/.local/share/firefox-devtools-mcp"
 WRAPPER_DIR="$REPO_ROOT/.mcp"
 WRAPPER_HEADLESS="$WRAPPER_DIR/firefox-devtools-mcp-wrapper-headless.sh"
@@ -93,7 +93,7 @@ echo "profile: $PROFILE_DIR"
 echo "runtime: $RUNTIME_DIR"
 echo
 echo "switch mode:"
-echo "  bash scripts/use-firefox-devtools-mcp-headless.sh"
-echo "  bash scripts/use-firefox-devtools-mcp-headful.sh"
+echo "  bash scripts/mcp/use-firefox-devtools-mcp-headless.sh"
+echo "  bash scripts/mcp/use-firefox-devtools-mcp-headful.sh"
 echo
 echo "next: restart Codex CLI and run '/mcp' then test list_pages"

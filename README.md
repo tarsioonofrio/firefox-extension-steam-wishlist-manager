@@ -67,6 +67,7 @@ Notes:
 ## Development
 
 - Install: `npm install`
+- Check local environment: `npm run check:env`
 - Dev (auto-reload): `npm run dev`
 - Dev (steam profile auto-detected): `npm run dev:steam`
 - Build package: `npm run build`
@@ -108,7 +109,7 @@ Use this flow when you need the extension in the dedicated Steam-logged develope
 
 Notes:
 - Keep `web-ext run` process alive while testing (it handles reload on source changes).
-- Script used by `npm run dev:steam`: `scripts/run-web-ext-steam-dev.sh`.
+- Script used by `npm run dev:steam`: `scripts/dev/run-web-ext-steam-dev.sh`.
 - Override profile name when needed:
   - `SWM_FIREFOX_PROFILE_NAME=another-profile npm run dev:steam`
 
@@ -254,14 +255,16 @@ Automated smoke coverage:
 Complete process mapping, troubleshooting, and automation scripts are documented in:
 - `docs/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
 - `docs/DEV_WORKFLOWS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/OPERATIONS.md`
 
 Automation scripts:
-- `bash scripts/setup-firefox-devtools-mcp.sh`
-- `bash scripts/use-firefox-devtools-mcp-headless.sh`
-- `bash scripts/use-firefox-devtools-mcp-headful.sh`
-- `bash scripts/reset-firefox-devtools-mcp-runtime.sh`
-- `bash scripts/doctor-firefox-devtools-mcp.sh`
-- `bash scripts/firefox-devtools-mcp-env-check.sh`
+- `bash scripts/mcp/setup-firefox-devtools-mcp.sh`
+- `bash scripts/mcp/use-firefox-devtools-mcp-headless.sh`
+- `bash scripts/mcp/use-firefox-devtools-mcp-headful.sh`
+- `bash scripts/mcp/reset-firefox-devtools-mcp-runtime.sh`
+- `bash scripts/mcp/doctor-firefox-devtools-mcp.sh`
+- `bash scripts/mcp/firefox-devtools-mcp-env-check.sh`
 
 Recommended flow:
 1. Run setup script.
@@ -271,4 +274,4 @@ Recommended flow:
 5. Validate with `mcp__firefox-devtools__list_pages`.
 6. Monitor `/tmp/firefox-devtools-mcp.stderr.log`.
 7. If headful window does not open, run env check:
-   - `bash scripts/firefox-devtools-mcp-env-check.sh`
+   - `bash scripts/mcp/firefox-devtools-mcp-env-check.sh`

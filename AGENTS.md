@@ -125,10 +125,10 @@ For Firefox DevTools MCP setup/troubleshooting, use:
 - `docs/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
 
 Automation scripts:
-- `scripts/setup-firefox-devtools-mcp.sh`
-- `scripts/use-firefox-devtools-mcp-headless.sh`
-- `scripts/use-firefox-devtools-mcp-headful.sh`
-- `scripts/reset-firefox-devtools-mcp-runtime.sh`
-- `scripts/doctor-firefox-devtools-mcp.sh`
+- `scripts/mcp/setup-firefox-devtools-mcp.sh`
+- `scripts/mcp/use-firefox-devtools-mcp-headless.sh`
+- `scripts/mcp/use-firefox-devtools-mcp-headful.sh`
+- `scripts/mcp/reset-firefox-devtools-mcp-runtime.sh`
+- `scripts/mcp/doctor-firefox-devtools-mcp.sh`
 
 When MCP transport issues occur, prefer runbook flow over ad-hoc retries.

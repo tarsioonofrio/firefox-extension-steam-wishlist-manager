@@ -2,7 +2,7 @@
 set -euo pipefail
 
 LOG="/tmp/firefox-devtools-mcp.stderr.log"
-WRAPPER="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.mcp/firefox-devtools-mcp-wrapper.sh"
+WRAPPER="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/.mcp/firefox-devtools-mcp-wrapper.sh"
 
 echo "[1] codex mcp list"
 codex mcp list | sed -n '1,200p'
