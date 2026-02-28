@@ -2933,6 +2933,13 @@ browser.runtime.onMessage.addListener((message, sender) => {
         let steamWrite = null;
         if (message.syncSteam !== false && message.owned === undefined) {
           steamWrite = await syncSteamSignalsForIntentChange(appId, previousItem, state.items[appId]);
+          if (steamWrite && Array.isArray(steamWrite.errors) && steamWrite.errors.length > 0) {
+            await logWarn("set-item-intent.steam-write", "Steam write finished with partial failure.", {
+              appId,
+              errors: steamWrite.errors.slice(0, 3),
+              errorDetails: Array.isArray(steamWrite.errorDetails) ? steamWrite.errorDetails.slice(0, 3) : []
+            });
+          }
         }
         return { ok: true, item: state.items[appId], state, steamWrite };
       }
@@ -3032,6 +3039,21 @@ browser.runtime.onMessage.addListener((message, sender) => {
               ...steamWrite
             });
           }
+        }
+
+        const steamWriteFailures = steamWriteResults.filter(
+          (entry) => Array.isArray(entry?.errors) && entry.errors.length > 0
+        );
+        if (steamWriteFailures.length > 0) {
+          await logWarn("batch-set-item-intent.steam-write", "Batch Steam write finished with partial failures.", {
+            requestedCount: appIds.length,
+            failedCount: steamWriteFailures.length,
+            samples: steamWriteFailures.slice(0, 3).map((entry) => ({
+              appId: entry.appId,
+              errors: Array.isArray(entry.errors) ? entry.errors.slice(0, 2) : [],
+              errorDetails: Array.isArray(entry.errorDetails) ? entry.errorDetails.slice(0, 2) : []
+            }))
+          });
         }
 
         await setState(state);
