@@ -53,6 +53,15 @@ function setLogsMeta(text) {
   el.textContent = String(text || "");
 }
 
+function setQueueRunSummary(text, isError = false) {
+  const el = document.getElementById("queue-run-summary");
+  if (!el) {
+    return;
+  }
+  el.textContent = String(text || "");
+  el.style.color = isError ? "#ff9696" : "#9ab8d3";
+}
+
 function formatDateTime(timestamp) {
   const n = Number(timestamp || 0);
   if (!Number.isFinite(n) || n <= 0) {
@@ -245,6 +254,36 @@ function validateBackupPayload(parsed) {
     throw new Error("Backup missing data section.");
   }
   return parsed;
+}
+
+function buildQueueRunSummary(result) {
+  const inboxProcessed = Number(result?.inboxProcessed || 0);
+  const maybeProcessed = Number(result?.maybeProcessed || 0);
+  const archiveProcessed = Number(result?.archiveProcessed || 0);
+  const details = Array.isArray(result?.errorDetails) ? result.errorDetails : [];
+  const queueCounts = details.reduce((acc, entry) => {
+    const key = String(entry?.queue || "unknown");
+    acc[key] = Number(acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const queueParts = Object.entries(queueCounts).map(([k, v]) => `${k}:${v}`);
+  const totalProcessed = inboxProcessed + maybeProcessed + archiveProcessed;
+
+  if (details.length === 0) {
+    return {
+      text: `Queue run ok | processed ${totalProcessed} (inbox:${inboxProcessed} maybe:${maybeProcessed} archive:${archiveProcessed})`,
+      isError: false
+    };
+  }
+
+  const first = details[0] || {};
+  const firstMsg = String(first.message || "Steam write failed");
+  const firstStage = String(first.stage || "").trim();
+  const stageSuffix = firstStage ? ` [${firstStage}]` : "";
+  return {
+    text: `Queue run finished with ${details.length} error(s)${queueParts.length ? ` (${queueParts.join(" ")})` : ""} | first: ${firstMsg}${stageSuffix}`,
+    isError: true
+  };
 }
 
 async function restoreFromParsedBackup(parsed) {
@@ -443,6 +482,25 @@ document.getElementById("save-queue-policy")?.addEventListener("click", async ()
   }
 });
 
+document.getElementById("run-queue-now")?.addEventListener("click", async () => {
+  try {
+    setStatus("Running queue automation...");
+    const response = await browser.runtime.sendMessage({
+      type: "run-queue-automation-now",
+      force: true
+    });
+    if (!response?.ok) {
+      throw new Error(String(response?.error || "Queue automation failed."));
+    }
+    const summary = buildQueueRunSummary(response);
+    setQueueRunSummary(summary.text, summary.isError);
+    setStatus("Queue automation finished.");
+  } catch (error) {
+    setQueueRunSummary("", false);
+    setStatus(`Failed to run queue automation: ${String(error?.message || error || "unknown error")}`, true);
+  }
+});
+
 document.getElementById("refresh-logs")?.addEventListener("click", async () => {
   try {
     await refreshLogsView();
@@ -472,6 +530,7 @@ refreshBackupSummary().catch(() => {});
 refreshQueuePolicySummary().catch(() => {
   applyQueuePolicyToUI({});
 });
+setQueueRunSummary("");
 refreshLogsView().catch(() => {
   setLogsOutput("Could not load logs.");
 });
