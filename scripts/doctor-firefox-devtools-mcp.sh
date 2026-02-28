@@ -11,6 +11,11 @@ echo
 echo "[2] wrapper exists"
 if [[ -x "$WRAPPER" ]]; then
   echo "ok: $WRAPPER"
+  if grep -q -- "--headless" "$WRAPPER"; then
+    echo "mode: headless"
+  else
+    echo "mode: headful"
+  fi
 else
   echo "missing/non-executable: $WRAPPER"
 fi

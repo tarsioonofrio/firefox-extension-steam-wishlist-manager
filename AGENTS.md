@@ -126,6 +126,8 @@ For Firefox DevTools MCP setup/troubleshooting, use:
 
 Automation scripts:
 - `scripts/setup-firefox-devtools-mcp.sh`
+- `scripts/use-firefox-devtools-mcp-headless.sh`
+- `scripts/use-firefox-devtools-mcp-headful.sh`
 - `scripts/reset-firefox-devtools-mcp-runtime.sh`
 - `scripts/doctor-firefox-devtools-mcp.sh`
 

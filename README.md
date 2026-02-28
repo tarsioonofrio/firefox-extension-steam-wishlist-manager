@@ -232,12 +232,18 @@ Complete process mapping, troubleshooting, and automation scripts are documented
 
 Automation scripts:
 - `bash scripts/setup-firefox-devtools-mcp.sh`
+- `bash scripts/use-firefox-devtools-mcp-headless.sh`
+- `bash scripts/use-firefox-devtools-mcp-headful.sh`
 - `bash scripts/reset-firefox-devtools-mcp-runtime.sh`
 - `bash scripts/doctor-firefox-devtools-mcp.sh`
+- `bash scripts/firefox-devtools-mcp-env-check.sh`
 
 Recommended flow:
 1. Run setup script.
-2. Reset stale processes.
-3. Restart Codex CLI.
-4. Validate with `mcp__firefox-devtools__list_pages`.
-5. Monitor `/tmp/firefox-devtools-mcp.stderr.log`.
+2. Choose mode (`headless` or `headful`).
+3. Reset stale processes.
+4. Restart Codex CLI.
+5. Validate with `mcp__firefox-devtools__list_pages`.
+6. Monitor `/tmp/firefox-devtools-mcp.stderr.log`.
+7. If headful window does not open, run env check:
+   - `bash scripts/firefox-devtools-mcp-env-check.sh`

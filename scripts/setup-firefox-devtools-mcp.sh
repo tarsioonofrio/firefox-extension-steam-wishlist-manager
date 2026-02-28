@@ -4,7 +4,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MCP_ROOT="$HOME/.local/share/firefox-devtools-mcp"
 WRAPPER_DIR="$REPO_ROOT/.mcp"
-WRAPPER="$WRAPPER_DIR/firefox-devtools-mcp-wrapper.sh"
+WRAPPER_HEADLESS="$WRAPPER_DIR/firefox-devtools-mcp-wrapper-headless.sh"
+WRAPPER_HEADFUL="$WRAPPER_DIR/firefox-devtools-mcp-wrapper-headful.sh"
+WRAPPER_ACTIVE="$WRAPPER_DIR/firefox-devtools-mcp-wrapper.sh"
 PROFILE_BASE="/tmp/firefox-devtools-mcp"
 LOG_FILE="${PROFILE_BASE}.stderr.log"
 PROFILE_DIR="${PROFILE_BASE}-profile"
@@ -24,7 +26,15 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 
-cat > "$WRAPPER" <<WRAP
+write_wrapper() {
+  local mode="$1"
+  local wrapper="$2"
+  local headless_flag=""
+  if [[ "$mode" == "headless" ]]; then
+    headless_flag="--headless"
+  fi
+
+  cat > "$wrapper" <<WRAP
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -56,23 +66,34 @@ unset NODE_OPTIONS || true
 
 exec "\$BIN" \\
   --profile-path "\$PROFILE" \\
-  --headless \\
+  $headless_flag \\
   --viewport 1280x720 \\
   --start-url about:blank
 WRAP
+  chmod +x "$wrapper"
+}
 
-chmod +x "$WRAPPER"
+write_wrapper headless "$WRAPPER_HEADLESS"
+write_wrapper headful "$WRAPPER_HEADFUL"
+cp "$WRAPPER_HEADLESS" "$WRAPPER_ACTIVE"
+chmod +x "$WRAPPER_ACTIVE"
 
 codex mcp remove firefox-devtools >/dev/null 2>&1 || true
 codex mcp add \
   -c 'startup_timeout_sec=30' \
   -c 'tool_timeout_sec=180' \
-  firefox-devtools -- "$WRAPPER"
+  firefox-devtools -- "$WRAPPER_ACTIVE"
 
 echo "ok: firefox-devtools MCP configured"
-echo "wrapper: $WRAPPER"
+echo "active wrapper: $WRAPPER_ACTIVE (default: headless)"
+echo "headless wrapper: $WRAPPER_HEADLESS"
+echo "headful wrapper: $WRAPPER_HEADFUL"
 echo "log: $LOG_FILE"
 echo "profile: $PROFILE_DIR"
 echo "runtime: $RUNTIME_DIR"
+echo
+echo "switch mode:"
+echo "  bash scripts/use-firefox-devtools-mcp-headless.sh"
+echo "  bash scripts/use-firefox-devtools-mcp-headful.sh"
 echo
 echo "next: restart Codex CLI and run '/mcp' then test list_pages"
