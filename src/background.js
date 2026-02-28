@@ -8,6 +8,7 @@ const FOLLOWED_SYNC_META_KEY = "steamWishlistFollowedSyncMetaV1";
 const NATIVE_BRIDGE_HOST_NAME = "dev.tarsio.steam_wishlist_manager_bridge";
 const BACKUP_SETTINGS_KEY = "steamWishlistBackupSettingsV1";
 const BACKUP_HISTORY_KEY = "steamWishlistBackupHistoryV1";
+const LOGS_KEY = "steamWishlistLogsV1";
 const BACKUP_ALARM_NAME = "steamWishlistAutoBackup";
 const QUEUE_POLICY_KEY = "steamWishlistQueuePolicyV1";
 const QUEUE_AUTOMATION_ALARM_NAME = "steamWishlistQueueAutomation";
@@ -48,11 +49,91 @@ const DEFAULT_INBOX_DAYS = 7;
 const MIN_QUEUE_DAYS = 1;
 const MAX_QUEUE_DAYS = 365;
 const QUEUE_AUTOMATION_PERIOD_MINUTES = 360;
+const MAX_LOG_ENTRIES = 400;
 let backgroundWishlistDomSyncInFlight = false;
 let nativeBridgePublishTimer = null;
 let steamSessionIdCache = "";
 let steamSessionIdCachedAt = 0;
 let steamWriteLastAt = 0;
+
+function trimLogString(value, max = 400) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+function normalizeLogLevel(value) {
+  const level = String(value || "").trim().toLowerCase();
+  if (level === "error") {
+    return "error";
+  }
+  if (level === "warn" || level === "warning") {
+    return "warn";
+  }
+  return "info";
+}
+
+function safeLogDetails(details) {
+  if (!details || typeof details !== "object") {
+    return null;
+  }
+  try {
+    return JSON.parse(JSON.stringify(details));
+  } catch {
+    return { note: "details-not-serializable" };
+  }
+}
+
+async function appendLogEntry(level, source, message, details = null) {
+  const entry = {
+    id: `log_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
+    at: Date.now(),
+    level: normalizeLogLevel(level),
+    source: trimLogString(source || "background", 80),
+    message: trimLogString(message || "", 400),
+    details: safeLogDetails(details)
+  };
+
+  try {
+    const stored = await browser.storage.local.get(LOGS_KEY);
+    const logs = Array.isArray(stored[LOGS_KEY]) ? stored[LOGS_KEY] : [];
+    logs.unshift(entry);
+    const trimmed = logs.slice(0, MAX_LOG_ENTRIES);
+    await browser.storage.local.set({ [LOGS_KEY]: trimmed });
+  } catch {
+    // ignore storage failures to avoid breaking core flows
+  }
+
+  if (entry.level === "error") {
+    console.error("[SWM]", entry.source, entry.message, entry.details || "");
+  } else if (entry.level === "warn") {
+    console.warn("[SWM]", entry.source, entry.message, entry.details || "");
+  } else {
+    console.info("[SWM]", entry.source, entry.message, entry.details || "");
+  }
+}
+
+async function logWarn(source, message, details = null) {
+  await appendLogEntry("warn", source, message, details);
+}
+
+async function logError(source, errorLike, details = null) {
+  const message = errorLike instanceof Error
+    ? `${errorLike.name}: ${errorLike.message}`
+    : String(errorLike || "unknown error");
+  await appendLogEntry("error", source, message, details);
+}
+
+async function getLogs(limit = 200) {
+  const safeLimit = Number.isFinite(Number(limit))
+    ? Math.max(1, Math.min(1000, Math.floor(Number(limit))))
+    : 200;
+  const stored = await browser.storage.local.get(LOGS_KEY);
+  const logs = Array.isArray(stored[LOGS_KEY]) ? stored[LOGS_KEY] : [];
+  return logs.slice(0, safeLimit);
+}
+
+async function clearLogs() {
+  await browser.storage.local.remove(LOGS_KEY);
+}
 
 function normalizeBackupSettings(rawSettings) {
   const raw = rawSettings && typeof rawSettings === "object" ? rawSettings : {};
@@ -1080,6 +1161,15 @@ async function performQueueAutomationSweep(force = false) {
     await setState(state);
   }
 
+  if (errors.length > 0) {
+    await logWarn("queue-automation", "Queue automation finished with errors.", {
+      inboxProcessed,
+      maybeProcessed,
+      archiveProcessed,
+      errors: errors.slice(0, 20)
+    });
+  }
+
   return {
     ok: true,
     changed,
@@ -1868,17 +1958,18 @@ async function syncWishlistOrderViaBackgroundTab(force = false) {
 
 browser.runtime.onMessage.addListener((message, sender) => {
   return (async () => {
-    if (!message || typeof message !== "object") {
-      throw new Error("Invalid message.");
-    }
+    try {
+      if (!message || typeof message !== "object") {
+        throw new Error("Invalid message.");
+      }
 
-    if (!isTrustedSender(sender)) {
-      throw new Error("Untrusted message sender.");
-    }
+      if (!isTrustedSender(sender)) {
+        throw new Error("Untrusted message sender.");
+      }
 
-    const state = await getState();
+      const state = await getState();
 
-    switch (message.type) {
+      switch (message.type) {
       case "get-state": {
         return state;
       }
@@ -2281,6 +2372,16 @@ browser.runtime.onMessage.addListener((message, sender) => {
         return { ok: true, summary };
       }
 
+      case "get-logs": {
+        const logs = await getLogs(message.limit);
+        return { ok: true, logs };
+      }
+
+      case "clear-logs": {
+        await clearLogs();
+        return { ok: true };
+      }
+
       case "set-backup-settings": {
         const settings = await setBackupSettings(message.settings || {});
         scheduleNativeBridgePublish("set-backup-settings");
@@ -2331,7 +2432,11 @@ browser.runtime.onMessage.addListener((message, sender) => {
         scheduleNativeBridgePublish("set-wishlist-steamid");
         try {
           await syncWishlistOrderCache(true);
-        } catch {
+        } catch (error) {
+          await logWarn("set-wishlist-steamid", "Immediate wishlist order sync failed after steamId update.", {
+            steamId,
+            error: String(error?.message || error || "sync failed")
+          });
           // non-fatal: collections page will retry and surface debug info
         }
         return { ok: true, steamId };
@@ -2343,6 +2448,10 @@ browser.runtime.onMessage.addListener((message, sender) => {
           scheduleNativeBridgePublish("sync-wishlist-order-cache");
           return result;
         } catch (error) {
+          await logWarn("sync-wishlist-order-cache", "Wishlist order cache sync failed.", {
+            force: Boolean(message.force),
+            error: String(error?.message || error || "unknown sync error")
+          });
           const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
           const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
           await browser.storage.local.set({
@@ -2362,6 +2471,10 @@ browser.runtime.onMessage.addListener((message, sender) => {
           scheduleNativeBridgePublish("sync-wishlist-order-via-background-tab");
           return result;
         } catch (error) {
+          await logWarn("sync-wishlist-order-via-background-tab", "Background tab wishlist sync failed.", {
+            force: Boolean(message.force),
+            error: String(error?.message || error || "background wishlist sync failed")
+          });
           const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
           const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
           await browser.storage.local.set({
@@ -2390,6 +2503,12 @@ browser.runtime.onMessage.addListener((message, sender) => {
 
       default:
         throw new Error(`Unknown message type: ${message.type}`);
+      }
+    } catch (error) {
+      await logError("runtime.onMessage", error, {
+        type: String(message?.type || "unknown")
+      });
+      throw error;
     }
   })();
 });
@@ -2400,11 +2519,15 @@ if (browser?.alarms?.onAlarm) {
       return;
     }
     if (alarm.name === BACKUP_ALARM_NAME) {
-      createBackupSnapshot("auto").catch(() => {});
+      createBackupSnapshot("auto").catch((error) => {
+        logError("alarm.backup", error).catch(() => {});
+      });
       return;
     }
     if (alarm.name === QUEUE_AUTOMATION_ALARM_NAME) {
-      performQueueAutomationSweep(false).catch(() => {});
+      performQueueAutomationSweep(false).catch((error) => {
+        logError("alarm.queue-automation", error).catch(() => {});
+      });
     }
   });
 }
@@ -2413,8 +2536,8 @@ async function initializeBackupScheduler() {
   try {
     const settings = await getBackupSettings();
     await scheduleBackupAlarm(settings);
-  } catch {
-    // ignore
+  } catch (error) {
+    await logError("initialize.backup-scheduler", error);
   }
 }
 
@@ -2422,8 +2545,8 @@ async function initializeQueueAutomationScheduler() {
   try {
     await getQueuePolicy();
     await scheduleQueueAutomationAlarm();
-  } catch {
-    // ignore
+  } catch (error) {
+    await logError("initialize.queue-scheduler", error);
   }
 }
 

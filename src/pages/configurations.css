@@ -88,6 +88,19 @@ button.danger {
   display: none;
 }
 
+.logs-output {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  border: 1px solid #2f445a;
+  border-radius: 4px;
+  background: #0d1520;
+  color: #cde3f8;
+  padding: 10px;
+  font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  box-sizing: border-box;
+}
+
 .status {
   margin: 2px 0 0;
   min-height: 16px;

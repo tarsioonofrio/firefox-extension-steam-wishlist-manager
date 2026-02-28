@@ -37,12 +37,30 @@ function setBackupSummary(text) {
   el.textContent = text;
 }
 
+function setLogsOutput(text) {
+  const el = document.getElementById("logs-output");
+  if (!el) {
+    return;
+  }
+  el.value = String(text || "");
+}
+
 function formatDateTime(timestamp) {
   const n = Number(timestamp || 0);
   if (!Number.isFinite(n) || n <= 0) {
     return "-";
   }
   return new Date(n).toLocaleString("pt-BR");
+}
+
+function formatLogLine(entry) {
+  const e = entry && typeof entry === "object" ? entry : {};
+  const when = formatDateTime(e.at);
+  const level = String(e.level || "info").toUpperCase();
+  const source = String(e.source || "background");
+  const message = String(e.message || "");
+  const details = e.details && typeof e.details === "object" ? ` | ${JSON.stringify(e.details)}` : "";
+  return `[${when}] [${level}] ${source} - ${message}${details}`;
 }
 
 function normalizeBackupSettings(rawSettings) {
@@ -132,6 +150,22 @@ async function refreshQueuePolicySummary() {
     throw new Error("Could not load queue policy.");
   }
   applyQueuePolicyToUI(response.policy || {});
+}
+
+async function refreshLogsView() {
+  const response = await browser.runtime.sendMessage({
+    type: "get-logs",
+    limit: 300
+  });
+  if (!response?.ok) {
+    throw new Error("Could not load logs.");
+  }
+  const logs = Array.isArray(response.logs) ? response.logs : [];
+  if (logs.length === 0) {
+    setLogsOutput("No warning/error logs yet.");
+    return;
+  }
+  setLogsOutput(logs.map(formatLogLine).join("\n"));
 }
 
 async function openCollectionsWithRefresh() {
@@ -381,7 +415,33 @@ document.getElementById("save-queue-policy")?.addEventListener("click", async ()
   }
 });
 
+document.getElementById("refresh-logs")?.addEventListener("click", async () => {
+  try {
+    await refreshLogsView();
+    setStatus("Logs refreshed.");
+  } catch {
+    setStatus("Failed to refresh logs.", true);
+  }
+});
+
+document.getElementById("clear-logs")?.addEventListener("click", async () => {
+  const confirmed = window.confirm("Clear all warning/error logs?");
+  if (!confirmed) {
+    return;
+  }
+  try {
+    await browser.runtime.sendMessage({ type: "clear-logs" });
+    setLogsOutput("No warning/error logs yet.");
+    setStatus("Logs cleared.");
+  } catch {
+    setStatus("Failed to clear logs.", true);
+  }
+});
+
 refreshBackupSummary().catch(() => {});
 refreshQueuePolicySummary().catch(() => {
   applyQueuePolicyToUI({});
+});
+refreshLogsView().catch(() => {
+  setLogsOutput("Could not load logs.");
 });
