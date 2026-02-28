@@ -994,7 +994,9 @@ function buildWishlistSignature(appIds) {
   for (let index = 0; index < ids.length; index += 1) {
     const appId = ids[index];
     const added = Number(wishlistAddedMap?.[appId] || 0);
-    acc ^= hashStringToUint32(`${index}:${appId}:${added}`);
+    const priority = Number(wishlistPriorityMap?.[appId]);
+    const priorityToken = Number.isFinite(priority) ? priority : "na";
+    acc ^= hashStringToUint32(`${index}:${appId}:${added}:${priorityToken}`);
     acc = Math.imul(acc, 16777619);
   }
   return `${ids.length}:${acc >>> 0}`;
@@ -1331,6 +1333,10 @@ async function loadWishlistAddedMap() {
       wishlistPriorityMap[cachedOrderedIds[i]] = i;
     }
   }
+  if (Object.keys(wishlistPriorityMap).length > 0 && (!wishlistPrioritySource || Number(wishlistPrioritySourceVersion || 0) <= 0)) {
+    wishlistPrioritySource = WISHLIST_RANK_SOURCE;
+    wishlistPrioritySourceVersion = WISHLIST_RANK_SOURCE_VERSION;
+  }
   wishlistAddedMap = { ...cachedMap };
   if (Object.keys(wishlistAddedMap).length === 0 && cachedOrderedIds.length > 0) {
     const fallbackMap = {};
@@ -1356,25 +1362,23 @@ async function loadWishlistAddedMap() {
       : [];
     let observedSteamId = "";
     let hasOpenSteamTab = true;
-    if (nowIds.length === 0 || !userdata) {
-      try {
-        const observed = await browser.runtime.sendMessage({ type: "get-steam-observed-signals" });
-        hasOpenSteamTab = Boolean(observed?.hasOpenSteamTab !== false);
-        const observedIds = Array.isArray(observed?.wishlistIds)
-          ? observed.wishlistIds.map((id) => String(id || "").trim()).filter(Boolean)
-          : [];
-        if (observedIds.length > 0) {
-          nowIds = observedIds;
-        }
-        if (/^\d{10,20}$/.test(String(observed?.steamId || ""))) {
-          observedSteamId = String(observed.steamId);
-          if (!wishlistSteamId) {
-            wishlistSteamId = observedSteamId;
-          }
-        }
-      } catch {
-        // keep other fallbacks below
+    try {
+      const observed = await browser.runtime.sendMessage({ type: "get-steam-observed-signals" });
+      hasOpenSteamTab = Boolean(observed?.hasOpenSteamTab !== false);
+      const observedIds = Array.isArray(observed?.wishlistIds)
+        ? observed.wishlistIds.map((id) => String(id || "").trim()).filter(Boolean)
+        : [];
+      if (nowIds.length === 0 && observedIds.length > 0) {
+        nowIds = observedIds;
       }
+      if (/^\d{10,20}$/.test(String(observed?.steamId || ""))) {
+        observedSteamId = String(observed.steamId);
+        if (!wishlistSteamId) {
+          wishlistSteamId = observedSteamId;
+        }
+      }
+    } catch {
+      // keep other fallbacks below
     }
     wishlistOrderedAppIds = cachedOrderedIds.length > 0 ? [...cachedOrderedIds] : [...nowIds];
     wishlistSortSignature = "";
@@ -1861,11 +1865,19 @@ async function ensureWishlistPrecomputedSorts(appIds) {
     return;
   }
 
-  if (Object.keys(wishlistPriorityMap || {}).length === 0 && Array.isArray(wishlistOrderedAppIds) && wishlistOrderedAppIds.length > 0) {
-    wishlistPriorityMap = {};
+  if (Array.isArray(wishlistOrderedAppIds) && wishlistOrderedAppIds.length > 0) {
+    const existingMap = wishlistPriorityMap && typeof wishlistPriorityMap === "object"
+      ? wishlistPriorityMap
+      : {};
+    const rebuiltMap = { ...existingMap };
     for (let i = 0; i < wishlistOrderedAppIds.length; i += 1) {
-      wishlistPriorityMap[wishlistOrderedAppIds[i]] = i;
+      const appId = wishlistOrderedAppIds[i];
+      const current = Number(rebuiltMap[appId]);
+      if (!Number.isFinite(current) || current < 0) {
+        rebuiltMap[appId] = i;
+      }
     }
+    wishlistPriorityMap = rebuiltMap;
   }
   if (wishlistOrderedAppIds.length > 0) {
     wishlistOrderedAppIds = sortByWishlistPriority(appIds);
@@ -4133,14 +4145,21 @@ function getCollectionsContainingApp(appId) {
 }
 
 function canManualReorder() {
+  if (batchMode || sortMode !== "position") {
+    return false;
+  }
+  if (sourceMode === "wishlist") {
+    return wishlistOrderedAppIds.length > 0;
+  }
   return sourceMode === "collections"
     && activeCollection !== "__all__"
-    && !isDynamicCollectionName(activeCollection)
-    && sortMode === "position"
-    && !batchMode;
+    && !isDynamicCollectionName(activeCollection);
 }
 
 function getActiveCollectionOrder() {
+  if (sourceMode === "wishlist") {
+    return Array.isArray(wishlistOrderedAppIds) ? [...wishlistOrderedAppIds] : [];
+  }
   if (sourceMode !== "collections" || activeCollection === "__all__" || isDynamicCollectionName(activeCollection)) {
     return [];
   }
@@ -4152,6 +4171,58 @@ function clamp(value, min, max) {
 }
 
 async function persistActiveCollectionOrder(nextOrder) {
+  if (sourceMode === "wishlist") {
+    const cleaned = Array.from(
+      new Set(
+        (Array.isArray(nextOrder) ? nextOrder : [])
+          .map((id) => String(id || "").trim())
+          .filter(Boolean)
+      )
+    );
+    if (cleaned.length === 0) {
+      return;
+    }
+
+    wishlistOrderedAppIds = [...cleaned];
+    wishlistPriorityMap = {};
+    for (let i = 0; i < cleaned.length; i += 1) {
+      wishlistPriorityMap[cleaned[i]] = i;
+    }
+
+    if (!wishlistAddedMap || typeof wishlistAddedMap !== "object") {
+      wishlistAddedMap = {};
+    }
+    for (const appId of cleaned) {
+      if (!Object.prototype.hasOwnProperty.call(wishlistAddedMap, appId)) {
+        wishlistAddedMap[appId] = 0;
+      }
+    }
+
+    const now = Date.now();
+    wishlistPriorityCachedAt = now;
+    wishlistPriorityLastError = "";
+    wishlistSortSignature = "";
+    wishlistSortOrders = {};
+    wishlistSnapshotDay = todayKey();
+
+    const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+    const cached = stored?.[WISHLIST_ADDED_CACHE_KEY] || {};
+    await browser.storage.local.set({
+      [WISHLIST_ADDED_CACHE_KEY]: {
+        ...cached,
+        cachedAt: now,
+        orderedAppIds: wishlistOrderedAppIds,
+        priorityMap: wishlistPriorityMap,
+        priorityCachedAt: now,
+        priorityLastError: "",
+        map: wishlistAddedMap
+      }
+    });
+
+    await render();
+    return;
+  }
+
   if (sourceMode !== "collections" || activeCollection === "__all__" || isDynamicCollectionName(activeCollection)) {
     return;
   }
@@ -4254,6 +4325,8 @@ async function renderCards() {
   const rankReadyNow = sourceMode !== "wishlist" || isWishlistRankReady(sourceIds);
   if (sourceMode === "wishlist" && sourceIds.length > 0 && sortMode === "position" && !rankReadyNow) {
     setStatus(getWishlistRankUnavailableReason(), true);
+  } else if (sourceMode === "wishlist" && sortMode === "position" && rankReadyNow) {
+    setStatus("");
   }
 
   cardsEl.innerHTML = "";

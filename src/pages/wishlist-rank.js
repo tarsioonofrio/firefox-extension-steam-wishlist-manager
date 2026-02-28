@@ -69,7 +69,7 @@
   }
 
   function isRankReady(state, appIds) {
-    if (!state || state.prioritySource !== RANK_SOURCE || Number(state.prioritySourceVersion) !== RANK_SOURCE_VERSION) {
+    if (!state) {
       return false;
     }
 
@@ -78,22 +78,46 @@
       return false;
     }
 
-    if (!Array.isArray(state.orderedAppIds) || state.orderedAppIds.length === 0) {
+    const ordered = Array.isArray(state.orderedAppIds) ? state.orderedAppIds : [];
+    if (ordered.length === 0) {
       return false;
     }
 
+    const hasKnownSource = state.prioritySource === RANK_SOURCE && Number(state.prioritySourceVersion) === RANK_SOURCE_VERSION;
     const priorityMap = state.priorityMap || {};
+    const orderedSet = new Set(ordered.map((id) => toAppId(id)).filter(Boolean));
+    let idsCoveredByOrderedList = true;
     for (const appId of ids) {
-      if (!Number.isFinite(Number(priorityMap[appId]))) {
-        return false;
+      if (!orderedSet.has(String(appId))) {
+        idsCoveredByOrderedList = false;
+        break;
       }
     }
 
-    return true;
+    let mappedCount = 0;
+    for (const appId of ids) {
+      if (Number.isFinite(Number(priorityMap[appId]))) {
+        mappedCount += 1;
+      }
+    }
+    const mapCoverage = ids.length > 0 ? (mappedCount / ids.length) : 0;
+    const mapMostlyReady = mappedCount > 0 && mapCoverage >= 0.9;
+
+    // Rank is ready if we have canonical source with most priorities or an ordered list that fully covers source IDs.
+    if (hasKnownSource && (mapMostlyReady || idsCoveredByOrderedList)) {
+      return true;
+    }
+
+    // Accept non-canonical fallback when ordered IDs cover all items (keeps "Your rank" usable offline/cache-only).
+    return idsCoveredByOrderedList || mapMostlyReady;
   }
 
   function getUnavailableReason(state) {
-    if (!state || state.prioritySource !== RANK_SOURCE || Number(state.prioritySourceVersion) !== RANK_SOURCE_VERSION) {
+    if (!state) {
+      return "Your rank cache is outdated; syncing latest ranking from API.";
+    }
+    const hasKnownSource = state.prioritySource === RANK_SOURCE && Number(state.prioritySourceVersion) === RANK_SOURCE_VERSION;
+    if (!hasKnownSource && (!Array.isArray(state.orderedAppIds) || state.orderedAppIds.length === 0)) {
       return "Your rank cache is outdated; syncing latest ranking from API.";
     }
     if (state.priorityLastError) {
