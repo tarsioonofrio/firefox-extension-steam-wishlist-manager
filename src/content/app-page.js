@@ -18,6 +18,20 @@ let wishlistApiCacheAt = 0;
 let wishlistApiInFlight = null;
 let lastMembershipEnforceAt = 0;
 let lastGlobalPruneAt = 0;
+const NON_FATAL_LOG_WINDOW_MS = 15000;
+const nonFatalLogAt = new Map();
+
+function reportNonFatal(scope, error) {
+  const key = String(scope || "unknown");
+  const now = Date.now();
+  const last = Number(nonFatalLogAt.get(key) || 0);
+  if (now - last < NON_FATAL_LOG_WINDOW_MS) {
+    return;
+  }
+  nonFatalLogAt.set(key, now);
+  const message = String(error?.message || error || "unknown error");
+  console.debug(`[SWM app-page] ${key}: ${message}`);
+}
 
 function getAppIdFromUrl() {
   const match = window.location.pathname.match(/\/app\/(\d+)/);
@@ -173,7 +187,8 @@ async function isOnSteamWishlist(appId) {
   try {
     const wishlistSet = await fetchWishlistSetFromApi();
     return wishlistSet.has(appId);
-  } catch {
+  } catch (error) {
+    reportNonFatal("wishlist-membership-api", error);
     return isOnSteamWishlistFromUi();
   }
 }
@@ -192,7 +207,8 @@ async function syncCollectionsWithWishlistApi() {
       type: "prune-items-not-in-wishlist",
       appIds: Array.from(wishlistSet)
     });
-  } catch {
+  } catch (error) {
+    reportNonFatal("wishlist-prune-sync", error);
     // Ignore sync failures and keep local state unchanged.
   }
 }
@@ -213,7 +229,7 @@ function syncRemovalIfNotWishlisted(appId, onSteamWishlist) {
       type: "remove-item-everywhere",
       appId
     })
-    .catch(() => {});
+    .catch((error) => reportNonFatal("remove-item-everywhere", error));
 }
 
 async function updateTriggerAvailability(appId) {
@@ -259,8 +275,8 @@ function refreshAvailabilitySoon(appId) {
   wishlistStateRefreshTimer = window.setTimeout(() => {
     wishlistStateRefreshTimer = 0;
     invalidateWishlistApiCache();
-    updateTriggerAvailability(appId).catch(() => {});
-    updateSaveAvailability(appId).catch(() => {});
+    updateTriggerAvailability(appId).catch((error) => reportNonFatal("update-trigger-availability", error));
+    updateSaveAvailability(appId).catch((error) => reportNonFatal("update-save-availability", error));
   }, 60);
 }
 
@@ -663,18 +679,21 @@ async function bootstrap() {
     return;
   }
 
-  await init().catch(() => false);
+  await init().catch((error) => {
+    reportNonFatal("init-first-pass", error);
+    return false;
+  });
 
   const observer = new MutationObserver(() => {
-    init().catch(() => {});
+    init().catch((error) => reportNonFatal("init-mutation-observer", error));
   });
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
 
   // Periodic lightweight re-check for late Steam async UI replacements.
   window.setInterval(() => {
-    init().catch(() => {});
+    init().catch((error) => reportNonFatal("init-periodic", error));
   }, INIT_RETRY_INTERVAL_MS * MAX_INIT_ATTEMPTS);
 }
 
-bootstrap().catch(() => {});
+bootstrap().catch((error) => reportNonFatal("bootstrap", error));
