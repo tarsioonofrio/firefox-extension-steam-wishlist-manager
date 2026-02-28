@@ -866,6 +866,83 @@ async function readSteamObservedSignals() {
   }
 }
 
+async function resolveSteamIdForObservedSignals() {
+  try {
+    const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+    const cached = stored?.[WISHLIST_ADDED_CACHE_KEY] || {};
+    const fromCache = String(cached.steamId || "").trim();
+    if (/^\d{10,20}$/.test(fromCache)) {
+      return fromCache;
+    }
+  } catch {
+    // continue
+  }
+
+  try {
+    const response = await fetch("https://store.steampowered.com/wishlist/", {
+      cache: "no-store",
+      credentials: "include",
+      redirect: "follow"
+    });
+    const redirectedUrl = String(response?.url || "");
+    const profileMatch = redirectedUrl.match(/\/wishlist\/profiles\/(\d{10,20})/);
+    if (profileMatch?.[1]) {
+      return profileMatch[1];
+    }
+  } catch {
+    // continue
+  }
+
+  try {
+    const html = await fetch("https://store.steampowered.com/", {
+      cache: "no-store",
+      credentials: "include"
+    }).then((r) => r.text());
+    const match = html.match(/g_steamID\s*=\s*"(\d{10,20})"/);
+    if (match?.[1]) {
+      return match[1];
+    }
+  } catch {
+    // continue
+  }
+
+  return "";
+}
+
+async function fetchPublicWishlistIdsBySteamId(steamId) {
+  const sid = String(steamId || "").trim();
+  if (!/^\d{10,20}$/.test(sid)) {
+    return [];
+  }
+  const ordered = [];
+  const seen = new Set();
+  for (let pageIndex = 0; pageIndex < 200; pageIndex += 1) {
+    const response = await fetch(
+      `https://store.steampowered.com/wishlist/profiles/${sid}/wishlistdata/?p=${pageIndex}`,
+      {
+        cache: "no-store",
+        credentials: "include"
+      }
+    );
+    if (!response.ok) {
+      break;
+    }
+    const raw = await response.text();
+    const idsInOrder = extractWishlistAppIdsInTextOrder(raw);
+    if (idsInOrder.length === 0) {
+      break;
+    }
+    for (const appId of idsInOrder) {
+      if (seen.has(appId)) {
+        continue;
+      }
+      seen.add(appId);
+      ordered.push(appId);
+    }
+  }
+  return ordered;
+}
+
 function applySteamObservedSignalsToState(state, wishlistIds, followedIds, nowTs) {
   const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
   const wishlistSet = new Set(sanitizeSteamObservedAppIds(wishlistIds));
@@ -2416,6 +2493,17 @@ browser.runtime.onMessage.addListener((message, sender) => {
         return { ok: true, logs };
       }
 
+      case "append-log-entry": {
+        const level = normalizeLogLevel(message.level || "info");
+        const source = trimLogString(message.source || "ui", 80);
+        const text = trimLogString(message.message || "", 400);
+        if (!text) {
+          return { ok: false, error: "Empty log message." };
+        }
+        await appendLogEntry(level, source, text, message.details || null);
+        return { ok: true };
+      }
+
       case "get-native-log-meta": {
         const meta = await getNativeLogMeta();
         return { ok: true, meta };
@@ -2543,6 +2631,35 @@ browser.runtime.onMessage.addListener((message, sender) => {
           await setState(state);
         }
         return result;
+      }
+
+      case "get-steam-observed-signals": {
+        let observed = { wishlistIds: [], followedIds: [] };
+        try {
+          observed = await readSteamObservedSignals();
+        } catch (error) {
+          await logWarn("get-steam-observed-signals", "Failed to read userdata signals.", {
+            error: String(error?.message || error || "userdata read failed")
+          });
+        }
+        const steamId = await resolveSteamIdForObservedSignals();
+        let wishlistIds = Array.isArray(observed?.wishlistIds) ? observed.wishlistIds : [];
+        if (wishlistIds.length === 0 && /^\d{10,20}$/.test(steamId)) {
+          try {
+            wishlistIds = await fetchPublicWishlistIdsBySteamId(steamId);
+          } catch (error) {
+            await logWarn("get-steam-observed-signals", "Public wishlist fallback failed.", {
+              steamId,
+              error: String(error?.message || error || "wishlistdata fallback failed")
+            });
+          }
+        }
+        return {
+          ok: true,
+          steamId: /^\d{10,20}$/.test(steamId) ? steamId : "",
+          wishlistIds,
+          followedIds: Array.isArray(observed?.followedIds) ? observed.followedIds : []
+        };
       }
 
       default:

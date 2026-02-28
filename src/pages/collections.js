@@ -94,6 +94,8 @@ let trackFeedRefreshing = false;
 let trackFeedLastRefreshedAt = 0;
 let trackFeedLastAutoRefreshAttemptAt = 0;
 let trackFeedDismissedEventIds = new Set();
+let lastErrorStatusLogKey = "";
+let lastErrorStatusLoggedAt = 0;
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -234,8 +236,25 @@ function setStatus(text, isError = false, options = {}) {
   }
   const withNetworkHint = Boolean(options?.withNetworkHint || isError);
   const suffix = withNetworkHint ? getNetworkTelemetryHint() : "";
-  el.textContent = `${text}${suffix}`;
+  const composedText = `${text}${suffix}`;
+  el.textContent = composedText;
   el.style.color = isError ? "#ff9696" : "";
+
+  if (isError) {
+    const now = Date.now();
+    const key = composedText.slice(0, 400);
+    const shouldLog = key && (key !== lastErrorStatusLogKey || (now - lastErrorStatusLoggedAt) > 5000);
+    if (shouldLog) {
+      lastErrorStatusLogKey = key;
+      lastErrorStatusLoggedAt = now;
+      browser.runtime.sendMessage({
+        type: "append-log-entry",
+        level: "warn",
+        source: "collections.status",
+        message: key
+      }).catch(() => {});
+    }
+  }
 }
 
 function setTrackFeedProgress(text) {
@@ -1291,27 +1310,141 @@ async function loadWishlistAddedMap() {
       wishlistPriorityMap[cachedOrderedIds[i]] = i;
     }
   }
+  wishlistAddedMap = { ...cachedMap };
+  if (Object.keys(wishlistAddedMap).length === 0 && cachedOrderedIds.length > 0) {
+    const fallbackMap = {};
+    for (const appId of cachedOrderedIds) {
+      fallbackMap[appId] = 0;
+    }
+    wishlistAddedMap = fallbackMap;
+  }
 
   try {
-    const userdata = await fetchSteamJson("https://store.steampowered.com/dynamicstore/userdata/", {
-      credentials: "include",
-      cache: "no-store"
-    });
+    let userdata = null;
+    try {
+      userdata = await fetchSteamJson("https://store.steampowered.com/dynamicstore/userdata/", {
+        credentials: "include",
+        cache: "no-store"
+      });
+    } catch {
+      userdata = null;
+    }
+
     let nowIds = Array.isArray(userdata?.rgWishlist)
       ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
       : [];
+    let observedSteamId = "";
+    if (nowIds.length === 0 || !userdata) {
+      try {
+        const observed = await browser.runtime.sendMessage({ type: "get-steam-observed-signals" });
+        const observedIds = Array.isArray(observed?.wishlistIds)
+          ? observed.wishlistIds.map((id) => String(id || "").trim()).filter(Boolean)
+          : [];
+        if (observedIds.length > 0) {
+          nowIds = observedIds;
+        }
+        if (/^\d{10,20}$/.test(String(observed?.steamId || ""))) {
+          observedSteamId = String(observed.steamId);
+          if (!wishlistSteamId) {
+            wishlistSteamId = observedSteamId;
+          }
+        }
+      } catch {
+        // keep other fallbacks below
+      }
+    }
     wishlistOrderedAppIds = cachedOrderedIds.length > 0 ? [...cachedOrderedIds] : [...nowIds];
     wishlistSortSignature = "";
     wishlistSortOrders = {};
     wishlistSnapshotDay = "";
     wishlistAddedMap = { ...cachedMap };
+    if (Object.keys(wishlistAddedMap).length === 0 && wishlistOrderedAppIds.length > 0) {
+      const fallbackMap = {};
+      for (const appId of wishlistOrderedAppIds) {
+        fallbackMap[appId] = 0;
+      }
+      wishlistAddedMap = fallbackMap;
+    }
 
-    // If we couldn't load current wishlist, keep existing cache to avoid destructive overwrite.
+    // If userdata comes empty, try public wishlist order fallback before giving up.
+    if (nowIds.length === 0) {
+      let fallbackSteamId = String(
+        userdata?.steamid
+        || userdata?.strSteamId
+        || userdata?.str_steamid
+        || userdata?.webapi_token_steamid
+        || ""
+      ).trim();
+      if (!fallbackSteamId) {
+        fallbackSteamId = String(effectiveCached.steamId || "").trim();
+      }
+      if (!fallbackSteamId) {
+        fallbackSteamId = await resolveCurrentSteamId().catch(() => "");
+      }
+      if (fallbackSteamId) {
+        const publicIds = await fetchWishlistIdsInPublicOrder(fallbackSteamId).catch(() => []);
+        if (publicIds.length > 0) {
+          nowIds = publicIds;
+          wishlistOrderedAppIds = [...publicIds];
+          if (!wishlistSteamId) {
+            wishlistSteamId = fallbackSteamId;
+          }
+          if (Object.keys(wishlistAddedMap).length === 0) {
+            const fallbackMap = {};
+            for (const appId of publicIds) {
+              fallbackMap[appId] = 0;
+            }
+            wishlistAddedMap = fallbackMap;
+          }
+        }
+      }
+    }
+
+    // If we still couldn't load current wishlist, keep existing cache to avoid destructive overwrite.
     if (nowIds.length === 0 && Object.keys(cachedMap).length > 0) {
       if (wishlistOrderedAppIds.length === 0) {
         wishlistOrderedAppIds = cachedOrderedIds.length > 0 ? [...cachedOrderedIds] : Object.keys(cachedMap);
       }
       return;
+    }
+    if (nowIds.length === 0 && cachedOrderedIds.length === 0) {
+      try {
+        const syncResult = await browser.runtime.sendMessage({
+          type: "sync-wishlist-order-cache",
+          force: true
+        });
+        if (syncResult?.ok) {
+          const refreshed = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
+          const refreshedCached = refreshed?.[WISHLIST_ADDED_CACHE_KEY] || {};
+          const refreshedOrdered = Array.isArray(refreshedCached.orderedAppIds)
+            ? refreshedCached.orderedAppIds.map((id) => String(id || "").trim()).filter(Boolean)
+            : [];
+          if (refreshedOrdered.length > 0) {
+            wishlistOrderedAppIds = [...refreshedOrdered];
+            wishlistPriorityMap = { ...(refreshedCached.priorityMap || {}) };
+            wishlistAddedMap = refreshedCached.map && typeof refreshedCached.map === "object"
+              ? { ...refreshedCached.map }
+              : {};
+            if (Object.keys(wishlistAddedMap).length === 0) {
+              const fallbackMap = {};
+              for (const appId of refreshedOrdered) {
+                fallbackMap[appId] = 0;
+              }
+              wishlistAddedMap = fallbackMap;
+            }
+            return;
+          }
+        }
+      } catch {
+        // continue with empty fallback below
+      }
+    }
+    if (nowIds.length > 0 && Object.keys(wishlistAddedMap).length === 0) {
+      const fallbackMap = {};
+      for (const appId of nowIds) {
+        fallbackMap[appId] = 0;
+      }
+      wishlistAddedMap = fallbackMap;
     }
 
     let steamId = String(
@@ -1319,6 +1452,7 @@ async function loadWishlistAddedMap() {
       || userdata?.strSteamId
       || userdata?.str_steamid
       || userdata?.webapi_token_steamid
+      || observedSteamId
       || ""
     ).trim();
     if (!steamId) {
@@ -1405,6 +1539,9 @@ async function loadWishlistAddedMap() {
         map: wishlistAddedMap
       }
     });
+    if (wishlistOrderedAppIds.length === 0 && Object.keys(wishlistAddedMap || {}).length === 0) {
+      setStatus("Could not load wishlist IDs from Steam session.", true, { withNetworkHint: true });
+    }
   } catch {
     wishlistAddedMap = { ...cachedMap };
     if (wishlistOrderedAppIds.length === 0) {
@@ -1413,6 +1550,9 @@ async function loadWishlistAddedMap() {
     wishlistSortSignature = "";
     wishlistSortOrders = {};
     wishlistSnapshotDay = "";
+    if (wishlistOrderedAppIds.length === 0 && Object.keys(wishlistAddedMap || {}).length === 0) {
+      setStatus("Could not load wishlist IDs from Steam session.", true, { withNetworkHint: true });
+    }
   }
 }
 
@@ -3427,7 +3567,10 @@ function renderCollectionSelect() {
     state,
     sourceMode,
     activeCollection,
-    wishlistCount: Object.keys(wishlistAddedMap || {}).length,
+    wishlistCount: Math.max(
+      wishlistOrderedAppIds.length,
+      Object.keys(wishlistAddedMap || {}).length
+    ),
     wishlistSelectValue: WISHLIST_SELECT_VALUE,
     inboxSelectValue: INBOX_SELECT_VALUE,
     trackSelectValue: TRACK_SELECT_VALUE,
@@ -4002,6 +4145,9 @@ async function renderCards() {
   }
 
   const sourceIds = getCurrentSourceAppIds();
+  if (sourceMode === "wishlist" && sourceIds.length === 0) {
+    setStatus("Steam wishlist is empty or unavailable for this session.", true, { withNetworkHint: true });
+  }
   const needsMetaForSort = sortMode !== "position";
   const needsMetaForSearch = Boolean(String(searchQuery || "").trim());
   const shouldSkipHeavyMetaHydration = sourceMode === "wishlist";
@@ -4038,7 +4184,7 @@ async function renderCards() {
     setStatus("");
   }
   const rankReadyNow = sourceMode !== "wishlist" || isWishlistRankReady(sourceIds);
-  if (sourceMode === "wishlist" && sortMode === "position" && !rankReadyNow) {
+  if (sourceMode === "wishlist" && sourceIds.length > 0 && sortMode === "position" && !rankReadyNow) {
     setStatus(getWishlistRankUnavailableReason(), true);
   }
 
