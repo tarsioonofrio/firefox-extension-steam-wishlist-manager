@@ -45,6 +45,14 @@ function setLogsOutput(text) {
   el.value = String(text || "");
 }
 
+function setLogsMeta(text) {
+  const el = document.getElementById("logs-meta");
+  if (!el) {
+    return;
+  }
+  el.textContent = String(text || "");
+}
+
 function formatDateTime(timestamp) {
   const n = Number(timestamp || 0);
   if (!Number.isFinite(n) || n <= 0) {
@@ -166,6 +174,26 @@ async function refreshLogsView() {
     return;
   }
   setLogsOutput(logs.map(formatLogLine).join("\n"));
+}
+
+async function refreshNativeLogMeta() {
+  const response = await browser.runtime.sendMessage({ type: "get-native-log-meta" });
+  if (!response?.ok) {
+    throw new Error("Could not load native log path.");
+  }
+  const meta = response.meta || {};
+  if (!meta.available) {
+    setLogsMeta("Native log file unavailable (native bridge not connected).");
+    return;
+  }
+  const pathText = String(meta.path || "-");
+  if (!meta.exists) {
+    setLogsMeta(`Native log file: ${pathText} (not created yet)`);
+    return;
+  }
+  const size = Number(meta.size || 0);
+  const updatedAt = formatDateTime(meta.updatedAt || 0);
+  setLogsMeta(`Native log file: ${pathText} | ${size} bytes | updated ${updatedAt}`);
 }
 
 async function openCollectionsWithRefresh() {
@@ -418,6 +446,7 @@ document.getElementById("save-queue-policy")?.addEventListener("click", async ()
 document.getElementById("refresh-logs")?.addEventListener("click", async () => {
   try {
     await refreshLogsView();
+    await refreshNativeLogMeta();
     setStatus("Logs refreshed.");
   } catch {
     setStatus("Failed to refresh logs.", true);
@@ -432,6 +461,7 @@ document.getElementById("clear-logs")?.addEventListener("click", async () => {
   try {
     await browser.runtime.sendMessage({ type: "clear-logs" });
     setLogsOutput("No warning/error logs yet.");
+    await refreshNativeLogMeta();
     setStatus("Logs cleared.");
   } catch {
     setStatus("Failed to clear logs.", true);
@@ -444,4 +474,7 @@ refreshQueuePolicySummary().catch(() => {
 });
 refreshLogsView().catch(() => {
   setLogsOutput("Could not load logs.");
+});
+refreshNativeLogMeta().catch(() => {
+  setLogsMeta("Could not load native log file metadata.");
 });

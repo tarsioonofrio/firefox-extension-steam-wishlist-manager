@@ -109,6 +109,19 @@ async function appendLogEntry(level, source, message, details = null) {
   } else {
     console.info("[SWM]", entry.source, entry.message, entry.details || "");
   }
+
+  if (entry.level === "warn" || entry.level === "error") {
+    try {
+      if (browser?.runtime?.sendNativeMessage) {
+        await browser.runtime.sendNativeMessage(NATIVE_BRIDGE_HOST_NAME, {
+          type: "log-entry",
+          entry
+        });
+      }
+    } catch {
+      // ignore native bridge failures, keep local storage log
+    }
+  }
 }
 
 async function logWarn(source, message, details = null) {
@@ -133,6 +146,32 @@ async function getLogs(limit = 200) {
 
 async function clearLogs() {
   await browser.storage.local.remove(LOGS_KEY);
+}
+
+async function getNativeLogMeta() {
+  if (!browser?.runtime?.sendNativeMessage) {
+    return {
+      ok: false,
+      available: false,
+      reason: "sendNativeMessage unavailable"
+    };
+  }
+  try {
+    const response = await browser.runtime.sendNativeMessage(NATIVE_BRIDGE_HOST_NAME, {
+      type: "get-log-meta"
+    });
+    return {
+      ok: Boolean(response?.ok),
+      available: true,
+      ...response
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      available: false,
+      reason: String(error?.message || error || "native bridge unavailable")
+    };
+  }
 }
 
 function normalizeBackupSettings(rawSettings) {
@@ -2375,6 +2414,11 @@ browser.runtime.onMessage.addListener((message, sender) => {
       case "get-logs": {
         const logs = await getLogs(message.limit);
         return { ok: true, logs };
+      }
+
+      case "get-native-log-meta": {
+        const meta = await getNativeLogMeta();
+        return { ok: true, meta };
       }
 
       case "clear-logs": {
