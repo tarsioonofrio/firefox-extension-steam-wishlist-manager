@@ -819,17 +819,22 @@ main {
 
 .line-row {
   display: grid;
-  grid-template-columns: auto 84px minmax(360px, 1fr) minmax(90px, 0.8fr) 64px auto auto auto auto minmax(90px, 0.8fr);
+  grid-template-columns: 92px 84px minmax(0, 1fr) 64px 52px 52px 62px 76px 72px 72px;
   gap: 8px;
   align-items: center;
   border: 1px solid #2f445a;
   background: var(--panel-2);
   border-radius: 4px;
   padding: 6px 10px;
+  min-width: 0;
 }
 
 .line-row.line-row-batch {
-  grid-template-columns: 24px auto 84px minmax(360px, 1fr) minmax(90px, 0.8fr) 64px auto auto auto auto minmax(90px, 0.8fr);
+  grid-template-columns: 24px 92px 84px minmax(0, 1fr) 64px 52px 52px 62px 76px 72px 72px;
+}
+
+.line-row > * {
+  min-width: 0;
 }
 
 .line-batch {
@@ -852,7 +857,8 @@ main {
   grid-template-columns: 28px 28px auto;
   gap: 4px;
   align-items: center;
-  width: fit-content;
+  width: 92px;
+  min-width: 92px;
   position: relative;
 }
 
