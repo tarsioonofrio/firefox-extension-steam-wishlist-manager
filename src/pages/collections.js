@@ -5027,13 +5027,12 @@ function bindViewControls() {
       renderViewMenu();
       await render();
     },
-    closeMenusBeforeOpenView: () => {
+    closeMenusBeforeToggleView: () => {
       toggleCollectionMenu(false);
       toggleCollectionSelectMenu(false);
       toggleSortMenu(false);
-    },
-    toggleViewMenu: () => toggleViewMenu(),
-    closeViewMenu: () => toggleViewMenu(false)
+      toggleViewMenu(false);
+    }
   });
 }
 

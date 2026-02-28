@@ -74,9 +74,7 @@
 
   function bindViewControls(options) {
     const onViewChange = options?.onViewChange || (async () => {});
-    const closeMenusBeforeOpenView = options?.closeMenusBeforeOpenView || (() => {});
-    const toggleViewMenu = options?.toggleViewMenu || (() => {});
-    const closeViewMenu = options?.closeViewMenu || (() => {});
+    const closeMenusBeforeToggleView = options?.closeMenusBeforeToggleView || (() => {});
 
     document.getElementById("view-select")?.addEventListener("change", async (event) => {
       await onViewChange(event.target.value);
@@ -84,27 +82,15 @@
 
     document.getElementById("view-menu-btn")?.addEventListener("click", (event) => {
       event.stopPropagation();
-      closeMenusBeforeOpenView();
-      toggleViewMenu();
-    });
-
-    document.getElementById("view-menu-options")?.addEventListener("click", (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
-        return;
-      }
-      const btn = target.closest("button[data-value]");
-      if (!(btn instanceof HTMLButtonElement)) {
-        return;
-      }
-      const value = String(btn.dataset.value || "");
+      closeMenusBeforeToggleView();
       const select = document.getElementById("view-select");
-      if (!select || !value || btn.disabled) {
+      if (!(select instanceof HTMLSelectElement)) {
         return;
       }
+      const current = String(select.value || "card");
+      const value = current === "line" ? "card" : "line";
       select.value = value;
       select.dispatchEvent(new Event("change", { bubbles: true }));
-      closeViewMenu();
     });
   }
 

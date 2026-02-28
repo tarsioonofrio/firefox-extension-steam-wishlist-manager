@@ -22,7 +22,7 @@
     const selectBtn = document.getElementById("collection-select-btn");
     const selectMenu = document.getElementById("collection-select-options");
     const deleteSelect = document.getElementById("delete-collection-select");
-    if (!select || !selectBtn || !selectMenu || !state) {
+    if (!select || !state) {
       return { activeCollection };
     }
 
@@ -79,20 +79,24 @@
     }
 
     select.value = sourceMode === "wishlist" ? wishlistSelectValue : nextActiveCollection;
-    const selectedOption = select.options[select.selectedIndex];
-    selectBtn.textContent = `Collection: ${selectedOption?.textContent || "Select"}`;
+    if (selectBtn) {
+      const selectedOption = select.options[select.selectedIndex];
+      selectBtn.textContent = `Collection: ${selectedOption?.textContent || "Select"}`;
+    }
 
-    selectMenu.innerHTML = "";
-    for (const option of Array.from(select.options)) {
-      const itemBtn = document.createElement("button");
-      itemBtn.type = "button";
-      itemBtn.className = "dropdown-option";
-      if (option.value === select.value) {
-        itemBtn.classList.add("active");
+    if (selectMenu) {
+      selectMenu.innerHTML = "";
+      for (const option of Array.from(select.options)) {
+        const itemBtn = document.createElement("button");
+        itemBtn.type = "button";
+        itemBtn.className = "dropdown-option";
+        if (option.value === select.value) {
+          itemBtn.classList.add("active");
+        }
+        itemBtn.textContent = option.textContent || option.value;
+        itemBtn.dataset.value = option.value;
+        selectMenu.appendChild(itemBtn);
       }
-      itemBtn.textContent = option.textContent || option.value;
-      itemBtn.dataset.value = option.value;
-      selectMenu.appendChild(itemBtn);
     }
 
     if (deleteSelect) {
@@ -115,24 +119,28 @@
     const select = document.getElementById("sort-select");
     const btn = document.getElementById("sort-menu-btn");
     const menu = document.getElementById("sort-menu-options");
-    if (!select || !btn || !menu) {
+    if (!select) {
       return;
     }
 
-    const selectedOption = select.options[select.selectedIndex];
-    btn.textContent = `Sort by: ${selectedOption?.textContent || fallbackLabel}`;
+    if (btn) {
+      const selectedOption = select.options[select.selectedIndex];
+      btn.textContent = `Sort by: ${selectedOption?.textContent || fallbackLabel}`;
+    }
 
-    menu.innerHTML = "";
-    for (const option of Array.from(select.options)) {
-      const itemBtn = document.createElement("button");
-      itemBtn.type = "button";
-      itemBtn.className = "dropdown-option";
-      if (option.value === select.value) {
-        itemBtn.classList.add("active");
+    if (menu) {
+      menu.innerHTML = "";
+      for (const option of Array.from(select.options)) {
+        const itemBtn = document.createElement("button");
+        itemBtn.type = "button";
+        itemBtn.className = "dropdown-option";
+        if (option.value === select.value) {
+          itemBtn.classList.add("active");
+        }
+        itemBtn.textContent = option.textContent || option.value;
+        itemBtn.dataset.value = option.value;
+        menu.appendChild(itemBtn);
       }
-      itemBtn.textContent = option.textContent || option.value;
-      itemBtn.dataset.value = option.value;
-      menu.appendChild(itemBtn);
     }
   }
 
