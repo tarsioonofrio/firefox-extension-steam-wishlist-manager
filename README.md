@@ -88,6 +88,27 @@ Notes:
 Manual load alternative:
 - `about:debugging` -> **This Firefox** -> **Load Temporary Add-on...** -> `manifest.json`
 
+### Dev Profile Workflow (`steam-dev`)
+
+Use this flow when you need the extension in the dedicated Steam-logged developer profile.
+
+1. Confirm profile name/path:
+   - `cat ~/.mozilla/firefox/profiles.ini`
+   - Expected profile entry:
+     - `Name=steam-dev`
+     - `Path=39ophcv1.steam-dev` (path can vary per machine)
+2. Open Firefox with that profile as a separate instance:
+   - `firefox --new-instance -P steam-dev --no-remote about:blank`
+3. Load this extension as a temporary add-on into that same profile:
+   - `npx web-ext run --source-dir . --target=firefox-desktop --firefox-profile ~/.mozilla/firefox/39ophcv1.steam-dev --keep-profile-changes`
+4. Verify:
+   - Open `about:debugging#/runtime/this-firefox`
+   - Check `firefox-extension-steam-wishlist-manager` is listed
+
+Notes:
+- Keep `web-ext run` process alive while testing (it handles reload on source changes).
+- If your profile directory is different, replace `39ophcv1.steam-dev` with your actual path from `profiles.ini`.
+
 ## Collections Page Architecture
 
 `src/pages/collections.js` is primarily an orchestrator. Core logic is split into focused modules:
