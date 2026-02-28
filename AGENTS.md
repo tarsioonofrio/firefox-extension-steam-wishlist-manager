@@ -122,7 +122,7 @@ Use it for structure and resilience patterns when there is no strong reason to d
 
 ## Firefox MCP Runbook
 For Firefox DevTools MCP setup/troubleshooting, use:
-- `docs/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
+- `docs/ops/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
 
 Automation scripts:
 - `scripts/mcp/setup-firefox-devtools-mcp.sh`

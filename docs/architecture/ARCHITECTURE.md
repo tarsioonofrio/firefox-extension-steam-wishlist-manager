@@ -48,6 +48,6 @@ UI wiring modules:
 - Native Messaging host: `mcp/native-bridge-host.mjs`
 - MCP server: `mcp/server.mjs`
 - Primary operations docs:
-  - `docs/DEV_WORKFLOWS.md`
-  - `docs/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
-  - `docs/OPERATIONS.md`
+  - `docs/dev/DEV_WORKFLOWS.md`
+  - `docs/ops/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
+  - `docs/ops/OPERATIONS.md`

@@ -44,6 +44,6 @@ Optional:
 - Consolidated health report: `npm run mcp:doctor`
 
 For full operational details and troubleshooting, see:
-- `docs/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
-- `docs/ARCHITECTURE.md`
-- `docs/OPERATIONS.md`
+- `docs/ops/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
+- `docs/architecture/ARCHITECTURE.md`
+- `docs/ops/OPERATIONS.md`

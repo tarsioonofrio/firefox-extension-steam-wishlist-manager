@@ -45,7 +45,7 @@ If headful window fails to open:
 - `npm run mcp:env-check`
 
 Canonical MCP troubleshooting:
-- `docs/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
+- `docs/ops/FIREFOX_DEVTOOLS_MCP_RUNBOOK.md`
 
 ## Steam Endpoint Instability
 
