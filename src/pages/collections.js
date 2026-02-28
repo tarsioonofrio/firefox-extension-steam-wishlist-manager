@@ -1,4 +1,8 @@
 const PAGE_SIZE = 30;
+const SEARCH_INPUT_DEBOUNCE_MS = 180;
+const FILTER_TEXT_INPUT_DEBOUNCE_MS = 180;
+const HEAVY_FILTER_VISIBLE_LIMIT = 120;
+const HEAVY_FILTER_MIN_QUERY_CHARS = 2;
 const META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const META_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
@@ -157,6 +161,8 @@ let batchSelectedIds = new Set();
 let dynamicCollectionSizes = {};
 let keyboardFocusIndex = 0;
 let lastSteamWriteDiagnostics = null;
+let searchInputDebounceTimer = null;
+const filterTextInputDebounceTimers = new Map();
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -2010,7 +2016,15 @@ async function setItemIntent(appId, intentPatch = {}) {
     setStatus(`Local state saved, but Steam write failed: ${formatted}`, true, { withNetworkHint: true });
   }
   await refreshState();
-  await render();
+  await renderStateDependentUi();
+}
+
+async function renderStateDependentUi() {
+  renderCollectionSelect();
+  renderDynamicCollectionFormHint();
+  renderBatchMenuState();
+  renderRadarStats();
+  await renderCards();
 }
 
 function clampFocusIndex(index, length) {
@@ -2989,7 +3003,7 @@ async function ensureExtraFilterCounts() {
   setStatus("");
 }
 
-function renderCheckboxOptions(containerId, counts, selectedSet, query = "") {
+function renderCheckboxOptions(containerId, counts, selectedSet, query = "", options = {}) {
   const optionsEl = document.getElementById(containerId);
   if (!optionsEl) {
     return;
@@ -2997,6 +3011,9 @@ function renderCheckboxOptions(containerId, counts, selectedSet, query = "") {
   optionsEl.innerHTML = "";
 
   const normalizedQuery = String(query || "").toLowerCase();
+  const maxVisibleWhenUnfiltered = Math.max(0, Number(options?.maxVisibleWhenUnfiltered || 0));
+  const minQueryCharsForFullResults = Math.max(0, Number(options?.minQueryCharsForFullResults || 0));
+  const label = String(options?.label || "items");
   const sourceCounts = Array.isArray(counts) ? counts : [];
   const selectedNames = selectedSet instanceof Set ? Array.from(selectedSet) : [];
   const sourceByName = new Map(sourceCounts.map((item) => [String(item?.name || ""), item]));
@@ -3014,7 +3031,14 @@ function renderCheckboxOptions(containerId, counts, selectedSet, query = "") {
   const remaining = normalizedQuery
     ? sourceCounts.filter((item) => String(item.name || "").toLowerCase().includes(normalizedQuery))
     : sourceCounts;
-  const remainingItems = remaining.filter((item) => !selectedSet.has(item.name));
+  let remainingItems = remaining.filter((item) => !selectedSet.has(item.name));
+  const shouldLimitWithoutQuery = maxVisibleWhenUnfiltered > 0
+    && normalizedQuery.length < minQueryCharsForFullResults
+    && remainingItems.length > maxVisibleWhenUnfiltered;
+  const hiddenItemsCount = shouldLimitWithoutQuery ? Math.max(0, remainingItems.length - maxVisibleWhenUnfiltered) : 0;
+  if (shouldLimitWithoutQuery) {
+    remainingItems = remainingItems.slice(0, maxVisibleWhenUnfiltered);
+  }
   const filteredCounts = [...selectedItems, ...remainingItems];
 
   for (const item of filteredCounts) {
@@ -3030,7 +3054,7 @@ function renderCheckboxOptions(containerId, counts, selectedSet, query = "") {
       } else {
         selectedSet.delete(item.name);
       }
-      renderCheckboxOptions(containerId, counts, selectedSet, query);
+      renderCheckboxOptions(containerId, counts, selectedSet, query, options);
       updateFilterSummaryCount(containerId, selectedSet.size);
       page = 1;
       await renderCards();
@@ -3049,6 +3073,17 @@ function renderCheckboxOptions(containerId, counts, selectedSet, query = "") {
     row.appendChild(name);
     row.appendChild(count);
     optionsEl.appendChild(row);
+  }
+
+  if (hiddenItemsCount > 0) {
+    const hint = document.createElement("p");
+    hint.className = "filter-options-hint";
+    if (minQueryCharsForFullResults > 0) {
+      hint.textContent = `Showing top ${maxVisibleWhenUnfiltered} ${label}. Type ${minQueryCharsForFullResults}+ chars to search all (${hiddenItemsCount} hidden).`;
+    } else {
+      hint.textContent = `Showing top ${maxVisibleWhenUnfiltered} ${label} (${hiddenItemsCount} hidden).`;
+    }
+    optionsEl.appendChild(hint);
   }
 }
 
@@ -3604,9 +3639,17 @@ function renderExtraFilterOptions() {
   updateFilterSummaryCount("subtitle-languages-options", selectedSubtitleLanguages.size);
   renderCheckboxOptions("technologies-options", technologyCounts, selectedTechnologies, technologySearchQuery);
   updateFilterSummaryCount("technologies-options", selectedTechnologies.size);
-  renderCheckboxOptions("developers-options", developerCounts, selectedDevelopers, developerSearchQuery);
+  renderCheckboxOptions("developers-options", developerCounts, selectedDevelopers, developerSearchQuery, {
+    maxVisibleWhenUnfiltered: HEAVY_FILTER_VISIBLE_LIMIT,
+    minQueryCharsForFullResults: HEAVY_FILTER_MIN_QUERY_CHARS,
+    label: "developers"
+  });
   updateFilterSummaryCount("developers-options", selectedDevelopers.size);
-  renderCheckboxOptions("publishers-options", publisherCounts, selectedPublishers, publisherSearchQuery);
+  renderCheckboxOptions("publishers-options", publisherCounts, selectedPublishers, publisherSearchQuery, {
+    maxVisibleWhenUnfiltered: HEAVY_FILTER_VISIBLE_LIMIT,
+    minQueryCharsForFullResults: HEAVY_FILTER_MIN_QUERY_CHARS,
+    label: "publishers"
+  });
   updateFilterSummaryCount("publishers-options", selectedPublishers.size);
 }
 
@@ -4376,7 +4419,7 @@ async function renderCards() {
           await refreshState();
           quickPopulateFiltersFromCache();
           refreshFilterOptionsInBackground();
-          await render();
+          await renderStateDependentUi();
           setStatus(`Collection ${checked ? "added" : "removed"}: ${collectionName}`);
         },
         maxPositionDigits,
@@ -4469,7 +4512,7 @@ async function renderCards() {
         await refreshState();
         quickPopulateFiltersFromCache();
         refreshFilterOptionsInBackground();
-        await render();
+        await renderStateDependentUi();
         setStatus(`Collection ${checked ? "added" : "removed"}: ${collectionName}`);
       },
       batchMode,
@@ -4498,7 +4541,7 @@ async function renderCards() {
         await refreshState();
         quickPopulateFiltersFromCache();
         refreshFilterOptionsInBackground();
-        await render();
+        await renderStateDependentUi();
       },
       onSetIntent: async (id, intentPatch) => {
         await setItemIntent(id, intentPatch);
@@ -5112,7 +5155,12 @@ function bindFilterControls() {
     onSearchInput: async (value) => {
       searchQuery = value;
       page = 1;
-      await render();
+      if (searchInputDebounceTimer) {
+        clearTimeout(searchInputDebounceTimer);
+      }
+      searchInputDebounceTimer = setTimeout(() => {
+        renderStateDependentUi().catch(() => setStatus("Failed to update search results.", true));
+      }, SEARCH_INPUT_DEBOUNCE_MS);
     },
     onPrevPage: async () => {
       page = Math.max(1, page - 1);
@@ -5140,7 +5188,15 @@ function bindFilterControls() {
       if (inputId === "technologies-search-input") technologySearchQuery = value;
       if (inputId === "developers-search-input") developerSearchQuery = value;
       if (inputId === "publishers-search-input") publisherSearchQuery = value;
-      renderExtraFilterOptions();
+      const existingTimer = filterTextInputDebounceTimers.get(inputId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+      const timer = setTimeout(() => {
+        filterTextInputDebounceTimers.delete(inputId);
+        renderExtraFilterOptions();
+      }, FILTER_TEXT_INPUT_DEBOUNCE_MS);
+      filterTextInputDebounceTimers.set(inputId, timer);
     },
     onRefreshPage: () => {
       if (activeCollection === TRACK_FEED_SELECT_VALUE) {
