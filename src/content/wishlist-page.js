@@ -1,6 +1,20 @@
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 let domOrderSyncInFlight = false;
+const NON_FATAL_LOG_WINDOW_MS = 15000;
+const nonFatalLogAt = new Map();
+
+function reportNonFatal(scope, error) {
+  const key = String(scope || "unknown");
+  const now = Date.now();
+  const last = Number(nonFatalLogAt.get(key) || 0);
+  if (now - last < NON_FATAL_LOG_WINDOW_MS) {
+    return;
+  }
+  nonFatalLogAt.set(key, now);
+  const message = String(error?.message || error || "unknown error");
+  console.debug(`[SWM wishlist-page] ${key}: ${message}`);
+}
 
 function withTimeout(promise, timeoutMs, label = "timeout") {
   return new Promise((resolve, reject) => {
@@ -770,7 +784,7 @@ if (window.location.pathname.startsWith("/wishlist")) {
     browser.runtime.sendMessage({
       type: "set-wishlist-steamid",
       steamId: profileMatch[1]
-    }).catch(() => {});
+    }).catch((error) => reportNonFatal("set-wishlist-steamid", error));
   }
-  syncWishlistOrderCache();
+  syncWishlistOrderCache().catch((error) => reportNonFatal("sync-wishlist-order-cache", error));
 }
