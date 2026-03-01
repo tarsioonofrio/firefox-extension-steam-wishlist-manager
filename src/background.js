@@ -50,6 +50,8 @@ const MIN_QUEUE_DAYS = 1;
 const MAX_QUEUE_DAYS = 365;
 const QUEUE_AUTOMATION_PERIOD_MINUTES = 360;
 const MAX_LOG_ENTRIES = 400;
+const DEV_RUNTIME_BOOT_ID = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+const DEV_RUNTIME_BOOT_AT = new Date().toISOString();
 let backgroundWishlistDomSyncInFlight = false;
 let nativeBridgePublishTimer = null;
 let steamSessionIdCache = "";
@@ -2903,6 +2905,15 @@ browser.runtime.onMessage.addListener((message, sender) => {
       switch (message.type) {
       case "get-state": {
         return state;
+      }
+
+      case "get-dev-runtime-info": {
+        return {
+          ok: true,
+          bootId: DEV_RUNTIME_BOOT_ID,
+          bootAt: DEV_RUNTIME_BOOT_AT,
+          manifestVersion: String(browser.runtime.getManifest()?.version || "")
+        };
       }
 
       case "set-active-collection": {

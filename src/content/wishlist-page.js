@@ -8,6 +8,7 @@ let domOrderSyncInFlight = false;
 let wishlistFollowUiScheduled = false;
 let wishlistFollowUiObserver = null;
 let wishlistFollowUiWindowHooksAdded = false;
+let wishlistDevRuntimeInfoLogged = false;
 let wishlistStateCache = { items: {} };
 let wishlistStateLoadedAt = 0;
 let wishlistStateLoadPromise = null;
@@ -1335,10 +1336,26 @@ function scheduleWishlistFollowUiDecorate() {
   }, 120);
 }
 
+function logWishlistDevRuntimeInfoOnce() {
+  if (wishlistDevRuntimeInfoLogged) {
+    return;
+  }
+  wishlistDevRuntimeInfoLogged = true;
+  browser.runtime.sendMessage({ type: "get-dev-runtime-info" })
+    .then((info) => {
+      const bootId = String(info?.bootId || "unknown");
+      const bootAt = String(info?.bootAt || "unknown");
+      const version = String(info?.manifestVersion || "unknown");
+      console.info(`[SWM][wishlist] runtime boot=${bootId} at=${bootAt} version=${version}`);
+    })
+    .catch((error) => reportNonFatal("wishlist-follow.runtime-info", error));
+}
+
 function initWishlistFollowUi() {
   if (!window.location.pathname.startsWith("/wishlist")) {
     return;
   }
+  logWishlistDevRuntimeInfoOnce();
   scheduleWishlistFollowUiDecorate();
   if (!wishlistFollowUiWindowHooksAdded) {
     window.addEventListener("resize", scheduleWishlistFollowUiDecorate, { passive: true });

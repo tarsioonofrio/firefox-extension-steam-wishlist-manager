@@ -16,6 +16,7 @@ Runs `web-ext` against your default Firefox profile/session.
 ### Steam developer profile (`steam-dev`)
 
 - `npm run dev:steam`
+- `npm run dev:steam:fresh` (force clean restart)
 
 What it does:
 1. Resolves the profile path from `~/.mozilla/firefox/profiles.ini`.
@@ -27,6 +28,9 @@ Optional:
   - `SWM_FIREFOX_PROFILE_NAME=<profile-name> npm run dev:steam`
 - Skip launching a new Firefox window:
   - `npm run dev:steam:no-launch`
+- Force clean session if stale reload is suspected:
+  - `npm run dev:steam:fresh`
+  - Stops old `web-ext` + `steam-dev` Firefox processes before relaunching.
 
 ## Firefox DevTools MCP
 

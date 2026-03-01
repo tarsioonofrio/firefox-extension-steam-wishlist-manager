@@ -70,6 +70,7 @@ Notes:
 - Check local environment: `npm run check:env`
 - Dev (auto-reload): `npm run dev`
 - Dev (steam profile auto-detected): `npm run dev:steam`
+- Dev (steam profile fresh restart): `npm run dev:steam:fresh`
 - Build package: `npm run build`
 - Start MCP server (local JSON DB): `npm run mcp:server`
 - MCP direct CLI (debug/easier local use):
@@ -110,8 +111,14 @@ Use this flow when you need the extension in the dedicated Steam-logged develope
 Notes:
 - Keep `web-ext run` process alive while testing (it handles reload on source changes).
 - Script used by `npm run dev:steam`: `scripts/dev/run-web-ext-steam-dev.sh`.
+- If you suspect stale extension code, use:
+  - `npm run dev:steam:fresh`
+  - This command stops previous `web-ext` and Firefox `steam-dev` processes, then starts a clean session.
 - Override profile name when needed:
   - `SWM_FIREFOX_PROFILE_NAME=another-profile npm run dev:steam`
+- To verify reload on wishlist pages, open browser console and check:
+  - `[SWM][wishlist] runtime boot=<id> at=<timestamp> version=<manifestVersion>`
+  - `boot=<id>` must change after a full fresh restart.
 
 ## Collections Page Architecture
 
