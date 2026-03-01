@@ -1,9 +1,11 @@
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
+const WISHLIST_META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const FOLLOW_UI_STYLE_ID = "swm-wishlist-follow-ui-style";
 const WISHLIST_ROW_SELECTOR = ".wishlist_row, [id^='game_'], [data-app-id], .c-Pw-ER6JnA-.Panel";
 const APP_LINK_SELECTOR = "a[href*='/app/']";
 const WISHLIST_STATE_FILTER_KEY = "swmWishlistStateFilter";
+const WISHLIST_TAG_SHOW_STEP = 12;
 let domOrderSyncInFlight = false;
 let wishlistFollowUiScheduled = false;
 let wishlistFollowUiObserver = null;
@@ -12,9 +14,14 @@ let wishlistDevRuntimeInfoLogged = false;
 let wishlistStateCache = { items: {} };
 let wishlistStateLoadedAt = 0;
 let wishlistStateLoadPromise = null;
+let wishlistMetaCache = {};
+let wishlistMetaLoadedAt = 0;
+let wishlistMetaLoadPromise = null;
 let wishlistCurrentStateFilter = "all";
+let wishlistSelectedTags = new Set();
+let wishlistTagSearchQuery = "";
+let wishlistTagShowLimit = WISHLIST_TAG_SHOW_STEP;
 let wishlistAdvancedFilters = {
-  tagsQuery: "",
   ratingMin: 0,
   ratingMax: 100,
   reviewsMin: 0,
@@ -659,6 +666,31 @@ function updateWishlistStateItemCache(appId, nextItem) {
   wishlistStateLoadedAt = Date.now();
 }
 
+async function loadWishlistMetaCache(force = false) {
+  const now = Date.now();
+  if (!force && wishlistMetaLoadPromise) {
+    return wishlistMetaLoadPromise;
+  }
+  if (!force && (now - wishlistMetaLoadedAt) < 30000) {
+    return wishlistMetaCache;
+  }
+  wishlistMetaLoadPromise = browser.storage.local.get(WISHLIST_META_CACHE_KEY)
+    .then((stored) => {
+      const cache = stored?.[WISHLIST_META_CACHE_KEY];
+      wishlistMetaCache = cache && typeof cache === "object" ? cache : {};
+      wishlistMetaLoadedAt = Date.now();
+      return wishlistMetaCache;
+    })
+    .catch((error) => {
+      reportNonFatal("wishlist-follow.load-meta-cache", error);
+      return wishlistMetaCache;
+    })
+    .finally(() => {
+      wishlistMetaLoadPromise = null;
+    });
+  return wishlistMetaLoadPromise;
+}
+
 function ensureWishlistFollowUiStyle() {
   if (document.getElementById(FOLLOW_UI_STYLE_ID)) {
     return;
@@ -767,6 +799,48 @@ function ensureWishlistFollowUiStyle() {
     }
     .swm-right-filters .swm-field {
       margin: 0 0 8px;
+    }
+    .swm-right-filters .tag-options {
+      max-height: 156px;
+      overflow: auto;
+      padding-right: 2px;
+      margin-top: 6px;
+    }
+    .swm-right-filters .tag-option {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      margin: 0 0 4px;
+      color: #c7d5e0;
+      font-size: 11px;
+    }
+    .swm-right-filters .tag-option input[type="checkbox"] {
+      width: 12px;
+      height: 12px;
+      margin: 0;
+      padding: 0;
+    }
+    .swm-right-filters .tag-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .swm-right-filters .tag-count {
+      color: #8fa8bd;
+      min-width: 1.4em;
+      text-align: right;
+    }
+    .swm-right-filters .small-btn {
+      width: 100%;
+      height: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 2px;
+      background: #2b3b4a;
+      color: #c7d5e0;
+      font-size: 11px;
+      cursor: pointer;
+      margin-top: 4px;
     }
     .swm-right-filters label {
       display: block;
@@ -974,6 +1048,43 @@ function parsePriceLoose(text) {
   return Number.isFinite(n) ? n : null;
 }
 
+function getRowTagNames(row) {
+  if (!(row instanceof HTMLElement)) {
+    return [];
+  }
+  const appId = getAppIdFromWishlistRow(row);
+  if (appId) {
+    const metaTags = Array.isArray(wishlistMetaCache?.[appId]?.tags)
+      ? wishlistMetaCache[appId].tags
+      : [];
+    if (metaTags.length > 0) {
+      return Array.from(
+        new Set(
+          metaTags
+            .map((v) => String(v || "").replace(/\s+/g, " ").trim())
+            .filter((v) => v && v.length <= 40)
+        )
+      ).slice(0, 20);
+    }
+  }
+  const names = [];
+  const seen = new Set();
+  const nodes = row.querySelectorAll(".app_tag, .match_tag, .tag, a[href*='/tags/'], [class*='app_tag']");
+  for (const node of nodes) {
+    const value = String(node?.textContent || "").replace(/\s+/g, " ").trim();
+    if (!value || value.length > 40 || value.length < 2) {
+      continue;
+    }
+    const key = value.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    names.push(value);
+  }
+  return names;
+}
+
 function extractRowMetrics(row, stateItems) {
   const appId = getAppIdFromWishlistRow(row);
   const item = appId ? (stateItems?.[appId] || {}) : {};
@@ -983,6 +1094,8 @@ function extractRowMetrics(row, stateItems) {
   const text = String(row?.textContent || "");
   const lower = text.toLowerCase();
   const title = getItemTitleFromWishlistRow(row).toLowerCase();
+  const tags = getRowTagNames(row);
+  const tagSetLower = new Set(tags.map((tag) => String(tag || "").toLowerCase()));
 
   const ratingMatch = text.match(/(\d{1,3})\s?%/);
   const rating = ratingMatch ? Math.max(0, Math.min(100, parseNumberLoose(ratingMatch[1], -1))) : -1;
@@ -1019,6 +1132,8 @@ function extractRowMetrics(row, stateItems) {
     bucket,
     title,
     lower,
+    tags,
+    tagSetLower,
     rating,
     reviews,
     discount,
@@ -1028,9 +1143,17 @@ function extractRowMetrics(row, stateItems) {
 
 function passesAdvancedFilters(metrics) {
   const f = wishlistAdvancedFilters || {};
-  const tagsQuery = String(f.tagsQuery || "").trim().toLowerCase();
-  if (tagsQuery && !(metrics.title.includes(tagsQuery) || metrics.lower.includes(tagsQuery))) {
-    return false;
+  if (wishlistSelectedTags.size > 0) {
+    let matched = false;
+    for (const tag of wishlistSelectedTags) {
+      if (metrics.tagSetLower?.has?.(tag)) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      return false;
+    }
   }
   if (metrics.rating >= 0) {
     if (metrics.rating < Number(f.ratingMin || 0) || metrics.rating > Number(f.ratingMax || 100)) {
@@ -1053,6 +1176,89 @@ function passesAdvancedFilters(metrics) {
     }
   }
   return true;
+}
+
+function buildWishlistTagCounts(rows) {
+  const counts = new Map();
+  for (const row of rows || []) {
+    for (const tag of getRowTagNames(row)) {
+      const key = String(tag || "").toLowerCase();
+      if (!key) {
+        continue;
+      }
+      const entry = counts.get(key) || { name: tag, count: 0 };
+      entry.count += 1;
+      counts.set(key, entry);
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) => {
+    const diff = Number(b.count || 0) - Number(a.count || 0);
+    if (diff !== 0) {
+      return diff;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+}
+
+function renderWishlistTagOptions(panel, stateItems) {
+  const optionsEl = panel.querySelector("#swm-tags-options");
+  const showMoreBtn = panel.querySelector("#swm-tags-show-more");
+  const searchEl = panel.querySelector("#swm-tags-search");
+  if (!optionsEl || !showMoreBtn || !searchEl) {
+    return;
+  }
+  if (searchEl.value !== wishlistTagSearchQuery) {
+    searchEl.value = wishlistTagSearchQuery;
+  }
+
+  const tagCounts = buildWishlistTagCounts(getWishlistRows());
+  const query = String(wishlistTagSearchQuery || "").trim().toLowerCase();
+  const selectedEntries = [];
+  const selectedKeys = new Set();
+  for (const key of wishlistSelectedTags) {
+    const found = tagCounts.find((item) => String(item.name || "").toLowerCase() === key);
+    selectedEntries.push(found || { name: key, count: 0 });
+    selectedKeys.add(key);
+  }
+  const filtered = tagCounts.filter((item) => !query || String(item.name || "").toLowerCase().includes(query));
+  const remaining = filtered.filter((item) => !selectedKeys.has(String(item.name || "").toLowerCase()));
+  const ordered = [...selectedEntries, ...remaining];
+  const visible = ordered.slice(0, wishlistTagShowLimit);
+
+  optionsEl.innerHTML = "";
+  for (const item of visible) {
+    const row = document.createElement("label");
+    row.className = "tag-option";
+
+    const key = String(item.name || "").toLowerCase();
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = wishlistSelectedTags.has(key);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        wishlistSelectedTags.add(key);
+      } else {
+        wishlistSelectedTags.delete(key);
+      }
+      renderWishlistTagOptions(panel, stateItems);
+      applyWishlistFiltersToRows(getWishlistRows(), stateItems);
+    });
+
+    const name = document.createElement("span");
+    name.className = "tag-name";
+    name.textContent = String(item.name || "");
+
+    const count = document.createElement("span");
+    count.className = "tag-count";
+    count.textContent = Number(item.count || 0) > 0 ? String(item.count) : "";
+
+    row.appendChild(checkbox);
+    row.appendChild(name);
+    row.appendChild(count);
+    optionsEl.appendChild(row);
+  }
+
+  showMoreBtn.style.display = ordered.length > wishlistTagShowLimit ? "" : "none";
 }
 
 function applyWishlistFiltersToRows(rows, stateItems) {
@@ -1085,8 +1291,10 @@ function ensureWishlistRightFiltersPanel(stateItems) {
     panel.innerHTML = `
       <h4>Filters</h4>
       <div class="swm-field">
-        <label for="swm-tags-filter">Tags</label>
-        <input id="swm-tags-filter" type="text" placeholder="tag text">
+        <label for="swm-tags-search">Tags</label>
+        <input id="swm-tags-search" type="search" placeholder="Search tags...">
+        <div id="swm-tags-options" class="tag-options"></div>
+        <button id="swm-tags-show-more" type="button" class="small-btn">Show more</button>
       </div>
       <div class="swm-field">
         <label>Rating %</label>
@@ -1145,7 +1353,23 @@ function ensureWishlistRightFiltersPanel(stateItems) {
     });
   };
 
-  bind("swm-tags-filter", "tagsQuery", (v) => String(v || "").slice(0, 60));
+  const tagSearchInput = panel.querySelector("#swm-tags-search");
+  if (tagSearchInput && !tagSearchInput.dataset.swmBound) {
+    tagSearchInput.dataset.swmBound = "1";
+    tagSearchInput.addEventListener("input", () => {
+      wishlistTagSearchQuery = String(tagSearchInput.value || "").slice(0, 60);
+      wishlistTagShowLimit = WISHLIST_TAG_SHOW_STEP;
+      renderWishlistTagOptions(panel, stateItems);
+    });
+  }
+  const tagShowMoreBtn = panel.querySelector("#swm-tags-show-more");
+  if (tagShowMoreBtn && !tagShowMoreBtn.dataset.swmBound) {
+    tagShowMoreBtn.dataset.swmBound = "1";
+    tagShowMoreBtn.addEventListener("click", () => {
+      wishlistTagShowLimit += WISHLIST_TAG_SHOW_STEP;
+      renderWishlistTagOptions(panel, stateItems);
+    });
+  }
   bind("swm-rating-min", "ratingMin", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 0))));
   bind("swm-rating-max", "ratingMax", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 100))));
   bind("swm-reviews-min", "reviewsMin", (v) => Math.max(0, parseNumberLoose(v, 0)));
@@ -1161,6 +1385,7 @@ function ensureWishlistRightFiltersPanel(stateItems) {
   });
   bind("swm-discount-min", "discountMin", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 0))));
   bind("swm-discount-max", "discountMax", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 100))));
+  renderWishlistTagOptions(panel, stateItems);
 }
 
 function setWishlistActionButtonsVisualState(container, intentState) {
@@ -1315,6 +1540,7 @@ async function decorateWishlistFollowUi() {
     }
   }
   const state = await loadWishlistState(false);
+  await loadWishlistMetaCache(false);
   const stateItems = state?.items && typeof state.items === "object" ? state.items : {};
   const rows = getWishlistRows();
   for (const row of rows) {
