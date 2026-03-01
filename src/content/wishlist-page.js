@@ -1309,6 +1309,29 @@ function applyWishlistFiltersToRows(rows, stateItems) {
   }
 }
 
+function hasActiveWishlistFilters() {
+  if (String(wishlistCurrentStateFilter || "all") !== "all") {
+    return true;
+  }
+  if (wishlistSelectedTags.size > 0) {
+    return true;
+  }
+  const f = wishlistAdvancedFilters || {};
+  if (Number(f.ratingMin || 0) > 0 || Number(f.ratingMax || 100) < 100) {
+    return true;
+  }
+  if (Number(f.reviewsMin || 0) > 0 || Number(f.reviewsMax || Number.MAX_SAFE_INTEGER) < Number.MAX_SAFE_INTEGER) {
+    return true;
+  }
+  if (Number(f.priceMin || 0) > 0 || Number(f.priceMax || Number.MAX_SAFE_INTEGER) < Number.MAX_SAFE_INTEGER) {
+    return true;
+  }
+  if (Number(f.discountMin || 0) > 0 || Number(f.discountMax || 100) < 100) {
+    return true;
+  }
+  return false;
+}
+
 function ensureWishlistRightFiltersPanel(stateItems) {
   if (WISHLIST_NATIVE_BROWSER_SIDEBAR_FILTERS) {
     return;
@@ -1863,6 +1886,9 @@ function clickWishlistLoadMoreIfVisible() {
 async function syncWishlistOrderFromDom(steamIdHint = "") {
   if (!window.location.pathname.startsWith("/wishlist")) {
     return { ok: false, error: "Not on wishlist page." };
+  }
+  if (hasActiveWishlistFilters()) {
+    return { ok: false, skipped: true, reason: "filters-active" };
   }
   if (domOrderSyncInFlight) {
     return { ok: false, error: "DOM wishlist sync already running." };

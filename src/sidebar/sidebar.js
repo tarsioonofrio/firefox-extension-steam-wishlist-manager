@@ -1,10 +1,15 @@
 const TAG_SHOW_STEP = 12;
 
 let activeTabId = 0;
-let selectedTags = new Set();
+let selectedTagIds = new Set();
 let tagSearchQuery = "";
 let tagShowLimit = TAG_SHOW_STEP;
 let tagCounts = [];
+let tagNameToId = new Map();
+
+function normalizeTagKey(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
 
 function setStatus(text) {
   const el = document.getElementById("status");
@@ -36,6 +41,66 @@ async function sendToWishlist(type, payload = null) {
   return browser.tabs.sendMessage(activeTabId, { type, payload });
 }
 
+async function loadTagDictionary() {
+  if (tagNameToId.size > 0) {
+    return;
+  }
+  try {
+    const url = browser.runtime.getURL("src/data/steamdb-tags-hardcoded.json");
+    const response = await fetch(url, { cache: "no-store" });
+    const data = await response.json();
+    const tags = Array.isArray(data?.tags) ? data.tags : [];
+    for (const entry of tags) {
+      const key = normalizeTagKey(entry?.name);
+      const id = Number(entry?.tagid || 0);
+      if (!key || !(id > 0) || tagNameToId.has(key)) {
+        continue;
+      }
+      tagNameToId.set(key, id);
+    }
+  } catch {
+    // Keep empty map; UI will still render names.
+  }
+}
+
+function parseTagIdsFromUrl(urlText) {
+  try {
+    const url = new URL(String(urlText || ""));
+    const raw = String(url.searchParams.get("tagids") || "").trim();
+    if (!raw) {
+      return new Set();
+    }
+    const out = new Set();
+    for (const part of raw.split(",")) {
+      const id = Number(String(part || "").trim());
+      if (Number.isFinite(id) && id > 0) {
+        out.add(id);
+      }
+    }
+    return out;
+  } catch {
+    return new Set();
+  }
+}
+
+async function applyTagIdsToWishlistUrl() {
+  if (!(activeTabId > 0)) {
+    activeTabId = await resolveActiveWishlistTabId();
+  }
+  if (!(activeTabId > 0)) {
+    throw new Error("Open a Steam wishlist tab first.");
+  }
+  const tab = await browser.tabs.get(activeTabId);
+  const url = new URL(String(tab?.url || ""));
+  const values = Array.from(selectedTagIds).map((n) => Number(n)).filter((n) => n > 0).sort((a, b) => a - b);
+  if (values.length === 0) {
+    url.searchParams.delete("tagids");
+  } else {
+    url.searchParams.set("tagids", values.join(","));
+  }
+  await browser.tabs.update(activeTabId, { url: url.toString() });
+}
+
 function parseNumber(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -44,7 +109,7 @@ function parseNumber(value, fallback) {
 async function pushCurrentFilters() {
   const payload = {
     stateFilter: document.getElementById("state-filter")?.value || "all",
-    selectedTags: Array.from(selectedTags),
+    selectedTags: [],
     tagSearchQuery,
     tagShowLimit,
     advanced: {
@@ -72,13 +137,13 @@ function renderTagOptions() {
   const query = String(tagSearchQuery || "").trim().toLowerCase();
   const selectedEntries = [];
   const selectedSeen = new Set();
-  for (const key of selectedTags) {
-    const found = tagCounts.find((item) => String(item.name || "").toLowerCase() === key);
-    selectedEntries.push(found || { name: key, count: 0 });
-    selectedSeen.add(key);
+  for (const id of selectedTagIds) {
+    const found = tagCounts.find((item) => Number(item.tagid || 0) === Number(id));
+    selectedEntries.push(found || { name: `tag:${id}`, count: 0, tagid: Number(id) });
+    selectedSeen.add(Number(id));
   }
-  const filtered = tagCounts.filter((item) => !query || String(item.name || "").toLowerCase().includes(query));
-  const remaining = filtered.filter((item) => !selectedSeen.has(String(item.name || "").toLowerCase()));
+  const filtered = tagCounts.filter((item) => !query || normalizeTagKey(item.name).includes(query));
+  const remaining = filtered.filter((item) => !selectedSeen.has(Number(item.tagid || 0)));
   const ordered = [...selectedEntries, ...remaining];
   const visible = ordered.slice(0, tagShowLimit);
 
@@ -87,17 +152,28 @@ function renderTagOptions() {
     const row = document.createElement("label");
     row.className = "tag-option";
 
-    const key = String(item.name || "").toLowerCase();
+    const key = normalizeTagKey(item.name);
+    const tagId = Number(item.tagid || tagNameToId.get(key) || 0);
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
-    checkbox.checked = selectedTags.has(key);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) {
-        selectedTags.add(key);
-      } else {
-        selectedTags.delete(key);
+    checkbox.checked = tagId > 0 ? selectedTagIds.has(tagId) : false;
+    checkbox.addEventListener("change", async () => {
+      if (!(tagId > 0)) {
+        checkbox.checked = false;
+        setStatus(`Tag id not found for: ${String(item.name || "")}`);
+        return;
       }
-      pushCurrentFilters().catch((error) => setStatus(error?.message || "Could not apply filters."));
+      if (checkbox.checked) {
+        selectedTagIds.add(tagId);
+      } else {
+        selectedTagIds.delete(tagId);
+      }
+      try {
+        await applyTagIdsToWishlistUrl();
+        setStatus("Tag filter applied via wishlist URL.");
+      } catch (error) {
+        setStatus(error?.message || "Could not apply tag filter.");
+      }
     });
 
     const name = document.createElement("span");
@@ -122,10 +198,19 @@ function hydrateFromSnapshot(snapshot) {
     return;
   }
   document.getElementById("state-filter").value = String(snapshot.stateFilter || "all");
-  selectedTags = new Set(Array.isArray(snapshot.selectedTags) ? snapshot.selectedTags.map((t) => String(t || "").toLowerCase()) : []);
   tagSearchQuery = String(snapshot.tagSearchQuery || "");
   tagShowLimit = Number(snapshot.tagShowLimit || TAG_SHOW_STEP);
-  tagCounts = Array.isArray(snapshot.tagCounts) ? snapshot.tagCounts : [];
+  tagCounts = (Array.isArray(snapshot.tagCounts) ? snapshot.tagCounts : []).map((item) => {
+    const name = String(item?.name || "");
+    const count = Number(item?.count || 0);
+    const key = normalizeTagKey(name);
+    const mappedId = Number(tagNameToId.get(key) || 0);
+    return {
+      name,
+      count: Number.isFinite(count) ? count : 0,
+      tagid: mappedId > 0 ? mappedId : 0
+    };
+  });
 
   document.getElementById("tags-search").value = tagSearchQuery;
 
@@ -185,11 +270,19 @@ function bindInputs() {
 }
 
 async function init() {
+  await loadTagDictionary();
   bindInputs();
   try {
     activeTabId = await resolveActiveWishlistTabId();
+    let initialUrlTagIds = new Set();
+    if (activeTabId > 0) {
+      const tab = await browser.tabs.get(activeTabId);
+      initialUrlTagIds = parseTagIdsFromUrl(tab?.url || "");
+    }
     const snapshot = await sendToWishlist("wishlist-filters-get");
     hydrateFromSnapshot(snapshot);
+    selectedTagIds = initialUrlTagIds;
+    renderTagOptions();
     setStatus(activeTabId > 0 ? "Connected" : "Open a Steam wishlist tab.");
   } catch (error) {
     setStatus(error?.message || "Open a Steam wishlist tab.");
