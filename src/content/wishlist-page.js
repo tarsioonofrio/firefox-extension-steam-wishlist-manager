@@ -527,16 +527,29 @@ function ensureWishlistFollowUiStyle() {
   const style = document.createElement("style");
   style.id = FOLLOW_UI_STYLE_ID;
   style.textContent = `
+    .swm-row-with-follow {
+      position: relative !important;
+      margin-left: 128px !important;
+      width: calc(100% - 128px) !important;
+      box-sizing: border-box !important;
+      overflow: visible !important;
+    }
     .swm-wishlist-actions {
+      position: absolute;
+      left: -116px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 108px;
       display: flex;
-      justify-content: flex-end;
+      justify-content: flex-start;
       align-items: center;
-      gap: 8px;
-      margin: 0 0 10px;
-      padding: 0 8px;
+      margin: 0;
+      padding: 0;
+      z-index: 2;
     }
     .swm-follow-btn {
-      min-width: 116px;
+      width: 100%;
+      min-width: 108px;
       border: 0;
       border-radius: 2px;
       background: #4c6b22;
@@ -615,8 +628,9 @@ function ensureWishlistRowFollowControl(row, stateItems) {
     container.className = "swm-wishlist-actions";
     container.dataset.swmAppId = appId;
   }
-  if (row.nextElementSibling !== container) {
-    row.insertAdjacentElement("afterend", container);
+  row.classList.add("swm-row-with-follow");
+  if (container.parentElement !== row) {
+    row.appendChild(container);
   }
 
   let button = container.querySelector(".swm-follow-btn");
