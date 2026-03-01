@@ -174,6 +174,14 @@ function bindInputs() {
     tagShowLimit += TAG_SHOW_STEP;
     renderTagOptions();
   });
+
+  document.getElementById("close-sidebar")?.addEventListener("click", async () => {
+    try {
+      await browser.sidebarAction.close();
+    } catch {
+      window.close();
+    }
+  });
 }
 
 async function init() {
