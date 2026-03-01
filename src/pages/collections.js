@@ -48,6 +48,7 @@ const ARCHIVE_SELECT_VALUE = "__archive__";
 const OWNED_SELECT_VALUE = "__owned__";
 const TRACK_FEED_SELECT_VALUE = "__track_feed__";
 const RELEASE_YEAR_DEFAULT_MIN = 2010;
+const OPEN_ENDED_MAX_VALUE = Number.MAX_SAFE_INTEGER;
 const steamFetchUtils = window.SWMSteamFetch;
 // Source baseline: SteamDB tags taxonomy (static seed for fast first render).
 const FILTER_SEED = {
@@ -149,11 +150,11 @@ let releaseYearCounts = [];
 let ratingMin = 0;
 let ratingMax = 100;
 let reviewsMin = 0;
-let reviewsMax = 999999999;
+let reviewsMax = OPEN_ENDED_MAX_VALUE;
 let discountMin = 0;
 let discountMax = 100;
 let priceMin = 0;
-let priceMax = 9999999;
+let priceMax = OPEN_ENDED_MAX_VALUE;
 let filterSyncRunId = 0;
 let batchMode = false;
 let batchAddTargetCollection = "";
@@ -630,11 +631,11 @@ function applyFilterSnapshot(snapshot) {
   ratingMin = parseNonNegativeInt(data.ratingMin, 0);
   ratingMax = parseNonNegativeInt(data.ratingMax, 100);
   reviewsMin = parseNonNegativeInt(data.reviewsMin, 0);
-  reviewsMax = parseNonNegativeInt(data.reviewsMax, 999999999);
+  reviewsMax = parseNonNegativeInt(data.reviewsMax, OPEN_ENDED_MAX_VALUE);
   discountMin = parseNonNegativeInt(data.discountMin, 0);
   discountMax = parseNonNegativeInt(data.discountMax, 100);
   priceMin = Number.isFinite(Number(data.priceMin)) ? Number(data.priceMin) : 0;
-  priceMax = Number.isFinite(Number(data.priceMax)) ? Number(data.priceMax) : 9999999;
+  priceMax = Number.isFinite(Number(data.priceMax)) ? Number(data.priceMax) : OPEN_ENDED_MAX_VALUE;
   releaseTextEnabled = Boolean(data.releaseTextEnabled);
   releaseYearRangeEnabled = Boolean(data.releaseYearRangeEnabled);
   releaseYearMin = Number.isFinite(Number(data.releaseYearMin)) ? Number(data.releaseYearMin) : RELEASE_YEAR_DEFAULT_MIN;
@@ -726,13 +727,13 @@ function countActiveFiltersInSnapshot(snapshot) {
   if (Number(data.ratingMin || 0) > 0 || Number(data.ratingMax || 100) < 100) {
     count += 1;
   }
-  if (Number(data.reviewsMin || 0) > 0 || Number(data.reviewsMax || 999999999) < 999999999) {
+  if (Number(data.reviewsMin || 0) > 0 || Number(data.reviewsMax || OPEN_ENDED_MAX_VALUE) < OPEN_ENDED_MAX_VALUE) {
     count += 1;
   }
   if (Number(data.discountMin || 0) > 0 || Number(data.discountMax || 100) < 100) {
     count += 1;
   }
-  if (Number(data.priceMin || 0) > 0 || Number(data.priceMax || 9999999) < 9999999) {
+  if (Number(data.priceMin || 0) > 0 || Number(data.priceMax || OPEN_ENDED_MAX_VALUE) < OPEN_ENDED_MAX_VALUE) {
     count += 1;
   }
   if (Boolean(data.releaseTextEnabled) !== true) {
@@ -5267,7 +5268,7 @@ function bindFilterControls() {
     },
     onApplyReviews: async (rawMin, rawMax) => {
       const minValue = parseNonNegativeInt(rawMin, 0);
-      const maxValue = parseNonNegativeInt(rawMax, 999999999);
+      const maxValue = parseNonNegativeInt(rawMax, OPEN_ENDED_MAX_VALUE);
       reviewsMin = Math.min(minValue, maxValue);
       reviewsMax = Math.max(minValue, maxValue);
       renderRatingControls();
@@ -5290,9 +5291,9 @@ function bindFilterControls() {
     },
     onApplyPrice: async (rawMin, rawMax) => {
       const minValue = Number(rawMin || 0);
-      const maxValue = Number(rawMax || 9999999);
+      const maxValue = Number(rawMax || OPEN_ENDED_MAX_VALUE);
       const normMin = Number.isFinite(minValue) && minValue >= 0 ? minValue : 0;
-      const normMax = Number.isFinite(maxValue) && maxValue >= 0 ? maxValue : 9999999;
+      const normMax = Number.isFinite(maxValue) && maxValue >= 0 ? maxValue : OPEN_ENDED_MAX_VALUE;
       priceMin = Math.min(normMin, normMax);
       priceMax = Math.max(normMin, normMax);
       renderRatingControls();

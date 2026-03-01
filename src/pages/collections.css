@@ -942,6 +942,12 @@ main {
   font-size: 11px;
 }
 
+.line-btn.active {
+  border-color: #6ca6ca;
+  background: #447196;
+  color: #eaf4ff;
+}
+
 .line-pos-input {
   height: 22px;
   width: calc((var(--pos-digits, 2) * 9px) + 16px);
