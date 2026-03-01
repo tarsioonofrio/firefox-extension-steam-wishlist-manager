@@ -163,6 +163,7 @@ let keyboardFocusIndex = 0;
 let lastSteamWriteDiagnostics = null;
 let searchInputDebounceTimer = null;
 const filterTextInputDebounceTimers = new Map();
+let intentMutationQueue = Promise.resolve();
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -1985,38 +1986,43 @@ async function refreshSingleItem(appId) {
 }
 
 async function setItemIntent(appId, intentPatch = {}) {
-  const id = String(appId || "").trim();
-  if (!id) {
-    return;
-  }
-  const titleForPatch = state?.items?.[id]?.title || metaCache?.[id]?.titleText || `App ${id}`;
-  const response = await browser.runtime.sendMessage({
-    type: "set-item-intent",
-    appId: id,
-    title: titleForPatch,
-    ...intentPatch
-  });
-  if (!response?.ok) {
-    throw new Error(String(response?.error || "Failed to update triage intent."));
-  }
-  const steamErrors = Array.isArray(response?.steamWrite?.errors)
-    ? response.steamWrite.errors.map((x) => String(x || "").trim()).filter(Boolean)
-    : [];
-  if (steamErrors.length > 0) {
-    setSteamWriteDiagnosticsSnapshot({
-      source: "collections.set-item-intent",
-      at: Date.now(),
+  const run = intentMutationQueue.then(async () => {
+    const id = String(appId || "").trim();
+    if (!id) {
+      return;
+    }
+    const titleForPatch = state?.items?.[id]?.title || metaCache?.[id]?.titleText || `App ${id}`;
+    const response = await browser.runtime.sendMessage({
+      type: "set-item-intent",
       appId: id,
-      intentPatch,
-      steamWrite: response?.steamWrite || null
+      title: titleForPatch,
+      deferSteam: true,
+      ...intentPatch
     });
-    const formatted = window?.SWMSteamWriteErrorUtils?.formatSingle
-      ? window.SWMSteamWriteErrorUtils.formatSingle(response?.steamWrite)
-      : steamErrors[0];
-    setStatus(`Local state saved, but Steam write failed: ${formatted}`, true, { withNetworkHint: true });
-  }
-  await refreshState();
-  await renderStateDependentUi();
+    if (!response?.ok) {
+      throw new Error(String(response?.error || "Failed to update triage intent."));
+    }
+    const steamErrors = Array.isArray(response?.steamWrite?.errors)
+      ? response.steamWrite.errors.map((x) => String(x || "").trim()).filter(Boolean)
+      : [];
+    if (steamErrors.length > 0) {
+      setSteamWriteDiagnosticsSnapshot({
+        source: "collections.set-item-intent",
+        at: Date.now(),
+        appId: id,
+        intentPatch,
+        steamWrite: response?.steamWrite || null
+      });
+      const formatted = window?.SWMSteamWriteErrorUtils?.formatSingle
+        ? window.SWMSteamWriteErrorUtils.formatSingle(response?.steamWrite)
+        : steamErrors[0];
+      setStatus(`Local state saved, but Steam write failed: ${formatted}`, true, { withNetworkHint: true });
+    }
+    await refreshState();
+    await renderStateDependentUi();
+  });
+  intentMutationQueue = run.catch(() => {});
+  return run;
 }
 
 async function renderStateDependentUi() {

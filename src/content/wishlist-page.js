@@ -772,6 +772,9 @@ browser.runtime.onMessage.addListener((message) => {
   if (message.type === "steam-proxy-read-steamid") {
     return proxyReadSteamIdentity();
   }
+  if (message.type === "steam-proxy-ping") {
+    return { ok: true, ready: true };
+  }
   if (message.type === "steam-proxy-write-action") {
     return proxyWriteSteamAction(String(message.action || ""), String(message.appId || ""));
   }

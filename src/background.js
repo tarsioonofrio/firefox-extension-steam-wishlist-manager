@@ -55,6 +55,13 @@ let nativeBridgePublishTimer = null;
 let steamSessionIdCache = "";
 let steamSessionIdCachedAt = 0;
 let steamWriteLastAt = 0;
+let messageHandlingQueue = Promise.resolve();
+
+function enqueueMessageHandling(task) {
+  const run = messageHandlingQueue.then(task, task);
+  messageHandlingQueue = run.catch(() => {});
+  return run;
+}
 
 function trimLogString(value, max = 400) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -514,6 +521,23 @@ function hasItemTriageState(item) {
     || normalized.labels.length > 0;
 }
 
+function hasExplicitLocalIntent(item) {
+  if (!item || typeof item !== "object") {
+    return false;
+  }
+  const normalized = normalizeItemRecord(String(item.appId || ""), item);
+  return normalized.track > 0
+    || normalized.buy > 0
+    || normalized.buyIntent !== "UNSET"
+    || normalized.trackIntent !== "UNSET"
+    || normalized.bucket === "ARCHIVE"
+    || normalized.triagedAt > 0
+    || Boolean(normalized.note)
+    || Number.isFinite(Number(normalized.targetPriceCents))
+    || normalized.muted
+    || normalized.labels.length > 0;
+}
+
 function upsertStateItem(state, appId, patch = {}) {
   const current = state.items?.[appId] || { appId };
   state.items[appId] = normalizeItemRecord(appId, {
@@ -925,6 +949,24 @@ async function readSteamObservedSignals() {
   }
 }
 
+async function confirmObservedSteamSignal(target, appId, enabled) {
+  const normalizedTarget = String(target || "").trim().toLowerCase();
+  const id = String(appId || "").trim();
+  if (!id || (normalizedTarget !== "wishlist" && normalizedTarget !== "follow")) {
+    return false;
+  }
+  try {
+    const observed = await readSteamObservedSignals();
+    const ids = normalizedTarget === "wishlist"
+      ? sanitizeSteamObservedAppIds(observed?.wishlistIds)
+      : sanitizeSteamObservedAppIds(observed?.followedIds);
+    const set = new Set(ids);
+    return enabled ? set.has(id) : !set.has(id);
+  } catch {
+    return false;
+  }
+}
+
 async function resolveSteamIdForObservedSignals() {
   try {
     const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
@@ -1082,13 +1124,14 @@ function applySteamObservedSignalsToState(state, wishlistIds, followedIds, nowTs
   for (const appId of allIds) {
     const current = normalizeItemRecord(appId, state.items?.[appId] || {});
     const next = { ...current };
+    const hasLocalIntent = hasExplicitLocalIntent(current);
     const isWishlisted = wishlistSet.has(appId);
     const isFollowed = followedSet.has(appId);
 
     next.steamWishlistedObserved = isWishlisted;
     next.steamFollowedObserved = isFollowed;
 
-    if (isWishlisted && isFollowed) {
+    if (!hasLocalIntent && isWishlisted && isFollowed) {
       next.buy = 2;
       next.buyIntent = "BUY";
       next.track = 1;
@@ -1096,7 +1139,7 @@ function applySteamObservedSignalsToState(state, wishlistIds, followedIds, nowTs
       next.bucket = "BUY";
       next.inboxQueuedAt = 0;
       buyFollowMapped += 1;
-    } else if (isWishlisted && !isFollowed) {
+    } else if (!hasLocalIntent && isWishlisted && !isFollowed) {
       next.buy = 0;
       next.buyIntent = "UNSET";
       next.track = 0;
@@ -1106,12 +1149,12 @@ function applySteamObservedSignalsToState(state, wishlistIds, followedIds, nowTs
         next.inboxQueuedAt = now;
       }
       inboxMapped += 1;
-    } else if (!isWishlisted && isFollowed) {
+    } else if (!hasLocalIntent && !isWishlisted && isFollowed) {
       next.track = 1;
       next.trackIntent = "ON";
       next.bucket = normalizeBucket(next.bucket, next.track, next.buy);
       next.inboxQueuedAt = 0;
-    } else {
+    } else if (!hasLocalIntent) {
       next.inboxQueuedAt = 0;
     }
 
@@ -1692,6 +1735,22 @@ async function setSteamWishlist(appId, enabled) {
       diagnostics: finalizeSteamWriteDiagnostics(diagnostics)
     };
   } catch (primaryError) {
+    const primaryStage = String(primaryError?.stage || "");
+    if (primaryStage === "primary-validate") {
+      addSteamWriteStage(diagnostics, "primary-observed-confirm", "start");
+      const observedConfirmed = await confirmObservedSteamSignal("wishlist", appId, Boolean(enabled));
+      if (observedConfirmed) {
+        addSteamWriteStage(diagnostics, "primary-observed-confirm", "ok");
+        return {
+          target: "wishlist",
+          enabled: Boolean(enabled),
+          appId,
+          mode: "primary-observed",
+          diagnostics: finalizeSteamWriteDiagnostics(diagnostics)
+        };
+      }
+      addSteamWriteStage(diagnostics, "primary-observed-confirm", "miss");
+    }
     addSteamWriteStage(diagnostics, "primary-write", "fallback", {
       error: String(primaryError?.message || primaryError || "primary write failed")
     });
@@ -1764,6 +1823,22 @@ async function setSteamFollow(appId, enabled) {
       diagnostics: finalizeSteamWriteDiagnostics(diagnostics)
     };
   } catch (primaryError) {
+    const primaryStage = String(primaryError?.stage || "");
+    if (primaryStage === "primary-validate") {
+      addSteamWriteStage(diagnostics, "primary-observed-confirm", "start");
+      const observedConfirmed = await confirmObservedSteamSignal("follow", appId, Boolean(enabled));
+      if (observedConfirmed) {
+        addSteamWriteStage(diagnostics, "primary-observed-confirm", "ok");
+        return {
+          target: "follow",
+          enabled: Boolean(enabled),
+          appId,
+          mode: "primary-observed",
+          diagnostics: finalizeSteamWriteDiagnostics(diagnostics)
+        };
+      }
+      addSteamWriteStage(diagnostics, "primary-observed-confirm", "miss");
+    }
     addSteamWriteStage(diagnostics, "primary-write", "fallback", {
       error: String(primaryError?.message || primaryError || "primary write failed")
     });
@@ -1856,6 +1931,17 @@ async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent
     errors,
     errorDetails
   };
+}
+
+async function logSteamWritePartialFailure(context, appId, steamWrite) {
+  if (!steamWrite || !Array.isArray(steamWrite.errors) || steamWrite.errors.length === 0) {
+    return;
+  }
+  await logWarn(context, "Steam write finished with partial failure.", {
+    appId,
+    errors: steamWrite.errors.slice(0, 3),
+    errorDetails: Array.isArray(steamWrite.errorDetails) ? steamWrite.errorDetails.slice(0, 3) : []
+  });
 }
 
 function decodeVarint(bytes, startIndex) {
@@ -2494,17 +2580,101 @@ async function resolveSteamIdForWishlistSync(cached) {
   throw new Error("Could not resolve steamid for background wishlist sync.");
 }
 
-async function sendMessageToTabWithRetry(tabId, message, retries = 30, delayMs = 500) {
+function isNoReceiverError(error) {
+  const msg = String(error?.message || error || "").toLowerCase();
+  return msg.includes("receiving end does not exist");
+}
+
+async function sendMessageToTabWithRetry(tabId, message, retries = 30, delayMs = 500, options = {}) {
+  const failFastOnNoReceiver = options?.failFastOnNoReceiver === true;
+  const maxNoReceiverRetries = Math.max(1, Number(options?.maxNoReceiverRetries || 2));
   let lastError = null;
+  let noReceiverFailures = 0;
   for (let i = 0; i < retries; i += 1) {
     try {
       return await browser.tabs.sendMessage(tabId, message);
     } catch (error) {
       lastError = error;
+      if (failFastOnNoReceiver && isNoReceiverError(error)) {
+        noReceiverFailures += 1;
+        if (noReceiverFailures >= maxNoReceiverRetries) {
+          throw error;
+        }
+      }
       await wait(delayMs);
     }
   }
   throw lastError || new Error("Could not send message to wishlist tab.");
+}
+
+async function hasSteamProxyReceiver(tabId) {
+  try {
+    const pong = await sendMessageToTabWithRetry(tabId, { type: "steam-proxy-ping" }, 1, 0, {
+      failFastOnNoReceiver: true,
+      maxNoReceiverRetries: 1
+    });
+    return Boolean(pong?.ok);
+  } catch {
+    return false;
+  }
+}
+
+async function listSteamStoreTabs() {
+  const queryUrls = [
+    "*://store.steampowered.com/wishlist/*",
+    "*://store.steampowered.com/app/*",
+    "*://store.steampowered.com/*"
+  ];
+  const out = [];
+  const seen = new Set();
+  for (const pattern of queryUrls) {
+    const tabs = await browser.tabs.query({ url: pattern });
+    for (const tab of tabs || []) {
+      const tabId = Number(tab?.id || 0);
+      if (!(tabId > 0) || seen.has(tabId)) {
+        continue;
+      }
+      seen.add(tabId);
+      out.push(tab);
+    }
+  }
+  out.sort((a, b) => Number(Boolean(b?.active)) - Number(Boolean(a?.active)));
+  return out;
+}
+
+async function resolveHealthySteamProxyTabId(allowCreateTab = true) {
+  const existingTabs = await listSteamStoreTabs();
+  for (const tab of existingTabs) {
+    const tabId = Number(tab?.id || 0);
+    if (!(tabId > 0)) {
+      continue;
+    }
+    if (await hasSteamProxyReceiver(tabId)) {
+      return { tabId, createdTabId: null };
+    }
+  }
+  if (!allowCreateTab) {
+    throw new Error("No Steam tab with proxy receiver available.");
+  }
+
+  const createdTab = await browser.tabs.create({
+    url: "https://store.steampowered.com/",
+    active: false
+  });
+  const createdTabId = Number(createdTab?.id || 0);
+  if (!(createdTabId > 0)) {
+    throw new Error("Could not open Store tab for Steam proxy.");
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 12000) {
+    if (await hasSteamProxyReceiver(createdTabId)) {
+      return { tabId: createdTabId, createdTabId };
+    }
+    await wait(250);
+  }
+  browser.tabs.remove(createdTabId).catch(() => {});
+  throw new Error("Steam proxy receiver unavailable in created tab.");
 }
 
 async function hasOpenSteamStoreTab() {
@@ -2549,40 +2719,25 @@ async function ensureOpenSteamStoreTab() {
 
 async function sendMessageToStoreTabWithFallback(message, options = {}) {
   const allowCreateTab = options?.allowCreateTab !== false;
-  const queryUrls = [
-    "*://store.steampowered.com/wishlist/*",
-    "*://store.steampowered.com/app/*",
-    "*://store.steampowered.com/*"
-  ];
-  let existingTabs = [];
-  for (const pattern of queryUrls) {
-    const tabs = await browser.tabs.query({ url: pattern });
-    if (Array.isArray(tabs) && tabs.length > 0) {
-      existingTabs = tabs;
-      break;
-    }
-  }
-
-  let createdTabId = null;
-  let targetTabId = Number(existingTabs?.[0]?.id || 0);
-
+  const isWriteAction = String(message?.type || "") === "steam-proxy-write-action";
+  const healthyTarget = await resolveHealthySteamProxyTabId(allowCreateTab);
+  const targetTabId = Number(healthyTarget?.tabId || 0);
+  const createdTabId = Number(healthyTarget?.createdTabId || 0) || null;
   if (!(targetTabId > 0)) {
-    if (!allowCreateTab) {
-      throw new Error("No open Steam tab available for proxy message.");
-    }
-    const createdTab = await browser.tabs.create({
-      url: "https://store.steampowered.com/",
-      active: false
-    });
-    targetTabId = Number(createdTab?.id || 0);
-    createdTabId = targetTabId > 0 ? targetTabId : null;
-    if (!(targetTabId > 0)) {
-      throw new Error("Could not open Store tab for Steam proxy.");
-    }
+    throw new Error("No Steam tab available for proxy message.");
   }
 
   try {
-    return await sendMessageToTabWithRetry(targetTabId, message, 40, 500);
+    return await sendMessageToTabWithRetry(
+      targetTabId,
+      message,
+      isWriteAction ? 8 : 40,
+      isWriteAction ? 250 : 500,
+      {
+        failFastOnNoReceiver: isWriteAction,
+        maxNoReceiverRetries: isWriteAction ? 2 : 4
+      }
+    );
   } finally {
     if (createdTabId) {
       browser.tabs.remove(createdTabId).catch(() => {});
@@ -2733,7 +2888,7 @@ async function syncWishlistOrderViaBackgroundTab(force = false) {
 }
 
 browser.runtime.onMessage.addListener((message, sender) => {
-  return (async () => {
+  return enqueueMessageHandling(async () => {
     try {
       if (!message || typeof message !== "object") {
         throw new Error("Invalid message.");
@@ -2965,13 +3120,23 @@ browser.runtime.onMessage.addListener((message, sender) => {
         await setState(state);
         let steamWrite = null;
         if (message.syncSteam !== false && message.owned === undefined) {
-          steamWrite = await syncSteamSignalsForIntentChange(appId, previousItem, state.items[appId]);
-          if (steamWrite && Array.isArray(steamWrite.errors) && steamWrite.errors.length > 0) {
-            await logWarn("set-item-intent.steam-write", "Steam write finished with partial failure.", {
-              appId,
-              errors: steamWrite.errors.slice(0, 3),
-              errorDetails: Array.isArray(steamWrite.errorDetails) ? steamWrite.errorDetails.slice(0, 3) : []
+          if (message.deferSteam === true) {
+            const nextItem = { ...(state.items?.[appId] || {}) };
+            Promise.resolve().then(async () => {
+              try {
+                const deferredWrite = await syncSteamSignalsForIntentChange(appId, previousItem, nextItem);
+                await logSteamWritePartialFailure("set-item-intent.steam-write", appId, deferredWrite);
+              } catch (error) {
+                await logWarn("set-item-intent.steam-write", "Deferred Steam write failed.", {
+                  appId,
+                  error: String(error?.message || error || "deferred steam write failed")
+                });
+              }
             });
+            steamWrite = { ok: true, deferred: true };
+          } else {
+            steamWrite = await syncSteamSignalsForIntentChange(appId, previousItem, state.items[appId]);
+            await logSteamWritePartialFailure("set-item-intent.steam-write", appId, steamWrite);
           }
         }
         return { ok: true, item: state.items[appId], state, steamWrite };
@@ -3394,7 +3559,7 @@ browser.runtime.onMessage.addListener((message, sender) => {
       });
       throw error;
     }
-  })();
+  });
 });
 
 if (browser?.alarms?.onAlarm) {
