@@ -463,10 +463,16 @@ function getItemTitleFromWishlistRow(row) {
   return String(title?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
-function normalizeTrackState(item) {
+function getWishlistIntentState(item) {
+  const buy = Number(item?.buy || 0);
   const track = Number(item?.track || 0) > 0;
   const trackIntent = String(item?.trackIntent || "").toUpperCase();
-  return track || trackIntent === "ON";
+  const labels = Array.isArray(item?.labels) ? item.labels.map((label) => String(label || "").toLowerCase()) : [];
+  return {
+    buy,
+    track: track || trackIntent === "ON",
+    owned: Boolean(item?.owned) || labels.includes("owned")
+  };
 }
 
 async function loadWishlistState(force = false) {
@@ -495,7 +501,7 @@ async function loadWishlistState(force = false) {
   return wishlistStateLoadPromise;
 }
 
-function updateWishlistStateTrackCache(appId, nextTracked) {
+function updateWishlistStateItemCache(appId, nextItem) {
   const id = String(appId || "").trim();
   if (!id) {
     return;
@@ -507,8 +513,7 @@ function updateWishlistStateTrackCache(appId, nextTracked) {
   const next = {
     ...current,
     appId: id,
-    track: nextTracked ? 1 : 0,
-    trackIntent: nextTracked ? "ON" : "OFF"
+    ...(nextItem && typeof nextItem === "object" ? nextItem : {})
   };
   wishlistStateCache = {
     ...(wishlistStateCache || {}),
@@ -537,37 +542,45 @@ function ensureWishlistFollowUiStyle() {
     .swm-wishlist-actions {
       position: absolute;
       left: -116px;
-      top: 50%;
-      transform: translateY(-50%);
+      top: 6px;
       width: 108px;
       display: flex;
+      flex-direction: column;
       justify-content: flex-start;
-      align-items: center;
+      align-items: stretch;
+      gap: 2px;
       margin: 0;
       padding: 0;
       z-index: 2;
     }
-    .swm-follow-btn {
+    .swm-action-btn {
       width: 100%;
       min-width: 108px;
       border: 0;
       border-radius: 2px;
-      background: #4c6b22;
+      background: #4b5a67;
       color: #fff;
-      font-size: 12px;
-      line-height: 30px;
-      height: 30px;
-      padding: 0 14px;
+      font-size: 10px;
+      line-height: 18px;
+      height: 18px;
+      padding: 0 8px;
       cursor: pointer;
       text-transform: uppercase;
+      text-align: center;
     }
-    .swm-follow-btn:hover {
-      background: #6f952d;
+    .swm-action-btn:hover {
+      background: #627687;
     }
-    .swm-follow-btn.is-active {
+    .swm-action-btn.is-active {
       background: #1f4e7a;
     }
-    .swm-follow-btn:disabled {
+    .swm-action-btn[data-action="follow"] {
+      background: #4c6b22;
+    }
+    .swm-action-btn[data-action="follow"]:hover {
+      background: #6f952d;
+    }
+    .swm-action-btn:disabled {
       opacity: 0.65;
       cursor: wait;
     }
@@ -575,43 +588,87 @@ function ensureWishlistFollowUiStyle() {
   document.head.appendChild(style);
 }
 
-function setFollowButtonVisualState(button, tracked) {
-  if (!button) {
+function setWishlistActionButtonsVisualState(container, intentState) {
+  if (!container) {
     return;
   }
-  button.dataset.swmTracked = tracked ? "1" : "0";
-  button.classList.toggle("is-active", Boolean(tracked));
-  button.innerHTML = tracked ? "<span>Unfollow</span>" : "<span>Follow</span>";
+  const buyBtn = container.querySelector("[data-action='buy']");
+  const maybeBtn = container.querySelector("[data-action='maybe']");
+  const archiveBtn = container.querySelector("[data-action='archive']");
+  const followBtn = container.querySelector("[data-action='follow']");
+
+  if (buyBtn) {
+    buyBtn.classList.toggle("is-active", intentState.buy === 2);
+    buyBtn.textContent = "Buy";
+  }
+  if (maybeBtn) {
+    maybeBtn.classList.toggle("is-active", intentState.buy === 1);
+    maybeBtn.textContent = "Maybe";
+  }
+  if (archiveBtn) {
+    archiveBtn.classList.toggle("is-active", intentState.owned);
+    archiveBtn.textContent = "Archive";
+  }
+  if (followBtn) {
+    followBtn.classList.toggle("is-active", Boolean(intentState.track));
+    followBtn.textContent = intentState.track ? "Unfollow" : "Follow";
+  }
 }
 
-async function handleWishlistFollowToggle(button, appId, title) {
+function getIntentPatchForAction(action, intentState) {
+  const key = String(action || "");
+  if (key === "buy") {
+    return { buy: intentState.buy === 2 ? 0 : 2 };
+  }
+  if (key === "maybe") {
+    return { buy: intentState.buy === 1 ? 0 : 1 };
+  }
+  if (key === "archive") {
+    if (intentState.owned) {
+      return { owned: false };
+    }
+    return { owned: true, track: 0, buy: 0 };
+  }
+  if (key === "follow") {
+    return { track: intentState.track ? 0 : 1 };
+  }
+  return {};
+}
+
+function setWishlistActionsDisabled(container, disabled) {
+  const buttons = container?.querySelectorAll?.(".swm-action-btn");
+  for (const button of buttons || []) {
+    button.disabled = Boolean(disabled);
+  }
+}
+
+async function handleWishlistIntentAction(container, appId, title, action) {
   const id = String(appId || "").trim();
-  if (!id || !button) {
+  if (!id || !container) {
     return;
   }
-  const currentlyTracked = button.dataset.swmTracked === "1";
-  const nextTracked = !currentlyTracked;
-  const previousLabel = button.innerHTML;
-  button.disabled = true;
-  button.innerHTML = "<span>Saving...</span>";
+  const currentItem = wishlistStateCache?.items?.[id] || {};
+  const currentIntent = getWishlistIntentState(currentItem);
+  const patch = getIntentPatchForAction(action, currentIntent);
+  setWishlistActionsDisabled(container, true);
   try {
     const response = await browser.runtime.sendMessage({
       type: "set-item-intent",
       appId: id,
       title: String(title || "").slice(0, 200),
-      track: nextTracked ? 1 : 0,
-      deferSteam: true
+      deferSteam: true,
+      ...patch
     });
     if (!response?.ok) {
-      throw new Error(String(response?.error || "Failed to update follow state."));
+      throw new Error(String(response?.error || "Failed to update wishlist intent state."));
     }
-    updateWishlistStateTrackCache(id, nextTracked);
-    setFollowButtonVisualState(button, nextTracked);
+    updateWishlistStateItemCache(id, response?.item || patch);
+    const nextIntent = getWishlistIntentState(wishlistStateCache?.items?.[id] || {});
+    setWishlistActionButtonsVisualState(container, nextIntent);
   } catch (error) {
-    button.innerHTML = previousLabel;
-    reportNonFatal("wishlist-follow.toggle", error);
+    reportNonFatal("wishlist-intent.toggle", error);
   } finally {
-    button.disabled = false;
+    setWishlistActionsDisabled(container, false);
   }
 }
 
@@ -633,23 +690,33 @@ function ensureWishlistRowFollowControl(row, stateItems) {
     row.appendChild(container);
   }
 
-  let button = container.querySelector(".swm-follow-btn");
-  if (!button) {
-    button = document.createElement("button");
-    button.type = "button";
-    button.className = "swm-follow-btn";
-    container.appendChild(button);
+  const actions = ["buy", "maybe", "archive", "follow"];
+  for (const action of actions) {
+    let button = container.querySelector(`[data-action='${action}']`);
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "swm-action-btn";
+      button.dataset.action = action;
+      container.appendChild(button);
+    }
   }
 
   const item = stateItems?.[appId] || {};
-  setFollowButtonVisualState(button, normalizeTrackState(item));
+  setWishlistActionButtonsVisualState(container, getWishlistIntentState(item));
 
   const title = getItemTitleFromWishlistRow(row);
-  button.onclick = () => {
-    handleWishlistFollowToggle(button, appId, title).catch((error) => {
-      reportNonFatal("wishlist-follow.onclick", error);
-    });
-  };
+  for (const action of actions) {
+    const button = container.querySelector(`[data-action='${action}']`);
+    if (!button) {
+      continue;
+    }
+    button.onclick = () => {
+      handleWishlistIntentAction(container, appId, title, action).catch((error) => {
+        reportNonFatal("wishlist-intent.onclick", error);
+      });
+    };
+  }
 }
 
 async function decorateWishlistFollowUi() {
