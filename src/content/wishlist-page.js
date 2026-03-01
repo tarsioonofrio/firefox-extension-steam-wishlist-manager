@@ -3,12 +3,14 @@ const ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const FOLLOW_UI_STYLE_ID = "swm-wishlist-follow-ui-style";
 const WISHLIST_ROW_SELECTOR = ".wishlist_row, [id^='game_'], [data-app-id], .c-Pw-ER6JnA-.Panel";
 const APP_LINK_SELECTOR = "a[href*='/app/']";
+const WISHLIST_STATE_FILTER_KEY = "swmWishlistStateFilter";
 let domOrderSyncInFlight = false;
 let wishlistFollowUiScheduled = false;
 let wishlistFollowUiObserver = null;
 let wishlistStateCache = { items: {} };
 let wishlistStateLoadedAt = 0;
 let wishlistStateLoadPromise = null;
+let wishlistCurrentStateFilter = "all";
 const NON_FATAL_LOG_WINDOW_MS = 15000;
 const nonFatalLogAt = new Map();
 
@@ -537,6 +539,30 @@ function getWishlistIntentState(item) {
   };
 }
 
+function getWishlistBucket(intentState) {
+  if (intentState?.owned) {
+    return "archive";
+  }
+  if (Number(intentState?.buy || 0) >= 2) {
+    return "buy";
+  }
+  if (Number(intentState?.buy || 0) === 1) {
+    return "maybe";
+  }
+  if (Boolean(intentState?.track)) {
+    return "follow";
+  }
+  return "inbox";
+}
+
+function matchesWishlistStateFilter(bucket, filterValue) {
+  const target = String(filterValue || "all").toLowerCase();
+  if (target === "all") {
+    return true;
+  }
+  return String(bucket || "inbox").toLowerCase() === target;
+}
+
 async function loadWishlistState(force = false) {
   const now = Date.now();
   if (!force && wishlistStateLoadPromise) {
@@ -647,6 +673,30 @@ function ensureWishlistFollowUiStyle() {
       opacity: 0.65;
       cursor: wait;
     }
+    .swm-state-filter-bar {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+      margin: 6px 0 10px !important;
+    }
+    .swm-state-filter {
+      position: static !important;
+      min-width: 138px;
+      height: 34px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 2px;
+      background: #1b2838;
+      color: #c7d5e0;
+      font-size: 12px;
+      padding: 0 8px;
+      box-sizing: border-box !important;
+    }
+    .swm-state-filter:focus {
+      outline: 1px solid rgba(102, 192, 244, 0.65);
+      outline-offset: 0;
+    }
     .swm-wishlist-actions.is-compact {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -675,6 +725,151 @@ function ensureWishlistFollowUiStyle() {
     }
   `;
   document.head.appendChild(style);
+}
+
+function findWishlistSearchInput() {
+  const directMatches = document.querySelectorAll("input._4Es02s8Xf3s-.Focusable[placeholder='Search by name or tag']");
+  for (const input of directMatches) {
+    const rect = input.getBoundingClientRect();
+    const width = Number(rect.width || 0);
+    const height = Number(rect.height || 0);
+    if (width > 280 && height >= 24 && rect.top >= 0 && rect.bottom > rect.top) {
+      return input;
+    }
+  }
+
+  const candidates = document.querySelectorAll("input[type='search'], input[type='text']");
+  const rows = getWishlistRows();
+  const firstRow = rows?.[0];
+  const rowRect = firstRow?.getBoundingClientRect?.();
+  const exactMatches = [];
+  for (const input of candidates) {
+    const placeholder = String(input?.getAttribute?.("placeholder") || "").toLowerCase();
+    if (!placeholder.includes("search by name or tag")) {
+      continue;
+    }
+    const rect = input.getBoundingClientRect();
+    const width = Number(rect.width || 0);
+    const height = Number(rect.height || 0);
+    const visible = width > 280 && height >= 24 && rect.top >= 0 && rect.bottom > rect.top;
+    if (!visible) {
+      continue;
+    }
+    exactMatches.push(input);
+  }
+  if (exactMatches.length > 0) {
+    if (!rowRect) {
+      return exactMatches[0];
+    }
+    let best = exactMatches[0];
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (const input of exactMatches) {
+      const rect = input.getBoundingClientRect();
+      const topDelta = Math.abs(Number(rowRect.top || 0) - Number(rect.top || 0));
+      const leftDelta = Math.abs(Number(rowRect.left || 0) - Number(rect.left || 0));
+      const score = 5000 - topDelta - leftDelta + Number(rect.width || 0) * 0.1;
+      if (score > bestScore) {
+        bestScore = score;
+        best = input;
+      }
+    }
+    return best;
+  }
+
+  if (!rowRect) {
+    return null;
+  }
+  let best = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const input of candidates) {
+    const rect = input.getBoundingClientRect();
+    const width = Number(rect.width || 0);
+    const height = Number(rect.height || 0);
+    if (width < 340 || height < 22) {
+      continue;
+    }
+    if (rect.bottom > rowRect.top + 10) {
+      continue;
+    }
+    if (rect.top < 120) {
+      continue;
+    }
+    const leftDelta = Math.abs(Number(rect.left || 0) - Number(rowRect.left || 0));
+    const topDelta = Math.abs(Number(rowRect.top || 0) - Number(rect.top || 0));
+    const score = 5000 - topDelta - leftDelta;
+    if (score > bestScore) {
+      bestScore = score;
+      best = input;
+    }
+  }
+  return best;
+}
+
+function applyWishlistStateFilterToRows(rows, stateItems) {
+  const filterValue = String(wishlistCurrentStateFilter || "all");
+  for (const row of rows || []) {
+    const appId = getAppIdFromWishlistRow(row);
+    const item = appId ? (stateItems?.[appId] || {}) : {};
+    const bucket = getWishlistBucket(getWishlistIntentState(item));
+    const visible = matchesWishlistStateFilter(bucket, filterValue);
+    row.style.display = visible ? "" : "none";
+  }
+}
+
+function ensureWishlistStateFilterControl(stateItems) {
+  const rows = getWishlistRows();
+  const firstRow = rows?.[0];
+  const listParent = firstRow?.parentElement;
+  if (!listParent || !firstRow) {
+    return;
+  }
+
+  let bar = document.getElementById("swm-state-filter-bar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "swm-state-filter-bar";
+    bar.className = "swm-state-filter-bar";
+  }
+  if (bar.parentElement !== listParent || bar.nextElementSibling !== firstRow) {
+    listParent.insertBefore(bar, firstRow);
+  }
+
+  let select = document.getElementById("swm-state-filter-select");
+  if (!select) {
+    select = document.createElement("select");
+    select.id = "swm-state-filter-select";
+    select.className = "swm-state-filter";
+    const options = [
+      ["all", "All states"],
+      ["inbox", "Inbox"],
+      ["buy", "Buy"],
+      ["maybe", "Maybe"],
+      ["follow", "Follow"],
+      ["archive", "Archive"]
+    ];
+    for (const [value, label] of options) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    }
+    select.addEventListener("change", () => {
+      wishlistCurrentStateFilter = String(select.value || "all");
+      try {
+        window.sessionStorage.setItem(WISHLIST_STATE_FILTER_KEY, wishlistCurrentStateFilter);
+      } catch {}
+      const rows = getWishlistRows();
+      applyWishlistStateFilterToRows(rows, stateItems);
+    });
+  }
+  if (select.parentElement !== bar) {
+    bar.appendChild(select);
+  }
+
+  if (!wishlistCurrentStateFilter) {
+    wishlistCurrentStateFilter = "all";
+  }
+  select.value = wishlistCurrentStateFilter;
 }
 
 function setWishlistActionButtonsVisualState(container, intentState) {
@@ -754,6 +949,7 @@ async function handleWishlistIntentAction(container, appId, title, action) {
     updateWishlistStateItemCache(id, response?.item || patch);
     const nextIntent = getWishlistIntentState(wishlistStateCache?.items?.[id] || {});
     setWishlistActionButtonsVisualState(container, nextIntent);
+    applyWishlistStateFilterToRows(getWishlistRows(), wishlistStateCache?.items || {});
   } catch (error) {
     reportNonFatal("wishlist-intent.toggle", error);
   } finally {
@@ -816,12 +1012,22 @@ async function decorateWishlistFollowUi() {
     return;
   }
   ensureWishlistFollowUiStyle();
+  if (!wishlistCurrentStateFilter) {
+    try {
+      const cached = String(window.sessionStorage.getItem(WISHLIST_STATE_FILTER_KEY) || "").trim().toLowerCase();
+      wishlistCurrentStateFilter = cached || "all";
+    } catch {
+      wishlistCurrentStateFilter = "all";
+    }
+  }
   const state = await loadWishlistState(false);
   const stateItems = state?.items && typeof state.items === "object" ? state.items : {};
   const rows = getWishlistRows();
   for (const row of rows) {
     ensureWishlistRowFollowControl(row, stateItems);
   }
+  ensureWishlistStateFilterControl(stateItems);
+  applyWishlistStateFilterToRows(rows, stateItems);
 }
 
 function scheduleWishlistFollowUiDecorate() {
