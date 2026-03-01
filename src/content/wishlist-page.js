@@ -640,25 +640,38 @@ function ensureWishlistFollowUiStyle() {
     }
     .swm-action-btn.is-active {
       background: #1f4e7a;
-    }
-    .swm-action-btn[data-action="buy"] {
-      background: #2f5f2b;
-    }
-    .swm-action-btn[data-action="maybe"] {
-      background: #6a5a2a;
-    }
-    .swm-action-btn[data-action="archive"] {
-      background: #5a334a;
-    }
-    .swm-action-btn[data-action="follow"] {
-      background: #4c6b22;
-    }
-    .swm-action-btn[data-action="follow"]:hover {
-      background: #6f952d;
+      border-color: rgba(255, 255, 255, 0.25);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     }
     .swm-action-btn:disabled {
       opacity: 0.65;
       cursor: wait;
+    }
+    .swm-wishlist-actions.is-compact {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-areas:
+        "buy buy"
+        "maybe archive"
+        "follow follow";
+    }
+    .swm-wishlist-actions.is-compact .swm-action-btn {
+      min-width: 0;
+      width: auto;
+      font-size: 10px;
+      padding: 0 4px;
+    }
+    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="buy"] {
+      grid-area: buy;
+    }
+    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="maybe"] {
+      grid-area: maybe;
+    }
+    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="archive"] {
+      grid-area: archive;
+    }
+    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="follow"] {
+      grid-area: follow;
     }
   `;
   document.head.appendChild(style);
@@ -766,6 +779,8 @@ function ensureWishlistRowFollowControl(row, stateItems) {
   if (container.parentElement !== row) {
     row.appendChild(container);
   }
+  const compactRow = Number(row.offsetHeight || 0) > 0 && Number(row.offsetHeight || 0) <= 104;
+  container.classList.toggle("is-compact", compactRow);
 
   const actions = ["buy", "maybe", "archive", "follow"];
   for (const action of actions) {
