@@ -7,10 +7,22 @@ const WISHLIST_STATE_FILTER_KEY = "swmWishlistStateFilter";
 let domOrderSyncInFlight = false;
 let wishlistFollowUiScheduled = false;
 let wishlistFollowUiObserver = null;
+let wishlistFollowUiWindowHooksAdded = false;
 let wishlistStateCache = { items: {} };
 let wishlistStateLoadedAt = 0;
 let wishlistStateLoadPromise = null;
 let wishlistCurrentStateFilter = "all";
+let wishlistAdvancedFilters = {
+  tagsQuery: "",
+  ratingMin: 0,
+  ratingMax: 100,
+  reviewsMin: 0,
+  reviewsMax: Number.MAX_SAFE_INTEGER,
+  priceMin: 0,
+  priceMax: Number.MAX_SAFE_INTEGER,
+  discountMin: 0,
+  discountMax: 100
+};
 const NON_FATAL_LOG_WINDOW_MS = 15000;
 const nonFatalLogAt = new Map();
 
@@ -454,15 +466,33 @@ function isLikelyWishlistRow(node) {
   if (!node || !(node instanceof HTMLElement)) {
     return false;
   }
-  if (node.matches(".wishlist_row, [id^='game_'], [data-app-id], [data-ds-appid], .c-Pw-ER6JnA-.Panel")) {
+  if (node.matches(".wishlist_row, [id^='game_']")) {
     return true;
   }
-  if (!node.querySelector(APP_LINK_SELECTOR)) {
+  if (node.querySelector(".wishlist_row, [id^='game_']")) {
+    return false;
+  }
+  const links = node.querySelectorAll(APP_LINK_SELECTOR);
+  if (!links || links.length === 0) {
+    return false;
+  }
+  const appIds = new Set();
+  for (const link of links) {
+    const href = String(link?.getAttribute?.("href") || "");
+    const m = href.match(/\/app\/(\d+)/);
+    if (m?.[1]) {
+      appIds.add(m[1]);
+      if (appIds.size > 1) {
+        return false;
+      }
+    }
+  }
+  if (appIds.size !== 1) {
     return false;
   }
   const width = Number(node.offsetWidth || 0);
   const height = Number(node.offsetHeight || 0);
-  if (width < 420 || height < 70) {
+  if (width < 420 || height < 70 || height > 420) {
     return false;
   }
   return true;
@@ -471,6 +501,10 @@ function isLikelyWishlistRow(node) {
 function findWishlistRowFromAppLink(anchor) {
   if (!anchor || !(anchor instanceof HTMLElement)) {
     return null;
+  }
+  const explicit = anchor.closest(".wishlist_row, [id^='game_']");
+  if (explicit instanceof HTMLElement) {
+    return explicit;
   }
   let node = anchor;
   for (let i = 0; i < 8 && node && node !== document.body; i += 1) {
@@ -483,30 +517,41 @@ function findWishlistRowFromAppLink(anchor) {
 }
 
 function getWishlistRows() {
-  const out = [];
-  const seen = new Set();
+  const candidates = new Set();
+  for (const row of document.querySelectorAll(".wishlist_row, [id^='game_']")) {
+    if (row instanceof HTMLElement) {
+      candidates.add(row);
+    }
+  }
+  for (const link of document.querySelectorAll(APP_LINK_SELECTOR)) {
+    const row = findWishlistRowFromAppLink(link);
+    if (row instanceof HTMLElement) {
+      candidates.add(row);
+    }
+  }
 
-  for (const row of document.querySelectorAll(WISHLIST_ROW_SELECTOR)) {
+  const byAppId = new Map();
+  for (const row of candidates) {
     if (!(row instanceof HTMLElement)) {
       continue;
     }
-    if (seen.has(row)) {
+    if (!isLikelyWishlistRow(row)) {
       continue;
     }
-    seen.add(row);
-    out.push(row);
-  }
-
-  for (const link of document.querySelectorAll(APP_LINK_SELECTOR)) {
-    const row = findWishlistRowFromAppLink(link);
-    if (!row || seen.has(row)) {
+    const appId = getAppIdFromWishlistRow(row);
+    if (!appId) {
       continue;
     }
-    seen.add(row);
-    out.push(row);
+    if (!byAppId.has(appId)) {
+      byAppId.set(appId, row);
+    }
   }
 
-  return out;
+  return Array.from(byAppId.values()).sort((a, b) => {
+    const ta = Number(a.getBoundingClientRect()?.top || 0);
+    const tb = Number(b.getBoundingClientRect()?.top || 0);
+    return ta - tb;
+  });
 }
 
 function getAppIdFromWishlistRow(row) {
@@ -623,7 +668,8 @@ function ensureWishlistFollowUiStyle() {
     .swm-row-with-follow {
       position: relative !important;
       margin-left: 0 !important;
-      width: auto !important;
+      margin-right: 210px !important;
+      width: calc(100% - 210px) !important;
       box-sizing: border-box !important;
       overflow: visible !important;
       padding-left: 150px !important;
@@ -679,7 +725,7 @@ function ensureWishlistFollowUiStyle() {
       justify-content: flex-start !important;
       width: 100% !important;
       box-sizing: border-box !important;
-      margin: 6px 0 10px !important;
+      margin: 6px 210px 10px 0 !important;
     }
     .swm-state-filter {
       position: static !important;
@@ -696,6 +742,52 @@ function ensureWishlistFollowUiStyle() {
     .swm-state-filter:focus {
       outline: 1px solid rgba(102, 192, 244, 0.65);
       outline-offset: 0;
+    }
+    .swm-list-with-filters {
+      position: relative !important;
+      box-sizing: border-box !important;
+    }
+    .swm-right-filters {
+      position: fixed !important;
+      top: 8px;
+      width: 196px;
+      box-sizing: border-box;
+      padding: 10px;
+      background: rgba(13, 29, 46, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 2px;
+      z-index: 25;
+    }
+    .swm-right-filters h4 {
+      margin: 0 0 8px;
+      color: #c7d5e0;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    .swm-right-filters .swm-field {
+      margin: 0 0 8px;
+    }
+    .swm-right-filters label {
+      display: block;
+      margin: 0 0 4px;
+      color: #9fb7cc;
+      font-size: 11px;
+    }
+    .swm-right-filters input {
+      width: 100%;
+      height: 28px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 2px;
+      background: #1b2838;
+      color: #c7d5e0;
+      font-size: 11px;
+      padding: 0 6px;
+      box-sizing: border-box;
+    }
+    .swm-right-filters .swm-grid2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
     }
     .swm-wishlist-actions.is-compact {
       display: grid;
@@ -806,14 +898,7 @@ function findWishlistSearchInput() {
 }
 
 function applyWishlistStateFilterToRows(rows, stateItems) {
-  const filterValue = String(wishlistCurrentStateFilter || "all");
-  for (const row of rows || []) {
-    const appId = getAppIdFromWishlistRow(row);
-    const item = appId ? (stateItems?.[appId] || {}) : {};
-    const bucket = getWishlistBucket(getWishlistIntentState(item));
-    const visible = matchesWishlistStateFilter(bucket, filterValue);
-    row.style.display = visible ? "" : "none";
-  }
+  applyWishlistFiltersToRows(rows, stateItems);
 }
 
 function ensureWishlistStateFilterControl(stateItems) {
@@ -833,6 +918,7 @@ function ensureWishlistStateFilterControl(stateItems) {
   if (bar.parentElement !== listParent || bar.nextElementSibling !== firstRow) {
     listParent.insertBefore(bar, firstRow);
   }
+  listParent.classList.add("swm-list-with-filters");
 
   let select = document.getElementById("swm-state-filter-select");
   if (!select) {
@@ -859,7 +945,7 @@ function ensureWishlistStateFilterControl(stateItems) {
         window.sessionStorage.setItem(WISHLIST_STATE_FILTER_KEY, wishlistCurrentStateFilter);
       } catch {}
       const rows = getWishlistRows();
-      applyWishlistStateFilterToRows(rows, stateItems);
+      applyWishlistFiltersToRows(rows, stateItems);
     });
   }
   if (select.parentElement !== bar) {
@@ -870,6 +956,210 @@ function ensureWishlistStateFilterControl(stateItems) {
     wishlistCurrentStateFilter = "all";
   }
   select.value = wishlistCurrentStateFilter;
+}
+
+function parseNumberLoose(value, fallback = 0) {
+  const n = Number(String(value || "").replace(/[^\d.-]/g, ""));
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function parsePriceLoose(text) {
+  const source = String(text || "").replace(/\./g, "").replace(",", ".");
+  const m = source.match(/(\d+(?:\.\d{1,2})?)/);
+  if (!m?.[1]) {
+    return null;
+  }
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function extractRowMetrics(row, stateItems) {
+  const appId = getAppIdFromWishlistRow(row);
+  const item = appId ? (stateItems?.[appId] || {}) : {};
+  const intent = getWishlistIntentState(item);
+  const bucket = getWishlistBucket(intent);
+
+  const text = String(row?.textContent || "");
+  const lower = text.toLowerCase();
+  const title = getItemTitleFromWishlistRow(row).toLowerCase();
+
+  const ratingMatch = text.match(/(\d{1,3})\s?%/);
+  const rating = ratingMatch ? Math.max(0, Math.min(100, parseNumberLoose(ratingMatch[1], -1))) : -1;
+
+  let reviews = 0;
+  const reviewMatch = text.match(/(\d[\d,.]*)\s+(?:user\s+)?reviews?/i);
+  if (reviewMatch?.[1]) {
+    reviews = parseNumberLoose(reviewMatch[1], 0);
+  }
+
+  let discount = 0;
+  const discountMatch = text.match(/-\s?(\d{1,3})\s?%/);
+  if (discountMatch?.[1]) {
+    discount = Math.max(0, Math.min(100, parseNumberLoose(discountMatch[1], 0)));
+  }
+
+  let price = null;
+  const priceNodes = row.querySelectorAll(".discount_final_price, .discount_original_price, [class*='price']");
+  for (const node of priceNodes) {
+    const p = parsePriceLoose(node.textContent || "");
+    if (p !== null && p >= 0) {
+      price = p;
+      break;
+    }
+  }
+  if (price === null) {
+    const loosePrice = parsePriceLoose(text);
+    if (loosePrice !== null && loosePrice < 100000) {
+      price = loosePrice;
+    }
+  }
+
+  return {
+    bucket,
+    title,
+    lower,
+    rating,
+    reviews,
+    discount,
+    price
+  };
+}
+
+function passesAdvancedFilters(metrics) {
+  const f = wishlistAdvancedFilters || {};
+  const tagsQuery = String(f.tagsQuery || "").trim().toLowerCase();
+  if (tagsQuery && !(metrics.title.includes(tagsQuery) || metrics.lower.includes(tagsQuery))) {
+    return false;
+  }
+  if (metrics.rating >= 0) {
+    if (metrics.rating < Number(f.ratingMin || 0) || metrics.rating > Number(f.ratingMax || 100)) {
+      return false;
+    }
+  }
+  if (metrics.reviews > 0) {
+    if (metrics.reviews < Number(f.reviewsMin || 0) || metrics.reviews > Number(f.reviewsMax || Number.MAX_SAFE_INTEGER)) {
+      return false;
+    }
+  }
+  if (metrics.discount > 0) {
+    if (metrics.discount < Number(f.discountMin || 0) || metrics.discount > Number(f.discountMax || 100)) {
+      return false;
+    }
+  }
+  if (metrics.price !== null) {
+    if (metrics.price < Number(f.priceMin || 0) || metrics.price > Number(f.priceMax || Number.MAX_SAFE_INTEGER)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function applyWishlistFiltersToRows(rows, stateItems) {
+  const filterValue = String(wishlistCurrentStateFilter || "all");
+  for (const row of rows || []) {
+    const metrics = extractRowMetrics(row, stateItems);
+    const stateMatch = matchesWishlistStateFilter(metrics.bucket, filterValue);
+    const advMatch = passesAdvancedFilters(metrics);
+    row.style.display = stateMatch && advMatch ? "" : "none";
+  }
+}
+
+function ensureWishlistRightFiltersPanel(stateItems) {
+  const rows = getWishlistRows();
+  const firstRow = rows?.[0];
+  const listParent = firstRow?.parentElement;
+  if (!listParent || !firstRow) {
+    return;
+  }
+  listParent.classList.add("swm-list-with-filters");
+  listParent.style.position = "relative";
+  listParent.style.paddingRight = "";
+  listParent.style.boxSizing = "border-box";
+
+  let panel = document.getElementById("swm-right-filters");
+  if (!panel) {
+    panel = document.createElement("aside");
+    panel.id = "swm-right-filters";
+    panel.className = "swm-right-filters";
+    panel.innerHTML = `
+      <h4>Filters</h4>
+      <div class="swm-field">
+        <label for="swm-tags-filter">Tags</label>
+        <input id="swm-tags-filter" type="text" placeholder="tag text">
+      </div>
+      <div class="swm-field">
+        <label>Rating %</label>
+        <div class="swm-grid2">
+          <input id="swm-rating-min" type="number" min="0" max="100" step="1" value="0">
+          <input id="swm-rating-max" type="number" min="0" max="100" step="1" value="100">
+        </div>
+      </div>
+      <div class="swm-field">
+        <label>Reviews</label>
+        <div class="swm-grid2">
+          <input id="swm-reviews-min" type="number" min="0" step="1" value="0">
+          <input id="swm-reviews-max" type="number" min="0" step="1" placeholder="max">
+        </div>
+      </div>
+      <div class="swm-field">
+        <label>Price</label>
+        <div class="swm-grid2">
+          <input id="swm-price-min" type="number" min="0" step="0.01" value="0">
+          <input id="swm-price-max" type="number" min="0" step="0.01" placeholder="max">
+        </div>
+      </div>
+      <div class="swm-field">
+        <label>Discount %</label>
+        <div class="swm-grid2">
+          <input id="swm-discount-min" type="number" min="0" max="100" step="1" value="0">
+          <input id="swm-discount-max" type="number" min="0" max="100" step="1" value="100">
+        </div>
+      </div>
+    `;
+  }
+  if (panel.parentElement !== document.body) {
+    document.body.appendChild(panel);
+  }
+  panel.style.position = "fixed";
+  panel.style.width = "196px";
+  panel.style.boxSizing = "border-box";
+  panel.style.zIndex = "25";
+  panel.style.marginLeft = "0";
+
+  const rowRect = firstRow.getBoundingClientRect();
+  panel.style.top = `${Math.max(8, Math.round(rowRect.top))}px`;
+  const maxLeft = Math.max(8, window.innerWidth - 196 - 8);
+  const left = Math.min(maxLeft, Math.max(8, Math.round(rowRect.right + 8)));
+  panel.style.left = `${left}px`;
+
+  const bind = (id, key, parser) => {
+    const el = panel.querySelector(`#${id}`);
+    if (!el || el.dataset.swmBound) {
+      return;
+    }
+    el.dataset.swmBound = "1";
+    el.addEventListener("input", () => {
+      wishlistAdvancedFilters[key] = parser(el.value);
+      applyWishlistFiltersToRows(getWishlistRows(), stateItems);
+    });
+  };
+
+  bind("swm-tags-filter", "tagsQuery", (v) => String(v || "").slice(0, 60));
+  bind("swm-rating-min", "ratingMin", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 0))));
+  bind("swm-rating-max", "ratingMax", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 100))));
+  bind("swm-reviews-min", "reviewsMin", (v) => Math.max(0, parseNumberLoose(v, 0)));
+  bind("swm-reviews-max", "reviewsMax", (v) => {
+    const raw = String(v || "").trim();
+    return raw ? Math.max(0, parseNumberLoose(raw, Number.MAX_SAFE_INTEGER)) : Number.MAX_SAFE_INTEGER;
+  });
+  bind("swm-price-min", "priceMin", (v) => Math.max(0, Number(v || 0)));
+  bind("swm-price-max", "priceMax", (v) => {
+    const raw = String(v || "").trim();
+    const n = Number(raw || 0);
+    return raw && Number.isFinite(n) && n >= 0 ? n : Number.MAX_SAFE_INTEGER;
+  });
+  bind("swm-discount-min", "discountMin", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 0))));
+  bind("swm-discount-max", "discountMax", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 100))));
 }
 
 function setWishlistActionButtonsVisualState(container, intentState) {
@@ -949,7 +1239,7 @@ async function handleWishlistIntentAction(container, appId, title, action) {
     updateWishlistStateItemCache(id, response?.item || patch);
     const nextIntent = getWishlistIntentState(wishlistStateCache?.items?.[id] || {});
     setWishlistActionButtonsVisualState(container, nextIntent);
-    applyWishlistStateFilterToRows(getWishlistRows(), wishlistStateCache?.items || {});
+    applyWishlistFiltersToRows(getWishlistRows(), wishlistStateCache?.items || {});
   } catch (error) {
     reportNonFatal("wishlist-intent.toggle", error);
   } finally {
@@ -972,6 +1262,9 @@ function ensureWishlistRowFollowControl(row, stateItems) {
   }
 
   row.classList.add("swm-row-with-follow");
+  row.style.removeProperty("margin-right");
+  row.style.removeProperty("width");
+  row.style.removeProperty("box-sizing");
   if (container.parentElement !== row) {
     row.appendChild(container);
   }
@@ -1027,7 +1320,8 @@ async function decorateWishlistFollowUi() {
     ensureWishlistRowFollowControl(row, stateItems);
   }
   ensureWishlistStateFilterControl(stateItems);
-  applyWishlistStateFilterToRows(rows, stateItems);
+  ensureWishlistRightFiltersPanel(stateItems);
+  applyWishlistFiltersToRows(rows, stateItems);
 }
 
 function scheduleWishlistFollowUiDecorate() {
@@ -1046,6 +1340,11 @@ function initWishlistFollowUi() {
     return;
   }
   scheduleWishlistFollowUiDecorate();
+  if (!wishlistFollowUiWindowHooksAdded) {
+    window.addEventListener("resize", scheduleWishlistFollowUiDecorate, { passive: true });
+    window.addEventListener("scroll", scheduleWishlistFollowUiDecorate, { passive: true });
+    wishlistFollowUiWindowHooksAdded = true;
+  }
   if (wishlistFollowUiObserver) {
     return;
   }
