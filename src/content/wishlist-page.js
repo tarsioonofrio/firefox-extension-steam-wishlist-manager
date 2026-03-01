@@ -466,35 +466,35 @@ function isLikelyWishlistRow(node) {
   if (!node || !(node instanceof HTMLElement)) {
     return false;
   }
-  if (node.matches(".wishlist_row, [id^='game_']")) {
-    return true;
-  }
-  if (node.querySelector(".wishlist_row, [id^='game_']")) {
-    return false;
-  }
-  const links = node.querySelectorAll(APP_LINK_SELECTOR);
-  if (!links || links.length === 0) {
-    return false;
-  }
-  const appIds = new Set();
-  for (const link of links) {
-    const href = String(link?.getAttribute?.("href") || "");
-    const m = href.match(/\/app\/(\d+)/);
-    if (m?.[1]) {
-      appIds.add(m[1]);
-      if (appIds.size > 1) {
-        return false;
-      }
-    }
-  }
-  if (appIds.size !== 1) {
-    return false;
-  }
   const width = Number(node.offsetWidth || 0);
   const height = Number(node.offsetHeight || 0);
   if (width < 420 || height < 70 || height > 420) {
     return false;
   }
+
+  if (node.matches(".wishlist_row, [id^='game_']")) {
+    return true;
+  }
+
+  if (node.querySelector(".wishlist_row, [id^='game_']")) {
+    return false;
+  }
+
+  const appId = getAppIdFromWishlistRow(node);
+  if (!appId) {
+    return false;
+  }
+
+  const hasMetaSignals = Boolean(
+    node.querySelector(".title, .wishlistRowItemName, a.title")
+    || node.querySelector(".discount_final_price, .discount_original_price, [class*='price']")
+    || node.querySelector("[id*='remove'], .delete, [class*='remove']")
+    || node.querySelector(".release_date, [class*='review'], [class*='ReleaseDate']")
+  );
+  if (!hasMetaSignals) {
+    return false;
+  }
+
   return true;
 }
 
@@ -516,33 +516,49 @@ function findWishlistRowFromAppLink(anchor) {
   return null;
 }
 
-function getWishlistRows() {
-  const candidates = new Set();
-  for (const row of document.querySelectorAll(".wishlist_row, [id^='game_']")) {
-    if (row instanceof HTMLElement) {
-      candidates.add(row);
+function collectRowCandidatesFromSelector(selector) {
+  const rows = [];
+  for (const node of document.querySelectorAll(selector)) {
+    if (node instanceof HTMLElement && isLikelyWishlistRow(node)) {
+      rows.push(node);
     }
   }
+  return rows;
+}
+
+function collectRowCandidatesFromAppLinks() {
+  const rows = [];
   for (const link of document.querySelectorAll(APP_LINK_SELECTOR)) {
     const row = findWishlistRowFromAppLink(link);
-    if (row instanceof HTMLElement) {
-      candidates.add(row);
+    if (row instanceof HTMLElement && isLikelyWishlistRow(row)) {
+      rows.push(row);
     }
   }
+  return rows;
+}
 
+function scoreWishlistRowCandidate(row) {
+  const width = Number(row.offsetWidth || 0);
+  const height = Number(row.offsetHeight || 0);
+  const hasTitle = row.querySelector(".title, .wishlistRowItemName, a.title") ? 1 : 0;
+  const hasPrice = row.querySelector(".discount_final_price, .discount_original_price, [class*='price']") ? 1 : 0;
+  const hasRemove = row.querySelector("[id*='remove'], .delete, [class*='remove']") ? 1 : 0;
+  const hasReviewOrDate = row.querySelector(".release_date, [class*='review'], [class*='ReleaseDate']") ? 1 : 0;
+  return width * 2 + height + hasTitle * 500 + hasPrice * 400 + hasRemove * 250 + hasReviewOrDate * 200;
+}
+
+function dedupeAndSortWishlistRows(candidates) {
   const byAppId = new Map();
   for (const row of candidates) {
     if (!(row instanceof HTMLElement)) {
-      continue;
-    }
-    if (!isLikelyWishlistRow(row)) {
       continue;
     }
     const appId = getAppIdFromWishlistRow(row);
     if (!appId) {
       continue;
     }
-    if (!byAppId.has(appId)) {
+    const current = byAppId.get(appId);
+    if (!current || scoreWishlistRowCandidate(row) > scoreWishlistRowCandidate(current)) {
       byAppId.set(appId, row);
     }
   }
@@ -552,6 +568,27 @@ function getWishlistRows() {
     const tb = Number(b.getBoundingClientRect()?.top || 0);
     return ta - tb;
   });
+}
+
+function getWishlistRows() {
+  // Strategy 1: canonical Steam wishlist rows.
+  const canonical = dedupeAndSortWishlistRows(
+    collectRowCandidatesFromSelector(".wishlist_row, [id^='game_']")
+  );
+  if (canonical.length >= 2) {
+    return canonical;
+  }
+
+  // Strategy 2: broader selectors often used by Steam experiments.
+  const broad = dedupeAndSortWishlistRows(
+    collectRowCandidatesFromSelector(WISHLIST_ROW_SELECTOR)
+  );
+  if (broad.length >= 2) {
+    return broad;
+  }
+
+  // Strategy 3: climb from app links and validate by single-app row signals.
+  return dedupeAndSortWishlistRows(collectRowCandidatesFromAppLinks());
 }
 
 function getAppIdFromWishlistRow(row) {
