@@ -1,13 +1,15 @@
 (() => {
+  const OPEN_ENDED_MAX_VALUE = Number.MAX_SAFE_INTEGER;
+
   function renderRangeControls(values) {
     const ratingMin = Number(values?.ratingMin ?? 0);
     const ratingMax = Number(values?.ratingMax ?? 100);
     const reviewsMin = Number(values?.reviewsMin ?? 0);
-    const reviewsMax = Number(values?.reviewsMax ?? 999999999);
+    const reviewsMax = Number(values?.reviewsMax ?? OPEN_ENDED_MAX_VALUE);
     const discountMin = Number(values?.discountMin ?? 0);
     const discountMax = Number(values?.discountMax ?? 100);
     const priceMin = Number(values?.priceMin ?? 0);
-    const priceMax = Number(values?.priceMax ?? 9999999);
+    const priceMax = Number(values?.priceMax ?? OPEN_ENDED_MAX_VALUE);
     const releaseTextEnabled = Boolean(values?.releaseTextEnabled);
     const releaseYearRangeEnabled = Boolean(values?.releaseYearRangeEnabled);
     const releaseYearMin = Number(values?.releaseYearMin ?? 1970);
@@ -40,13 +42,17 @@
     if (minRange) minRange.value = String(ratingMin);
     if (maxRange) maxRange.value = String(ratingMax);
     if (minInput) minInput.value = String(reviewsMin);
-    if (maxInput) maxInput.value = String(reviewsMax);
+    if (maxInput) {
+      maxInput.value = reviewsMax >= OPEN_ENDED_MAX_VALUE ? "" : String(reviewsMax);
+    }
     if (discountMinLabel) discountMinLabel.textContent = `${discountMin}%`;
     if (discountMaxLabel) discountMaxLabel.textContent = `${discountMax}%`;
     if (discountMinRange) discountMinRange.value = String(discountMin);
     if (discountMaxRange) discountMaxRange.value = String(discountMax);
     if (priceMinInput) priceMinInput.value = String(priceMin);
-    if (priceMaxInput) priceMaxInput.value = String(priceMax);
+    if (priceMaxInput) {
+      priceMaxInput.value = priceMax >= OPEN_ENDED_MAX_VALUE ? "" : String(priceMax);
+    }
     if (releaseTextToggle) releaseTextToggle.checked = releaseTextEnabled;
     if (releaseYearToggle) releaseYearToggle.checked = releaseYearRangeEnabled;
     if (releaseYearMinLabel) releaseYearMinLabel.textContent = String(releaseYearMin);
