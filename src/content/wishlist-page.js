@@ -1209,6 +1209,35 @@ function buildWishlistTagCounts(rows) {
   });
 }
 
+function buildWishlistTagCountsFromCache() {
+  const counts = new Map();
+  const items = wishlistStateCache?.items && typeof wishlistStateCache.items === "object"
+    ? wishlistStateCache.items
+    : {};
+  for (const appId of Object.keys(items)) {
+    const tags = Array.isArray(wishlistMetaCache?.[appId]?.tags)
+      ? wishlistMetaCache[appId].tags
+      : [];
+    for (const rawTag of tags) {
+      const name = String(rawTag || "").replace(/\s+/g, " ").trim();
+      if (!name || name.length > 40) {
+        continue;
+      }
+      const key = name.toLowerCase();
+      const entry = counts.get(key) || { name, count: 0 };
+      entry.count += 1;
+      counts.set(key, entry);
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) => {
+    const diff = Number(b.count || 0) - Number(a.count || 0);
+    if (diff !== 0) {
+      return diff;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+}
+
 function renderWishlistTagOptions(panel, stateItems) {
   const optionsEl = panel.querySelector("#swm-tags-options");
   const showMoreBtn = panel.querySelector("#swm-tags-show-more");
@@ -1469,9 +1498,12 @@ function ensureWishlistRightFiltersPanel(stateItems) {
   renderWishlistTagOptions(panel, stateItems);
 }
 
-function getWishlistFiltersSnapshot() {
+async function getWishlistFiltersSnapshot() {
+  await loadWishlistState(false);
+  await loadWishlistMetaCache(false);
   const rows = getWishlistRows();
-  const tagCounts = buildWishlistTagCounts(rows);
+  const cacheCounts = buildWishlistTagCountsFromCache();
+  const tagCounts = cacheCounts.length > 0 ? cacheCounts : buildWishlistTagCounts(rows);
   return {
     ok: true,
     stateFilter: String(wishlistCurrentStateFilter || "all"),
@@ -1492,7 +1524,9 @@ function getWishlistFiltersSnapshot() {
   };
 }
 
-function applyWishlistFiltersPayload(payload) {
+async function applyWishlistFiltersPayload(payload) {
+  await loadWishlistState(false);
+  await loadWishlistMetaCache(false);
   if (!payload || typeof payload !== "object") {
     return getWishlistFiltersSnapshot();
   }
