@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wishlist Filters</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <main class="layout">
+    <h1>Filters</h1>
+
+    <div class="field">
+      <label for="state-filter">State</label>
+      <select id="state-filter">
+        <option value="all">All states</option>
+        <option value="inbox">Inbox</option>
+        <option value="buy">Buy</option>
+        <option value="maybe">Maybe</option>
+        <option value="follow">Follow</option>
+        <option value="archive">Archive</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="tags-search">Tags</label>
+      <input id="tags-search" type="search" placeholder="Search tags...">
+      <div id="tags-options" class="tag-options"></div>
+      <button id="tags-show-more" type="button" class="small-btn">Show more</button>
+    </div>
+
+    <div class="field">
+      <label>Rating %</label>
+      <div class="grid2">
+        <input id="rating-min" type="number" min="0" max="100" step="1" value="0">
+        <input id="rating-max" type="number" min="0" max="100" step="1" value="100">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Reviews</label>
+      <div class="grid2">
+        <input id="reviews-min" type="number" min="0" step="1" value="0">
+        <input id="reviews-max" type="number" min="0" step="1" placeholder="max">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Price</label>
+      <div class="grid2">
+        <input id="price-min" type="number" min="0" step="0.01" value="0">
+        <input id="price-max" type="number" min="0" step="0.01" placeholder="max">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Discount %</label>
+      <div class="grid2">
+        <input id="discount-min" type="number" min="0" max="100" step="1" value="0">
+        <input id="discount-max" type="number" min="0" max="100" step="1" value="100">
+      </div>
+    </div>
+
+    <p id="status" class="status"></p>
+  </main>
+  <script src="sidebar.js"></script>
+</body>
+</html>

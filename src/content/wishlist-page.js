@@ -6,11 +6,14 @@ const WISHLIST_ROW_SELECTOR = ".wishlist_row, [id^='game_'], [data-app-id], .c-P
 const APP_LINK_SELECTOR = "a[href*='/app/']";
 const WISHLIST_STATE_FILTER_KEY = "swmWishlistStateFilter";
 const WISHLIST_TAG_SHOW_STEP = 12;
+const WISHLIST_FILTERS_SIDEBAR_MODE = true;
+const WISHLIST_NATIVE_BROWSER_SIDEBAR_FILTERS = true;
 let domOrderSyncInFlight = false;
 let wishlistFollowUiScheduled = false;
 let wishlistFollowUiObserver = null;
 let wishlistFollowUiWindowHooksAdded = false;
 let wishlistDevRuntimeInfoLogged = false;
+let wishlistSidebarShellEl = null;
 let wishlistStateCache = { items: {} };
 let wishlistStateLoadedAt = 0;
 let wishlistStateLoadPromise = null;
@@ -701,8 +704,8 @@ function ensureWishlistFollowUiStyle() {
     .swm-row-with-follow {
       position: relative !important;
       margin-left: 0 !important;
-      margin-right: 210px !important;
-      width: calc(100% - 210px) !important;
+      margin-right: 0 !important;
+      width: auto !important;
       box-sizing: border-box !important;
       overflow: visible !important;
       padding-left: 150px !important;
@@ -758,7 +761,7 @@ function ensureWishlistFollowUiStyle() {
       justify-content: flex-start !important;
       width: 100% !important;
       box-sizing: border-box !important;
-      margin: 6px 210px 10px 0 !important;
+      margin: 6px 0 10px 0 !important;
     }
     .swm-state-filter {
       position: static !important;
@@ -782,14 +785,17 @@ function ensureWishlistFollowUiStyle() {
     }
     .swm-right-filters {
       position: fixed !important;
-      top: 8px;
-      width: 196px;
+      top: 88px;
+      right: 8px;
+      width: 228px;
+      max-height: calc(100vh - 96px);
+      overflow: auto;
       box-sizing: border-box;
       padding: 10px;
       background: rgba(13, 29, 46, 0.85);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 2px;
-      z-index: 25;
+      z-index: 2147483000;
     }
     .swm-right-filters h4 {
       margin: 0 0 8px;
@@ -977,6 +983,9 @@ function applyWishlistStateFilterToRows(rows, stateItems) {
 }
 
 function ensureWishlistStateFilterControl(stateItems) {
+  if (WISHLIST_FILTERS_SIDEBAR_MODE || WISHLIST_NATIVE_BROWSER_SIDEBAR_FILTERS) {
+    return;
+  }
   const rows = getWishlistRows();
   const firstRow = rows?.[0];
   const listParent = firstRow?.parentElement;
@@ -1272,16 +1281,55 @@ function applyWishlistFiltersToRows(rows, stateItems) {
 }
 
 function ensureWishlistRightFiltersPanel(stateItems) {
-  const rows = getWishlistRows();
-  const firstRow = rows?.[0];
-  const listParent = firstRow?.parentElement;
-  if (!listParent || !firstRow) {
+  if (WISHLIST_NATIVE_BROWSER_SIDEBAR_FILTERS) {
     return;
   }
-  listParent.classList.add("swm-list-with-filters");
-  listParent.style.position = "relative";
-  listParent.style.paddingRight = "";
-  listParent.style.boxSizing = "border-box";
+  const rows = getWishlistRows();
+  const firstRow = rows?.[0];
+  if (!firstRow) {
+    return;
+  }
+  const listParent = firstRow.parentElement;
+  if (listParent) {
+    listParent.classList.add("swm-list-with-filters");
+    listParent.style.position = "relative";
+    listParent.style.paddingRight = WISHLIST_FILTERS_SIDEBAR_MODE ? "0" : "";
+    listParent.style.boxSizing = "border-box";
+  }
+
+  let bestShell = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let node = firstRow;
+  for (let i = 0; i < 10 && node && node !== document.body; i += 1) {
+    if (node instanceof HTMLElement) {
+      const count = node.querySelectorAll(".wishlist_row, [id^='game_']").length;
+      if (count >= 2) {
+        const width = Number(node.getBoundingClientRect()?.width || node.offsetWidth || 0);
+        const score = count * 10000 + width;
+        if (score > bestScore) {
+          bestScore = score;
+          bestShell = node;
+        }
+      }
+    }
+    node = node.parentElement;
+  }
+  const fallbackShell = document.getElementById("wishlist_ctn")
+    || firstRow.closest?.("#wishlist_ctn")
+    || listParent?.closest?.("#wishlist_ctn")
+    || listParent?.parentElement
+    || null;
+  const wishlistShell = bestShell || fallbackShell;
+
+  if (wishlistSidebarShellEl && wishlistSidebarShellEl !== wishlistShell) {
+    wishlistSidebarShellEl.style.paddingRight = "";
+  }
+  wishlistSidebarShellEl = wishlistShell instanceof HTMLElement ? wishlistShell : null;
+
+  if (wishlistSidebarShellEl) {
+    wishlistSidebarShellEl.style.boxSizing = "border-box";
+    wishlistSidebarShellEl.style.paddingRight = WISHLIST_FILTERS_SIDEBAR_MODE ? "250px" : "";
+  }
 
   let panel = document.getElementById("swm-right-filters");
   if (!panel) {
@@ -1290,6 +1338,17 @@ function ensureWishlistRightFiltersPanel(stateItems) {
     panel.className = "swm-right-filters";
     panel.innerHTML = `
       <h4>Filters</h4>
+      <div class="swm-field">
+        <label for="swm-sidebar-state-select">State</label>
+        <select id="swm-sidebar-state-select" class="swm-state-filter">
+          <option value="all">All states</option>
+          <option value="inbox">Inbox</option>
+          <option value="buy">Buy</option>
+          <option value="maybe">Maybe</option>
+          <option value="follow">Follow</option>
+          <option value="archive">Archive</option>
+        </select>
+      </div>
       <div class="swm-field">
         <label for="swm-tags-search">Tags</label>
         <input id="swm-tags-search" type="search" placeholder="Search tags...">
@@ -1330,16 +1389,23 @@ function ensureWishlistRightFiltersPanel(stateItems) {
     document.body.appendChild(panel);
   }
   panel.style.position = "fixed";
-  panel.style.width = "196px";
+  panel.style.top = "88px";
+  panel.style.right = "8px";
+  panel.style.left = "auto";
+  panel.style.width = "228px";
   panel.style.boxSizing = "border-box";
-  panel.style.zIndex = "25";
+  panel.style.maxHeight = "calc(100vh - 96px)";
+  panel.style.overflow = "auto";
+  panel.style.zIndex = "2147483000";
   panel.style.marginLeft = "0";
-
-  const rowRect = firstRow.getBoundingClientRect();
-  panel.style.top = `${Math.max(8, Math.round(rowRect.top))}px`;
-  const maxLeft = Math.max(8, window.innerWidth - 196 - 8);
-  const left = Math.min(maxLeft, Math.max(8, Math.round(rowRect.right + 8)));
-  panel.style.left = `${left}px`;
+  if (!WISHLIST_FILTERS_SIDEBAR_MODE && firstRow) {
+    const rowRect = firstRow.getBoundingClientRect();
+    panel.style.top = `${Math.max(8, Math.round(rowRect.top))}px`;
+    const maxLeft = Math.max(8, window.innerWidth - 228 - 8);
+    const left = Math.min(maxLeft, Math.max(8, Math.round(rowRect.right + 8)));
+    panel.style.left = `${left}px`;
+    panel.style.right = "auto";
+  }
 
   const bind = (id, key, parser) => {
     const el = panel.querySelector(`#${id}`);
@@ -1352,6 +1418,21 @@ function ensureWishlistRightFiltersPanel(stateItems) {
       applyWishlistFiltersToRows(getWishlistRows(), stateItems);
     });
   };
+
+  const sidebarStateSelect = panel.querySelector("#swm-sidebar-state-select");
+  if (sidebarStateSelect && !sidebarStateSelect.dataset.swmBound) {
+    sidebarStateSelect.dataset.swmBound = "1";
+    sidebarStateSelect.addEventListener("change", () => {
+      wishlistCurrentStateFilter = String(sidebarStateSelect.value || "all");
+      try {
+        window.sessionStorage.setItem(WISHLIST_STATE_FILTER_KEY, wishlistCurrentStateFilter);
+      } catch {}
+      applyWishlistFiltersToRows(getWishlistRows(), stateItems);
+    });
+  }
+  if (sidebarStateSelect) {
+    sidebarStateSelect.value = String(wishlistCurrentStateFilter || "all");
+  }
 
   const tagSearchInput = panel.querySelector("#swm-tags-search");
   if (tagSearchInput && !tagSearchInput.dataset.swmBound) {
@@ -1386,6 +1467,92 @@ function ensureWishlistRightFiltersPanel(stateItems) {
   bind("swm-discount-min", "discountMin", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 0))));
   bind("swm-discount-max", "discountMax", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 100))));
   renderWishlistTagOptions(panel, stateItems);
+}
+
+function getWishlistFiltersSnapshot() {
+  const rows = getWishlistRows();
+  const tagCounts = buildWishlistTagCounts(rows);
+  return {
+    ok: true,
+    stateFilter: String(wishlistCurrentStateFilter || "all"),
+    selectedTags: Array.from(wishlistSelectedTags),
+    tagSearchQuery: String(wishlistTagSearchQuery || ""),
+    tagShowLimit: Number(wishlistTagShowLimit || WISHLIST_TAG_SHOW_STEP),
+    tagCounts,
+    advanced: {
+      ratingMin: Number(wishlistAdvancedFilters?.ratingMin || 0),
+      ratingMax: Number(wishlistAdvancedFilters?.ratingMax || 100),
+      reviewsMin: Number(wishlistAdvancedFilters?.reviewsMin || 0),
+      reviewsMax: Number(wishlistAdvancedFilters?.reviewsMax || Number.MAX_SAFE_INTEGER),
+      priceMin: Number(wishlistAdvancedFilters?.priceMin || 0),
+      priceMax: Number(wishlistAdvancedFilters?.priceMax || Number.MAX_SAFE_INTEGER),
+      discountMin: Number(wishlistAdvancedFilters?.discountMin || 0),
+      discountMax: Number(wishlistAdvancedFilters?.discountMax || 100)
+    }
+  };
+}
+
+function applyWishlistFiltersPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return getWishlistFiltersSnapshot();
+  }
+  if (payload.stateFilter !== undefined) {
+    wishlistCurrentStateFilter = String(payload.stateFilter || "all").toLowerCase();
+    try {
+      window.sessionStorage.setItem(WISHLIST_STATE_FILTER_KEY, wishlistCurrentStateFilter);
+    } catch {}
+  }
+  if (Array.isArray(payload.selectedTags)) {
+    const next = new Set();
+    for (const tag of payload.selectedTags) {
+      const key = String(tag || "").toLowerCase().trim();
+      if (key) {
+        next.add(key);
+      }
+    }
+    wishlistSelectedTags = next;
+  }
+  if (payload.tagSearchQuery !== undefined) {
+    wishlistTagSearchQuery = String(payload.tagSearchQuery || "").slice(0, 60);
+  }
+  if (payload.tagShowLimit !== undefined) {
+    const n = Number(payload.tagShowLimit || WISHLIST_TAG_SHOW_STEP);
+    wishlistTagShowLimit = Number.isFinite(n) && n > 0 ? Math.floor(n) : WISHLIST_TAG_SHOW_STEP;
+  }
+
+  const advanced = payload.advanced && typeof payload.advanced === "object" ? payload.advanced : {};
+  if (advanced.ratingMin !== undefined) {
+    wishlistAdvancedFilters.ratingMin = Math.max(0, Math.min(100, parseNumberLoose(advanced.ratingMin, 0)));
+  }
+  if (advanced.ratingMax !== undefined) {
+    wishlistAdvancedFilters.ratingMax = Math.max(0, Math.min(100, parseNumberLoose(advanced.ratingMax, 100)));
+  }
+  if (advanced.reviewsMin !== undefined) {
+    wishlistAdvancedFilters.reviewsMin = Math.max(0, parseNumberLoose(advanced.reviewsMin, 0));
+  }
+  if (advanced.reviewsMax !== undefined) {
+    const raw = String(advanced.reviewsMax ?? "").trim();
+    wishlistAdvancedFilters.reviewsMax = raw
+      ? Math.max(0, parseNumberLoose(raw, Number.MAX_SAFE_INTEGER))
+      : Number.MAX_SAFE_INTEGER;
+  }
+  if (advanced.priceMin !== undefined) {
+    wishlistAdvancedFilters.priceMin = Math.max(0, Number(advanced.priceMin || 0));
+  }
+  if (advanced.priceMax !== undefined) {
+    const raw = String(advanced.priceMax ?? "").trim();
+    const n = Number(raw || 0);
+    wishlistAdvancedFilters.priceMax = raw && Number.isFinite(n) && n >= 0 ? n : Number.MAX_SAFE_INTEGER;
+  }
+  if (advanced.discountMin !== undefined) {
+    wishlistAdvancedFilters.discountMin = Math.max(0, Math.min(100, parseNumberLoose(advanced.discountMin, 0)));
+  }
+  if (advanced.discountMax !== undefined) {
+    wishlistAdvancedFilters.discountMax = Math.max(0, Math.min(100, parseNumberLoose(advanced.discountMax, 100)));
+  }
+
+  applyWishlistFiltersToRows(getWishlistRows(), wishlistStateCache?.items || {});
+  return getWishlistFiltersSnapshot();
 }
 
 function setWishlistActionButtonsVisualState(container, intentState) {
@@ -1934,6 +2101,12 @@ browser.runtime.onMessage.addListener((message) => {
   }
   if (message.type === "steam-proxy-write-action") {
     return proxyWriteSteamAction(String(message.action || ""), String(message.appId || ""));
+  }
+  if (message.type === "wishlist-filters-get") {
+    return getWishlistFiltersSnapshot();
+  }
+  if (message.type === "wishlist-filters-set") {
+    return applyWishlistFiltersPayload(message.payload || {});
   }
   return undefined;
 });
