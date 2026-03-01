@@ -1,6 +1,13 @@
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+const FOLLOW_UI_STYLE_ID = "swm-wishlist-follow-ui-style";
+const WISHLIST_ROW_SELECTOR = ".wishlist_row, [id^='game_'], [data-app-id], .c-Pw-ER6JnA-.Panel";
 let domOrderSyncInFlight = false;
+let wishlistFollowUiScheduled = false;
+let wishlistFollowUiObserver = null;
+let wishlistStateCache = { items: {} };
+let wishlistStateLoadedAt = 0;
+let wishlistStateLoadPromise = null;
 const NON_FATAL_LOG_WINDOW_MS = 15000;
 const nonFatalLogAt = new Map();
 
@@ -428,12 +435,9 @@ async function syncWishlistOrderCache() {
 function extractWishlistRowsOrderFromDom() {
   const ids = [];
   const seen = new Set();
-  const rows = document.querySelectorAll(".wishlist_row, [id^='game_'], [data-app-id]");
+  const rows = document.querySelectorAll(WISHLIST_ROW_SELECTOR);
   for (const row of rows) {
-    const idText = String(row?.id || "");
-    const dataAppId = String(row?.getAttribute?.("data-app-id") || "").trim();
-    const match = idText.match(/game_(\d+)/);
-    const appId = String(match?.[1] || dataAppId || "").trim();
+    const appId = getAppIdFromWishlistRow(row);
     if (!appId || seen.has(appId)) {
       continue;
     }
@@ -441,6 +445,238 @@ function extractWishlistRowsOrderFromDom() {
     ids.push(appId);
   }
   return ids;
+}
+
+function getAppIdFromWishlistRow(row) {
+  const idText = String(row?.id || "");
+  const dataAppId = String(row?.getAttribute?.("data-app-id") || "").trim();
+  const dataDsAppId = String(row?.getAttribute?.("data-ds-appid") || "").trim();
+  const match = idText.match(/game_(\d+)/);
+  const appLink = row?.querySelector?.("a[href*='/app/']");
+  const href = String(appLink?.getAttribute?.("href") || "");
+  const hrefMatch = href.match(/\/app\/(\d+)/);
+  return String(match?.[1] || dataAppId || dataDsAppId || hrefMatch?.[1] || "").trim();
+}
+
+function getItemTitleFromWishlistRow(row) {
+  const title = row?.querySelector?.(".title, .wishlistRowItemName, a.title, a.pOyXxbQoV38-[href*='/app/'], a[href*='/app/']");
+  return String(title?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+function normalizeTrackState(item) {
+  const track = Number(item?.track || 0) > 0;
+  const trackIntent = String(item?.trackIntent || "").toUpperCase();
+  return track || trackIntent === "ON";
+}
+
+async function loadWishlistState(force = false) {
+  const now = Date.now();
+  if (!force && wishlistStateLoadPromise) {
+    return wishlistStateLoadPromise;
+  }
+  if (!force && (now - wishlistStateLoadedAt) < 5000) {
+    return wishlistStateCache;
+  }
+  wishlistStateLoadPromise = browser.runtime.sendMessage({ type: "get-state" })
+    .then((state) => {
+      wishlistStateCache = state && typeof state === "object"
+        ? state
+        : { items: {} };
+      wishlistStateLoadedAt = Date.now();
+      return wishlistStateCache;
+    })
+    .catch((error) => {
+      reportNonFatal("wishlist-follow.load-state", error);
+      return wishlistStateCache;
+    })
+    .finally(() => {
+      wishlistStateLoadPromise = null;
+    });
+  return wishlistStateLoadPromise;
+}
+
+function updateWishlistStateTrackCache(appId, nextTracked) {
+  const id = String(appId || "").trim();
+  if (!id) {
+    return;
+  }
+  const items = wishlistStateCache?.items && typeof wishlistStateCache.items === "object"
+    ? wishlistStateCache.items
+    : {};
+  const current = items[id] && typeof items[id] === "object" ? items[id] : {};
+  const next = {
+    ...current,
+    appId: id,
+    track: nextTracked ? 1 : 0,
+    trackIntent: nextTracked ? "ON" : "OFF"
+  };
+  wishlistStateCache = {
+    ...(wishlistStateCache || {}),
+    items: {
+      ...items,
+      [id]: next
+    }
+  };
+  wishlistStateLoadedAt = Date.now();
+}
+
+function ensureWishlistFollowUiStyle() {
+  if (document.getElementById(FOLLOW_UI_STYLE_ID)) {
+    return;
+  }
+  const style = document.createElement("style");
+  style.id = FOLLOW_UI_STYLE_ID;
+  style.textContent = `
+    .swm-wishlist-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 10px;
+      padding: 0 8px;
+    }
+    .swm-follow-btn {
+      min-width: 116px;
+      border: 0;
+      border-radius: 2px;
+      background: #4c6b22;
+      color: #fff;
+      font-size: 12px;
+      line-height: 30px;
+      height: 30px;
+      padding: 0 14px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    .swm-follow-btn:hover {
+      background: #6f952d;
+    }
+    .swm-follow-btn.is-active {
+      background: #1f4e7a;
+    }
+    .swm-follow-btn:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function setFollowButtonVisualState(button, tracked) {
+  if (!button) {
+    return;
+  }
+  button.dataset.swmTracked = tracked ? "1" : "0";
+  button.classList.toggle("is-active", Boolean(tracked));
+  button.innerHTML = tracked ? "<span>Unfollow</span>" : "<span>Follow</span>";
+}
+
+async function handleWishlistFollowToggle(button, appId, title) {
+  const id = String(appId || "").trim();
+  if (!id || !button) {
+    return;
+  }
+  const currentlyTracked = button.dataset.swmTracked === "1";
+  const nextTracked = !currentlyTracked;
+  const previousLabel = button.innerHTML;
+  button.disabled = true;
+  button.innerHTML = "<span>Saving...</span>";
+  try {
+    const response = await browser.runtime.sendMessage({
+      type: "set-item-intent",
+      appId: id,
+      title: String(title || "").slice(0, 200),
+      track: nextTracked ? 1 : 0,
+      deferSteam: true
+    });
+    if (!response?.ok) {
+      throw new Error(String(response?.error || "Failed to update follow state."));
+    }
+    updateWishlistStateTrackCache(id, nextTracked);
+    setFollowButtonVisualState(button, nextTracked);
+  } catch (error) {
+    button.innerHTML = previousLabel;
+    reportNonFatal("wishlist-follow.toggle", error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function ensureWishlistRowFollowControl(row, stateItems) {
+  const appId = getAppIdFromWishlistRow(row);
+  if (!appId) {
+    return;
+  }
+  const controlId = `swm-wishlist-actions-${appId}`;
+  let container = document.getElementById(controlId);
+  if (!container) {
+    container = document.createElement("div");
+    container.id = controlId;
+    container.className = "swm-wishlist-actions";
+    container.dataset.swmAppId = appId;
+  }
+  if (row.nextElementSibling !== container) {
+    row.insertAdjacentElement("afterend", container);
+  }
+
+  let button = container.querySelector(".swm-follow-btn");
+  if (!button) {
+    button = document.createElement("button");
+    button.type = "button";
+    button.className = "swm-follow-btn";
+    container.appendChild(button);
+  }
+
+  const item = stateItems?.[appId] || {};
+  setFollowButtonVisualState(button, normalizeTrackState(item));
+
+  const title = getItemTitleFromWishlistRow(row);
+  button.onclick = () => {
+    handleWishlistFollowToggle(button, appId, title).catch((error) => {
+      reportNonFatal("wishlist-follow.onclick", error);
+    });
+  };
+}
+
+async function decorateWishlistFollowUi() {
+  if (!window.location.pathname.startsWith("/wishlist")) {
+    return;
+  }
+  ensureWishlistFollowUiStyle();
+  const state = await loadWishlistState(false);
+  const stateItems = state?.items && typeof state.items === "object" ? state.items : {};
+  const rows = document.querySelectorAll(WISHLIST_ROW_SELECTOR);
+  for (const row of rows) {
+    ensureWishlistRowFollowControl(row, stateItems);
+  }
+}
+
+function scheduleWishlistFollowUiDecorate() {
+  if (wishlistFollowUiScheduled) {
+    return;
+  }
+  wishlistFollowUiScheduled = true;
+  setTimeout(() => {
+    wishlistFollowUiScheduled = false;
+    decorateWishlistFollowUi().catch((error) => reportNonFatal("wishlist-follow.decorate", error));
+  }, 120);
+}
+
+function initWishlistFollowUi() {
+  if (!window.location.pathname.startsWith("/wishlist")) {
+    return;
+  }
+  scheduleWishlistFollowUiDecorate();
+  if (wishlistFollowUiObserver) {
+    return;
+  }
+  wishlistFollowUiObserver = new MutationObserver(() => {
+    scheduleWishlistFollowUiDecorate();
+  });
+  wishlistFollowUiObserver.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
 }
 
 async function fetchWishlistIdsInPublicOrder(steamId) {
@@ -522,7 +758,7 @@ async function syncWishlistOrderFromDom(steamIdHint = "") {
     });
 
     for (let i = 0; i < 80; i += 1) {
-      if (document.querySelector(".wishlist_row, [id^='game_'], [data-app-id]")) {
+      if (document.querySelector(WISHLIST_ROW_SELECTOR)) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
@@ -790,4 +1026,5 @@ if (window.location.pathname.startsWith("/wishlist")) {
     }).catch((error) => reportNonFatal("set-wishlist-steamid", error));
   }
   syncWishlistOrderCache().catch((error) => reportNonFatal("sync-wishlist-order-cache", error));
+  initWishlistFollowUi();
 }

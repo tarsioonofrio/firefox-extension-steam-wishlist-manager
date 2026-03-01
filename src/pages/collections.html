@@ -14,7 +14,6 @@
         <div class="content-header-right">
           <input id="search-input" type="search" placeholder="Search by title or appid">
           <button id="refresh-page-btn" type="button" class="header-btn">Refresh</button>
-          <button id="copy-steam-write-diagnostics" type="button" class="header-btn" disabled>Copy Steam Diagnostics</button>
         </div>
       </header>
       <div class="top-controls">
@@ -29,10 +28,6 @@
             <option value="buy">Buy</option>
             <option value="archive">Archive</option>
           </select>
-          <label class="top-toggle">
-            <input id="under-target-checkbox" type="checkbox">
-            <span>At/under target</span>
-          </label>
           <select id="track-window-select" class="hidden">
             <option value="7">Track: last 7d</option>
             <option value="30">Track: last 30d</option>
@@ -49,13 +44,17 @@
             <option value="release-date">Release Date</option>
             <option value="review-score">Review Score</option>
           </select>
+          <button id="collection-select-btn" type="button" class="hidden">Collection</button>
+          <select id="collection-select"></select>
+          <label class="top-toggle">
+            <input id="under-target-checkbox" type="checkbox">
+            <span>At/under target</span>
+          </label>
           <button id="view-menu-btn" type="button">View</button>
           <select id="view-select" class="native-select-hidden">
             <option value="card">Card</option>
             <option value="line">Line</option>
           </select>
-          <button id="collection-select-btn" type="button" class="hidden">Collection</button>
-          <select id="collection-select"></select>
         </div>
       </div>
       <p id="radar-stats" class="radar-stats"></p>
