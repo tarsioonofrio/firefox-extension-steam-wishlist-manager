@@ -14,6 +14,7 @@ let wishlistFollowUiObserver = null;
 let wishlistFollowUiWindowHooksAdded = false;
 let wishlistDevRuntimeInfoLogged = false;
 let wishlistSidebarShellEl = null;
+let wishlistSuppressDomSync = false;
 let wishlistStateCache = { items: {} };
 let wishlistStateLoadedAt = 0;
 let wishlistStateLoadPromise = null;
@@ -1550,6 +1551,7 @@ async function getWishlistFiltersSnapshot() {
 async function applyWishlistFiltersPayload(payload) {
   await loadWishlistState(false);
   await loadWishlistMetaCache(false);
+  wishlistSuppressDomSync = true;
   if (!payload || typeof payload !== "object") {
     return getWishlistFiltersSnapshot();
   }
@@ -1886,6 +1888,9 @@ function clickWishlistLoadMoreIfVisible() {
 async function syncWishlistOrderFromDom(steamIdHint = "") {
   if (!window.location.pathname.startsWith("/wishlist")) {
     return { ok: false, error: "Not on wishlist page." };
+  }
+  if (wishlistSuppressDomSync) {
+    return { ok: false, skipped: true, reason: "dom-sync-suppressed-by-filters" };
   }
   if (hasActiveWishlistFilters()) {
     return { ok: false, skipped: true, reason: "filters-active" };
