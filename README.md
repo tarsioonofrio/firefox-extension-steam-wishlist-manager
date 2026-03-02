@@ -64,30 +64,108 @@ Notes:
 - `wishlistdata` and `dynamicstore/userdata` are internal Store endpoints and may be rate-limited/blocked.
 - Rank ordering should remain available from `GetWishlist/v1` even when metadata endpoints fail.
 
-## Wishlist URL / Endpoint Notes (Non-Official)
+## Wishlist URL Inputs (Non-Official Reference)
 
-As of March 2, 2026, Valve does not provide a single official document for all
-Wishlist page URL filter parameters. In practice, this project treats support in
-three levels:
+The section below documents what is publicly observable in
+`https://store.steampowered.com/wishlist/profiles/*/` as URL input
+(path + query string), without claiming official Valve support.
 
-1. Stable URL filters used by the Wishlist page itself:
-   - `tagids=<id1,id2,...>` (tags)
-   - `sort=<mode>` (for example: `discount`, `price`, `reviews`, `releasedate`, `dateadded`, `topsellers`)
-   - `min_discount=<any|50|75>`
-   - `type_filters=games` (observed in page URLs)
-2. Public/official API surfaces:
-   - `IWishlistService/GetWishlist/v1` (rank/base snapshot)
-   - `appreviews` (review summary metrics)
-3. Internal/non-official endpoints (best effort only):
-   - `wishlistdata/?p={page}`
-   - `IWishlistService/GetWishlistSortedFiltered/v1` (protobuf request payload)
+### Endpoint
 
-Important:
-- Internal endpoints can change without notice.
-- Only filters explicitly reflected in Wishlist URL parameters should be treated
-  as shareable/deep-link behavior.
-- Advanced filters that are not represented in URL parameters should be applied
-  locally by extension logic.
+`GET /wishlist/profiles/{steamid64}/`
+
+Description:
+- Renders the HTML wishlist page for a user.
+
+Path parameter:
+- `steamid64` (`string`/integer): SteamID64 of the profile (for example: `7656119...`).
+
+### Query parameters (observed support)
+
+#### `sort`
+
+Controls the "Sort by" mode. Observed values:
+
+- `sort=discount` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198095235304/?sort=discount&utm_source=chatgpt.com))
+- `sort=price` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561199083473026/?sort=price&utm_source=chatgpt.com))
+- `sort=name` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198366875031/?sort=name&utm_source=chatgpt.com))
+- `sort=dateadded` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198045286731/?sort=dateadded&utm_source=chatgpt.com))
+- `sort=topsellers` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561199831289568/?l=koreana&snr=1_25_4__globalheader&sort=topsellers&utm_source=chatgpt.com))
+- `sort=releasedate` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198845968628/?sort=releasedate&utm_source=chatgpt.com))
+- `sort=reviews` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561197989342514/?sort=reviews&utm_source=chatgpt.com))
+
+Default behavior (without `sort`):
+- UI shows `Sort by: Ranked Order` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561197961826099/?utm_source=chatgpt.com))
+
+#### `min_discount`
+
+Applies minimum discount filter (`Discount` menu).
+
+Observed/supported values:
+- `min_discount=any` (`All with discount`) ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198964535546/?min_discount=any&utm_source=chatgpt.com))
+
+Notes:
+- UI also exposes `50% or more` and `75% or more` tiers
+  ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198865858080/?type_filters=games)).
+- Public indexed URLs clearly confirm `any`; other tiers are treated as observed UI capability.
+
+#### `type_filters`
+
+Applies `Type` menu filter.
+
+Observed/supported values:
+- `type_filters=games` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198865858080/?type_filters=games))
+
+Notes:
+- UI also shows `Software` and `DLC`
+  ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198865858080/?type_filters=games)).
+- Strictly from public URL evidence, `games` is the confirmed value.
+
+#### `l`
+
+Steam Store UI language parameter.
+
+Examples:
+- `l=brazilian` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198211102183/?l=brazilian&snr=1_25_4__globalheader&sort=price&utm_source=chatgpt.com))
+- `l=english` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198331600557/?l=english&utm_source=chatgpt.com))
+
+#### `snr`
+
+Steam Store referral/tracking parameter.
+
+Notes:
+- Not a wishlist filter.
+- Commonly appears with `l=...` ([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198211102183/?l=brazilian&snr=1_25_4__globalheader&sort=price&utm_source=chatgpt.com)).
+
+### Examples
+
+```text
+# Sort by discount
+https://store.steampowered.com/wishlist/profiles/{steamid64}/?sort=discount
+```
+
+```text
+# Any discount only, sorted by price
+https://store.steampowered.com/wishlist/profiles/{steamid64}/?min_discount=any&sort=price
+```
+
+```text
+# Games only, sorted by reviews
+https://store.steampowered.com/wishlist/profiles/{steamid64}/?type_filters=games&sort=reviews
+```
+
+```text
+# Force UI language (pt-BR)
+https://store.steampowered.com/wishlist/profiles/{steamid64}/?l=brazilian
+```
+
+### Important note about `Options` menu
+
+Although UI exposes `Platform`, `Price`, `Exclude`, and `Deck Compatibility`
+([Steam Store](https://store.steampowered.com/wishlist/profiles/76561198865858080/?type_filters=games)),
+there are no consistently documentable public query params for those filters in
+`/wishlist/profiles/.../`. In many cases, those states are client-side
+(local state/cookies/scripts) and do not map to simple query parameters.
 
 ## Development
 
