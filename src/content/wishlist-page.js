@@ -20,7 +20,7 @@ const WISHLIST_MULTI_FILTER_KEYS = [
   "developers",
   "publishers"
 ];
-const WISHLIST_FILTERS_SIDEBAR_MODE = true;
+const WISHLIST_FILTERS_SIDEBAR_MODE = false;
 const WISHLIST_NATIVE_BROWSER_SIDEBAR_FILTERS = true;
 let domOrderSyncInFlight = false;
 let wishlistFollowUiScheduled = false;
@@ -781,6 +781,8 @@ function ensureWishlistFollowUiStyle() {
       display: flex !important;
       align-items: center !important;
       justify-content: flex-start !important;
+      gap: 8px !important;
+      flex-wrap: wrap !important;
       width: 100% !important;
       box-sizing: border-box !important;
       margin: 6px 0 10px 0 !important;
@@ -800,6 +802,64 @@ function ensureWishlistFollowUiStyle() {
     .swm-state-filter:focus {
       outline: 1px solid rgba(102, 192, 244, 0.65);
       outline-offset: 0;
+    }
+    .swm-state-filter-bar #swm-tags-search {
+      min-width: 180px;
+      height: 34px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 2px;
+      background: #1b2838;
+      color: #c7d5e0;
+      font-size: 12px;
+      padding: 0 8px;
+      box-sizing: border-box;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      flex: 0 0 100%;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .tag-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .tag-option {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      color: #c7d5e0;
+      font-size: 11px;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .tag-option input[type="checkbox"] {
+      width: 12px;
+      height: 12px;
+      margin: 0;
+      padding: 0;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .tag-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 120px;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .tag-count {
+      color: #8fa8bd;
+      min-width: 1.4em;
+      text-align: right;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .small-btn {
+      height: 34px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 2px;
+      background: #2b3b4a;
+      color: #c7d5e0;
+      font-size: 11px;
+      cursor: pointer;
+      padding: 0 10px;
     }
     .swm-list-with-filters {
       position: relative !important;
@@ -1005,7 +1065,7 @@ function applyWishlistStateFilterToRows(rows, stateItems) {
 }
 
 function ensureWishlistStateFilterControl(stateItems) {
-  if (WISHLIST_FILTERS_SIDEBAR_MODE || WISHLIST_NATIVE_BROWSER_SIDEBAR_FILTERS) {
+  if (WISHLIST_FILTERS_SIDEBAR_MODE) {
     return;
   }
   const rows = getWishlistRows();
@@ -1057,6 +1117,49 @@ function ensureWishlistStateFilterControl(stateItems) {
   if (select.parentElement !== bar) {
     bar.appendChild(select);
   }
+
+  let tagSearchInput = document.getElementById("swm-tags-search");
+  if (!tagSearchInput) {
+    tagSearchInput = document.createElement("input");
+    tagSearchInput.id = "swm-tags-search";
+    tagSearchInput.type = "search";
+    tagSearchInput.placeholder = "Search tags...";
+  }
+  if (tagSearchInput.parentElement !== bar) {
+    bar.appendChild(tagSearchInput);
+  }
+
+  let tagsField = document.getElementById("swm-inline-tags-field");
+  if (!tagsField) {
+    tagsField = document.createElement("div");
+    tagsField.id = "swm-inline-tags-field";
+    tagsField.className = "swm-inline-tags-field";
+    tagsField.innerHTML = `
+      <div id="swm-tags-options" class="tag-options"></div>
+      <button id="swm-tags-show-more" type="button" class="small-btn">Show more</button>
+    `;
+  }
+  if (tagsField.parentElement !== bar) {
+    bar.appendChild(tagsField);
+  }
+
+  if (tagSearchInput && !tagSearchInput.dataset.swmBound) {
+    tagSearchInput.dataset.swmBound = "1";
+    tagSearchInput.addEventListener("input", () => {
+      wishlistTagSearchQuery = String(tagSearchInput.value || "").slice(0, 60);
+      wishlistTagShowLimit = WISHLIST_TAG_SHOW_STEP;
+      renderWishlistTagOptions(bar, stateItems);
+    });
+  }
+  const tagShowMoreBtn = bar.querySelector("#swm-tags-show-more");
+  if (tagShowMoreBtn && !tagShowMoreBtn.dataset.swmBound) {
+    tagShowMoreBtn.dataset.swmBound = "1";
+    tagShowMoreBtn.addEventListener("click", () => {
+      wishlistTagShowLimit += WISHLIST_TAG_SHOW_STEP;
+      renderWishlistTagOptions(bar, stateItems);
+    });
+  }
+  renderWishlistTagOptions(bar, stateItems);
 
   if (!wishlistCurrentStateFilter) {
     wishlistCurrentStateFilter = "all";
@@ -1582,6 +1685,13 @@ function hasActiveWishlistFilters() {
 
 function ensureWishlistRightFiltersPanel(stateItems) {
   if (WISHLIST_NATIVE_BROWSER_SIDEBAR_FILTERS) {
+    const panel = document.getElementById("swm-right-filters");
+    if (panel) {
+      panel.remove();
+    }
+    if (wishlistSidebarShellEl) {
+      wishlistSidebarShellEl.style.paddingRight = "";
+    }
     return;
   }
   const rows = getWishlistRows();
