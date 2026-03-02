@@ -2916,6 +2916,13 @@ browser.runtime.onMessage.addListener((message, sender) => {
         };
       }
 
+      case "close-sidebar-action": {
+        if (browser?.sidebarAction?.close) {
+          await browser.sidebarAction.close();
+        }
+        return { ok: true };
+      }
+
       case "set-active-collection": {
         const activeCollection = normalizeCollectionName(message.activeCollection || "") || "__all__";
         const isValid =

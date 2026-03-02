@@ -730,27 +730,41 @@ function ensureWishlistFollowUiStyle() {
       width: auto !important;
       box-sizing: border-box !important;
       overflow: visible !important;
-      padding-left: 150px !important;
+      padding-left: 228px !important;
       min-height: 88px !important;
     }
     .swm-wishlist-actions {
       position: absolute;
       left: 8px;
       top: 8px;
-      width: 132px;
-      min-width: 132px;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-start;
+      width: 210px;
+      min-width: 210px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-areas:
+        "buy maybe archive"
+        "follow follow follow";
       align-items: stretch;
       gap: 4px;
       margin: 0;
       padding: 0;
       z-index: 50;
     }
+    .swm-wishlist-actions .swm-action-btn[data-action="buy"] {
+      grid-area: buy;
+    }
+    .swm-wishlist-actions .swm-action-btn[data-action="maybe"] {
+      grid-area: maybe;
+    }
+    .swm-wishlist-actions .swm-action-btn[data-action="archive"] {
+      grid-area: archive;
+    }
+    .swm-wishlist-actions .swm-action-btn[data-action="follow"] {
+      grid-area: follow;
+    }
     .swm-action-btn {
-      width: 100%;
-      min-width: 132px;
+      width: auto;
+      min-width: 0;
       border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 2px;
       background: #4b5a67;
@@ -759,7 +773,7 @@ function ensureWishlistFollowUiStyle() {
       font-weight: 700;
       line-height: 22px;
       height: 22px;
-      padding: 0 10px;
+      padding: 0 4px;
       cursor: pointer;
       text-transform: uppercase;
       text-align: center;
@@ -969,30 +983,16 @@ function ensureWishlistFollowUiStyle() {
       gap: 6px;
     }
     .swm-wishlist-actions.is-compact {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       grid-template-areas:
-        "buy buy"
-        "maybe archive"
-        "follow follow";
+        "buy maybe archive"
+        "follow follow follow";
     }
     .swm-wishlist-actions.is-compact .swm-action-btn {
       min-width: 0;
       width: auto;
       font-size: 10px;
-      padding: 0 4px;
-    }
-    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="buy"] {
-      grid-area: buy;
-    }
-    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="maybe"] {
-      grid-area: maybe;
-    }
-    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="archive"] {
-      grid-area: archive;
-    }
-    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="follow"] {
-      grid-area: follow;
+      padding: 0 3px;
     }
   `;
   document.head.appendChild(style);
@@ -1729,16 +1729,14 @@ function hasActiveWishlistFilters() {
 }
 
 function ensureWishlistRightFiltersPanel(stateItems) {
-  if (WISHLIST_NATIVE_BROWSER_SIDEBAR_FILTERS) {
-    const panel = document.getElementById("swm-right-filters");
-    if (panel) {
-      panel.remove();
-    }
-    if (wishlistSidebarShellEl) {
-      wishlistSidebarShellEl.style.paddingRight = "";
-    }
-    return;
+  const existingPanel = document.getElementById("swm-right-filters");
+  if (existingPanel) {
+    existingPanel.remove();
   }
+  if (wishlistSidebarShellEl) {
+    wishlistSidebarShellEl.style.paddingRight = "";
+  }
+  return;
   const rows = getWishlistRows();
   const firstRow = rows?.[0];
   if (!firstRow) {
@@ -2246,11 +2244,17 @@ function logWishlistDevRuntimeInfoOnce() {
     .catch((error) => reportNonFatal("wishlist-follow.runtime-info", error));
 }
 
+function requestSidebarCloseForWishlist() {
+  browser.runtime.sendMessage({ type: "close-sidebar-action" })
+    .catch((error) => reportNonFatal("wishlist-follow.close-sidebar", error));
+}
+
 function initWishlistFollowUi() {
   if (!window.location.pathname.startsWith("/wishlist")) {
     return;
   }
   logWishlistDevRuntimeInfoOnce();
+  requestSidebarCloseForWishlist();
   scheduleWishlistFollowUiDecorate();
   if (!wishlistFollowUiWindowHooksAdded) {
     window.addEventListener("resize", scheduleWishlistFollowUiDecorate, { passive: true });
