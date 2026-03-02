@@ -1,4 +1,346 @@
 (() => {
+  const MEDIA_TOOLTIP_ID = "swm-media-tooltip";
+  const MEDIA_TOOLTIP_FETCH_LABEL = "media tooltip fetch timeout";
+  const MEDIA_TOOLTIP_FETCH_TIMEOUT_MS = 12000;
+  let mediaTooltipHoverSeq = 0;
+  let mediaTooltipHideTimer = null;
+
+  function clearMediaTooltipHideTimer() {
+    if (mediaTooltipHideTimer) {
+      clearTimeout(mediaTooltipHideTimer);
+      mediaTooltipHideTimer = null;
+    }
+  }
+
+  function scheduleMediaTooltipHide(delay = 120) {
+    clearMediaTooltipHideTimer();
+    mediaTooltipHideTimer = setTimeout(() => {
+      const tooltip = document.getElementById(MEDIA_TOOLTIP_ID);
+      if (tooltip) {
+        tooltip.classList.add("hidden");
+      }
+    }, Math.max(0, Number(delay || 0)));
+  }
+
+  function normalizeMediaUrl(rawUrl) {
+    const url = String(rawUrl || "").trim();
+    if (!url) {
+      return "";
+    }
+    if (url.startsWith("//")) {
+      return `https:${url}`;
+    }
+    return url;
+  }
+
+  function parseStoreMediaFromHtml(htmlText) {
+    const doc = new DOMParser().parseFromString(String(htmlText || ""), "text/html");
+    const videos = [];
+    const images = [];
+    const seenVideos = new Set();
+    const seenImages = new Set();
+
+    const movieNodes = doc.querySelectorAll(".highlight_movie, [id^='highlight_movie_']");
+    for (const movie of movieNodes) {
+      const sourceNodes = movie.querySelectorAll("video source, source");
+      const sourceCandidates = [
+        movie.getAttribute("data-mp4-source"),
+        movie.getAttribute("data-webm-source"),
+        ...(Array.from(sourceNodes).map((node) => node.getAttribute("src")))
+      ];
+      let mediaUrl = "";
+      for (const candidate of sourceCandidates) {
+        const normalized = normalizeMediaUrl(candidate);
+        if (!normalized) {
+          continue;
+        }
+        mediaUrl = normalized;
+        break;
+      }
+      if (!mediaUrl || seenVideos.has(mediaUrl)) {
+        continue;
+      }
+      seenVideos.add(mediaUrl);
+      const posterEl = movie.querySelector("img");
+      const posterUrl = normalizeMediaUrl(
+        movie.getAttribute("data-poster")
+        || posterEl?.getAttribute("src")
+        || posterEl?.getAttribute("data-src")
+      );
+      videos.push({ url: mediaUrl, posterUrl });
+    }
+
+    const imageNodes = doc.querySelectorAll(
+      ".highlight_strip_screenshot img, .highlight_screenshot_link img, [id^='thumb_screenshot_'] img"
+    );
+    for (const img of imageNodes) {
+      const normalized = normalizeMediaUrl(img.getAttribute("src") || img.getAttribute("data-src"));
+      if (!normalized || seenImages.has(normalized)) {
+        continue;
+      }
+      seenImages.add(normalized);
+      images.push(normalized);
+    }
+
+    return { videos, images };
+  }
+
+  function ensureMediaTooltip() {
+    let tooltip = document.getElementById(MEDIA_TOOLTIP_ID);
+    if (tooltip) {
+      return tooltip;
+    }
+
+    tooltip = document.createElement("div");
+    tooltip.id = MEDIA_TOOLTIP_ID;
+    tooltip.className = "swm-media-tooltip hidden";
+    tooltip.innerHTML = `
+      <div class="swm-media-tooltip-stage"></div>
+      <p class="swm-media-tooltip-status">Hover a capsule to preview media.</p>
+      <div class="swm-media-tooltip-controls">
+        <button type="button" data-mode="video">Videos</button>
+        <button type="button" data-mode="image">Images</button>
+        <button type="button" data-nav="prev" aria-label="Previous">‹</button>
+        <span class="swm-media-tooltip-count">0/0</span>
+        <button type="button" data-nav="next" aria-label="Next">›</button>
+      </div>
+    `;
+    tooltip._state = {
+      appId: "",
+      mode: "",
+      index: 0,
+      videos: [],
+      images: []
+    };
+
+    tooltip.addEventListener("mouseenter", () => clearMediaTooltipHideTimer());
+    tooltip.addEventListener("mouseleave", () => scheduleMediaTooltipHide(120));
+    tooltip.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target) {
+        return;
+      }
+      const state = tooltip._state || {};
+      const nav = target.getAttribute("data-nav");
+      const mode = target.getAttribute("data-mode");
+      if (mode) {
+        if (mode === "video" && Array.isArray(state.videos) && state.videos.length > 0) {
+          state.mode = "video";
+          state.index = 0;
+          renderMediaTooltipState(tooltip);
+        } else if (mode === "image" && Array.isArray(state.images) && state.images.length > 0) {
+          state.mode = "image";
+          state.index = 0;
+          renderMediaTooltipState(tooltip);
+        }
+        return;
+      }
+      if (!nav) {
+        return;
+      }
+      const list = state.mode === "video" ? state.videos : state.images;
+      if (!Array.isArray(list) || list.length === 0) {
+        return;
+      }
+      if (nav === "prev") {
+        state.index = (state.index - 1 + list.length) % list.length;
+      } else if (nav === "next") {
+        state.index = (state.index + 1) % list.length;
+      }
+      renderMediaTooltipState(tooltip);
+    });
+
+    document.body.appendChild(tooltip);
+    return tooltip;
+  }
+
+  function positionMediaTooltip(tooltip, anchorEl) {
+    if (!tooltip || !anchorEl) {
+      return;
+    }
+    const rect = anchorEl.getBoundingClientRect();
+    const width = Math.max(360, Number(tooltip.offsetWidth || 0));
+    const height = Math.max(240, Number(tooltip.offsetHeight || 0));
+    const margin = 10;
+    const preferRightLeft = rect.right + margin;
+    const rightFits = preferRightLeft + width <= window.innerWidth - margin;
+    const left = rightFits
+      ? preferRightLeft
+      : Math.max(margin, Math.min(window.innerWidth - width - margin, rect.left - width - margin));
+    const top = Math.max(
+      margin,
+      Math.min(window.innerHeight - height - margin, rect.top + ((rect.height - height) / 2))
+    );
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+  }
+
+  function renderMediaTooltipState(tooltip) {
+    if (!tooltip) {
+      return;
+    }
+    const state = tooltip._state || {};
+    const stage = tooltip.querySelector(".swm-media-tooltip-stage");
+    const status = tooltip.querySelector(".swm-media-tooltip-status");
+    const count = tooltip.querySelector(".swm-media-tooltip-count");
+    const videoBtn = tooltip.querySelector("[data-mode='video']");
+    const imageBtn = tooltip.querySelector("[data-mode='image']");
+    const prevBtn = tooltip.querySelector("[data-nav='prev']");
+    const nextBtn = tooltip.querySelector("[data-nav='next']");
+    const videoList = Array.isArray(state.videos) ? state.videos : [];
+    const imageList = Array.isArray(state.images) ? state.images : [];
+    const activeMode = state.mode === "image" ? "image" : "video";
+    const activeList = activeMode === "video" ? videoList : imageList;
+    if (!Array.isArray(activeList) || activeList.length === 0) {
+      if (stage) {
+        stage.innerHTML = "";
+      }
+      if (status) {
+        status.textContent = "No media available for this game.";
+      }
+      if (count) {
+        count.textContent = "0/0";
+      }
+      if (videoBtn) {
+        videoBtn.disabled = videoList.length === 0;
+        videoBtn.classList.toggle("active", activeMode === "video");
+      }
+      if (imageBtn) {
+        imageBtn.disabled = imageList.length === 0;
+        imageBtn.classList.toggle("active", activeMode === "image");
+      }
+      if (prevBtn) {
+        prevBtn.disabled = true;
+      }
+      if (nextBtn) {
+        nextBtn.disabled = true;
+      }
+      return;
+    }
+
+    state.mode = activeMode;
+    state.index = Math.max(0, Math.min(activeList.length - 1, Number(state.index || 0)));
+    const current = activeList[state.index];
+
+    if (stage) {
+      stage.innerHTML = "";
+      if (activeMode === "video") {
+        const video = document.createElement("video");
+        video.className = "swm-media-tooltip-video";
+        video.src = String(current?.url || "");
+        if (current?.posterUrl) {
+          video.poster = String(current.posterUrl);
+        }
+        video.controls = true;
+        video.muted = true;
+        video.autoplay = true;
+        video.loop = true;
+        video.playsInline = true;
+        video.preload = "none";
+        stage.appendChild(video);
+      } else {
+        const image = document.createElement("img");
+        image.className = "swm-media-tooltip-image";
+        image.src = String(current || "");
+        image.alt = `Screenshot ${state.index + 1}`;
+        image.loading = "eager";
+        stage.appendChild(image);
+      }
+    }
+    if (status) {
+      status.textContent = activeMode === "video" ? "Video preview" : "Screenshot preview";
+    }
+    if (count) {
+      count.textContent = `${state.index + 1}/${activeList.length}`;
+    }
+    if (videoBtn) {
+      videoBtn.disabled = videoList.length === 0;
+      videoBtn.classList.toggle("active", activeMode === "video");
+    }
+    if (imageBtn) {
+      imageBtn.disabled = imageList.length === 0;
+      imageBtn.classList.toggle("active", activeMode === "image");
+    }
+    if (prevBtn) {
+      prevBtn.disabled = activeList.length < 2;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = activeList.length < 2;
+    }
+  }
+
+  async function openMediaTooltip(anchorEl, appId) {
+    const tooltip = ensureMediaTooltip();
+    clearMediaTooltipHideTimer();
+    tooltip.classList.remove("hidden");
+    positionMediaTooltip(tooltip, anchorEl);
+    const status = tooltip.querySelector(".swm-media-tooltip-status");
+    const stage = tooltip.querySelector(".swm-media-tooltip-stage");
+    if (stage) {
+      stage.innerHTML = "";
+    }
+    if (status) {
+      status.textContent = "Loading media from Steam page...";
+    }
+    tooltip._state = { appId: String(appId || ""), mode: "", index: 0, videos: [], images: [] };
+    renderMediaTooltipState(tooltip);
+
+    const fetchText = window?.SWMSteamFetch?.fetchText;
+    if (typeof fetchText !== "function") {
+      if (status) {
+        status.textContent = "Media loader unavailable.";
+      }
+      return;
+    }
+    const seq = ++mediaTooltipHoverSeq;
+    const storeUrl = `https://store.steampowered.com/app/${encodeURIComponent(String(appId || "").trim())}/?l=english`;
+    try {
+      const fetchPromise = fetchText(storeUrl, { cache: "no-store" });
+      const htmlText = await Promise.race([
+        fetchPromise,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error(MEDIA_TOOLTIP_FETCH_LABEL)), MEDIA_TOOLTIP_FETCH_TIMEOUT_MS);
+        })
+      ]);
+      if (seq !== mediaTooltipHoverSeq) {
+        return;
+      }
+      const parsed = parseStoreMediaFromHtml(htmlText);
+      tooltip._state = {
+        appId: String(appId || ""),
+        mode: parsed.videos.length > 0 ? "video" : "image",
+        index: 0,
+        videos: parsed.videos,
+        images: parsed.images
+      };
+      renderMediaTooltipState(tooltip);
+      positionMediaTooltip(tooltip, anchorEl);
+    } catch (error) {
+      if (seq !== mediaTooltipHoverSeq) {
+        return;
+      }
+      if (status) {
+        status.textContent = `Failed to load media: ${String(error?.message || "unknown error")}`;
+      }
+    }
+  }
+
+  function bindMediaPreviewHover(anchorEl, appId) {
+    if (!anchorEl) {
+      return;
+    }
+    if (anchorEl.dataset.swmMediaHoverBound === "1") {
+      return;
+    }
+    anchorEl.dataset.swmMediaHoverBound = "1";
+    anchorEl.addEventListener("mouseenter", () => {
+      openMediaTooltip(anchorEl, appId).catch(() => {});
+    });
+    anchorEl.addEventListener("mouseleave", () => {
+      scheduleMediaTooltipHide(120);
+    });
+  }
+
   function buildImageCandidates(appId, primaryUrl) {
     const base = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}`;
     const list = [

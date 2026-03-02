@@ -6,6 +6,8 @@ const WISHLIST_ROW_SELECTOR = ".wishlist_row, [id^='game_'], [data-app-id], .c-P
 const APP_LINK_SELECTOR = "a[href*='/app/']";
 const WISHLIST_STATE_FILTER_KEY = "swmWishlistStateFilter";
 const WISHLIST_TAG_SHOW_STEP = 12;
+const WISHLIST_MEDIA_TOOLTIP_ID = "swm-wishlist-media-tooltip";
+const WISHLIST_MEDIA_FETCH_TIMEOUT_MS = 12000;
 const WISHLIST_MULTI_FILTER_KEYS = [
   "types",
   "players",
@@ -27,6 +29,9 @@ let wishlistFollowUiScheduled = false;
 let wishlistFollowUiObserver = null;
 let wishlistFollowUiWindowHooksAdded = false;
 let wishlistDevRuntimeInfoLogged = false;
+let wishlistMediaDelegationBound = false;
+let wishlistMediaTooltipHoverSeq = 0;
+let wishlistMediaTooltipHideTimer = null;
 let wishlistSidebarShellEl = null;
 let wishlistSuppressDomSync = false;
 let wishlistStateCache = { items: {} };
@@ -791,6 +796,67 @@ function ensureWishlistFollowUiStyle() {
       opacity: 0.65;
       cursor: wait;
     }
+    .swm-wishlist-media-tooltip {
+      position: fixed;
+      z-index: 2147483002;
+      width: 360px;
+      max-width: min(92vw, 360px);
+      background: rgba(11, 20, 31, 0.98);
+      border: 1px solid #3d556e;
+      border-radius: 8px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+      padding: 8px;
+    }
+    .swm-wishlist-media-tooltip.hidden {
+      display: none !important;
+    }
+    .swm-wishlist-media-tooltip-stage {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #000;
+    }
+    .swm-wishlist-media-tooltip-video,
+    .swm-wishlist-media-tooltip-image {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+      background: #000;
+    }
+    .swm-wishlist-media-tooltip-status {
+      margin: 6px 0 0;
+      color: #9fb7cc;
+      font-size: 11px;
+    }
+    .swm-wishlist-media-tooltip-controls {
+      margin-top: 6px;
+      display: grid;
+      grid-template-columns: auto auto 1fr auto auto;
+      gap: 6px;
+      align-items: center;
+    }
+    .swm-wishlist-media-tooltip-controls button {
+      height: 24px;
+      min-width: 56px;
+      font-size: 11px;
+      padding: 0 8px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+      background: #2b3b4a;
+      color: #c7d5e0;
+      cursor: pointer;
+    }
+    .swm-wishlist-media-tooltip-controls button.active {
+      border-color: #6ca6ca;
+      background: #447196;
+    }
+    .swm-wishlist-media-tooltip-count {
+      text-align: center;
+      color: #9fb7cc;
+      font-size: 11px;
+    }
     .swm-state-filter-bar {
       display: flex !important;
       align-items: center !important;
@@ -1210,6 +1276,452 @@ function ensureWishlistStateFilterControl(stateItems) {
     wishlistCurrentStateFilter = "all";
   }
   select.value = wishlistCurrentStateFilter;
+}
+
+function clearWishlistMediaTooltipHideTimer() {
+  if (wishlistMediaTooltipHideTimer) {
+    clearTimeout(wishlistMediaTooltipHideTimer);
+    wishlistMediaTooltipHideTimer = null;
+  }
+}
+
+function scheduleWishlistMediaTooltipHide(delayMs = 120) {
+  clearWishlistMediaTooltipHideTimer();
+  wishlistMediaTooltipHideTimer = setTimeout(() => {
+    const tooltip = document.getElementById(WISHLIST_MEDIA_TOOLTIP_ID);
+    if (tooltip) {
+      tooltip.classList.add("hidden");
+    }
+  }, Math.max(0, Number(delayMs || 0)));
+}
+
+function normalizeWishlistMediaUrl(rawUrl) {
+  const url = String(rawUrl || "").trim();
+  if (!url) {
+    return "";
+  }
+  if (url.startsWith("//")) {
+    return `https:${url}`;
+  }
+  return url;
+}
+
+function parseWishlistStoreMedia(htmlText) {
+  const doc = new DOMParser().parseFromString(String(htmlText || ""), "text/html");
+  const videos = [];
+  const images = [];
+  const seenVideos = new Set();
+  const seenImages = new Set();
+
+  const movieNodes = doc.querySelectorAll(".highlight_movie, [id^='highlight_movie_']");
+  for (const movie of movieNodes) {
+    const sourceNodes = movie.querySelectorAll("video source, source");
+    const sourceCandidates = [
+      movie.getAttribute("data-mp4-source"),
+      movie.getAttribute("data-webm-source"),
+      ...Array.from(sourceNodes).map((node) => node.getAttribute("src"))
+    ];
+    let videoUrl = "";
+    for (const candidate of sourceCandidates) {
+      const normalized = normalizeWishlistMediaUrl(candidate);
+      if (!normalized) {
+        continue;
+      }
+      videoUrl = normalized;
+      break;
+    }
+    if (!videoUrl || seenVideos.has(videoUrl)) {
+      continue;
+    }
+    seenVideos.add(videoUrl);
+    const posterEl = movie.querySelector("img");
+    const posterUrl = normalizeWishlistMediaUrl(
+      movie.getAttribute("data-poster")
+      || posterEl?.getAttribute("src")
+      || posterEl?.getAttribute("data-src")
+    );
+    videos.push({ url: videoUrl, posterUrl });
+  }
+
+  const imageNodes = doc.querySelectorAll(
+    ".highlight_strip_screenshot img, .highlight_screenshot_link img, [id^='thumb_screenshot_'] img"
+  );
+  for (const img of imageNodes) {
+    const imageUrl = normalizeWishlistMediaUrl(img.getAttribute("src") || img.getAttribute("data-src"));
+    if (!imageUrl || seenImages.has(imageUrl)) {
+      continue;
+    }
+    seenImages.add(imageUrl);
+    images.push(imageUrl);
+  }
+
+  return { videos, images };
+}
+
+async function fetchWishlistAppDetailsMedia(appId) {
+  const id = String(appId || "").trim();
+  if (!id) {
+    return { videos: [], images: [] };
+  }
+  const url = `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(id)}&l=english&cc=us`;
+  const json = await fetch(url, { cache: "no-store", credentials: "include" }).then((response) => {
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return response.json();
+  });
+  const entry = json?.[id];
+  const data = entry?.success ? (entry.data || {}) : {};
+  const videos = [];
+  const images = [];
+  const seenVideos = new Set();
+  const seenImages = new Set();
+
+  for (const movie of Array.isArray(data?.movies) ? data.movies : []) {
+    const mp4 = normalizeWishlistMediaUrl(movie?.mp4?.max || movie?.mp4?.["480"]);
+    if (!mp4 || seenVideos.has(mp4)) {
+      continue;
+    }
+    seenVideos.add(mp4);
+    const posterUrl = normalizeWishlistMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
+    videos.push({ url: mp4, posterUrl });
+  }
+
+  for (const screenshot of Array.isArray(data?.screenshots) ? data.screenshots : []) {
+    const imageUrl = normalizeWishlistMediaUrl(screenshot?.path_full || screenshot?.path_thumbnail);
+    if (!imageUrl || seenImages.has(imageUrl)) {
+      continue;
+    }
+    seenImages.add(imageUrl);
+    images.push(imageUrl);
+  }
+
+  return { videos, images };
+}
+
+function ensureWishlistMediaTooltip() {
+  let tooltip = document.getElementById(WISHLIST_MEDIA_TOOLTIP_ID);
+  if (tooltip) {
+    return tooltip;
+  }
+  tooltip = document.createElement("div");
+  tooltip.id = WISHLIST_MEDIA_TOOLTIP_ID;
+  tooltip.className = "swm-wishlist-media-tooltip hidden";
+  tooltip.innerHTML = `
+    <div class="swm-wishlist-media-tooltip-stage"></div>
+    <p class="swm-wishlist-media-tooltip-status">Hover a capsule to preview media.</p>
+    <div class="swm-wishlist-media-tooltip-controls">
+      <button type="button" data-mode="video">Videos</button>
+      <button type="button" data-mode="image">Images</button>
+      <button type="button" data-nav="prev" aria-label="Previous">‹</button>
+      <span class="swm-wishlist-media-tooltip-count">0/0</span>
+      <button type="button" data-nav="next" aria-label="Next">›</button>
+    </div>
+  `;
+  tooltip._state = { mode: "video", index: 0, videos: [], images: [] };
+  tooltip.addEventListener("mouseenter", () => clearWishlistMediaTooltipHideTimer());
+  tooltip.addEventListener("mouseleave", () => scheduleWishlistMediaTooltipHide(120));
+  tooltip.addEventListener("click", (event) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target) {
+      return;
+    }
+    const state = tooltip._state || {};
+    const mode = target.getAttribute("data-mode");
+    if (mode === "video" && Array.isArray(state.videos) && state.videos.length > 0) {
+      state.mode = "video";
+      state.index = 0;
+      renderWishlistMediaTooltipState(tooltip);
+      return;
+    }
+    if (mode === "image" && Array.isArray(state.images) && state.images.length > 0) {
+      state.mode = "image";
+      state.index = 0;
+      renderWishlistMediaTooltipState(tooltip);
+      return;
+    }
+    const nav = target.getAttribute("data-nav");
+    const activeList = state.mode === "image" ? state.images : state.videos;
+    if (!nav || !Array.isArray(activeList) || activeList.length === 0) {
+      return;
+    }
+    state.index = nav === "prev"
+      ? (state.index - 1 + activeList.length) % activeList.length
+      : (state.index + 1) % activeList.length;
+    renderWishlistMediaTooltipState(tooltip);
+  });
+  document.body.appendChild(tooltip);
+  return tooltip;
+}
+
+function positionWishlistMediaTooltip(tooltip, anchorEl) {
+  if (!tooltip || !anchorEl) {
+    return;
+  }
+  const rect = anchorEl.getBoundingClientRect();
+  const width = Math.max(340, Number(tooltip.offsetWidth || 0));
+  const height = Math.max(220, Number(tooltip.offsetHeight || 0));
+  const margin = 10;
+  const left = Math.max(
+    margin,
+    Math.min(window.innerWidth - width - margin, rect.right + margin)
+  );
+  const top = Math.max(
+    margin,
+    Math.min(window.innerHeight - height - margin, rect.top + ((rect.height - height) / 2))
+  );
+  tooltip.style.left = `${Math.round(left)}px`;
+  tooltip.style.top = `${Math.round(top)}px`;
+}
+
+function renderWishlistMediaTooltipState(tooltip) {
+  if (!tooltip) {
+    return;
+  }
+  const state = tooltip._state || {};
+  const stage = tooltip.querySelector(".swm-wishlist-media-tooltip-stage");
+  const status = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+  const count = tooltip.querySelector(".swm-wishlist-media-tooltip-count");
+  const videoBtn = tooltip.querySelector("[data-mode='video']");
+  const imageBtn = tooltip.querySelector("[data-mode='image']");
+  const prevBtn = tooltip.querySelector("[data-nav='prev']");
+  const nextBtn = tooltip.querySelector("[data-nav='next']");
+  const videos = Array.isArray(state.videos) ? state.videos : [];
+  const images = Array.isArray(state.images) ? state.images : [];
+  const mode = state.mode === "image" ? "image" : "video";
+  const active = mode === "video" ? videos : images;
+
+  if (!Array.isArray(active) || active.length === 0) {
+    if (stage) {
+      stage.innerHTML = "";
+    }
+    if (status) {
+      status.textContent = "No media available for this game.";
+    }
+    if (count) {
+      count.textContent = "0/0";
+    }
+    if (videoBtn) {
+      videoBtn.disabled = videos.length === 0;
+      videoBtn.classList.toggle("active", mode === "video");
+    }
+    if (imageBtn) {
+      imageBtn.disabled = images.length === 0;
+      imageBtn.classList.toggle("active", mode === "image");
+    }
+    if (prevBtn) {
+      prevBtn.disabled = true;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = true;
+    }
+    return;
+  }
+
+  state.index = Math.max(0, Math.min(active.length - 1, Number(state.index || 0)));
+  const current = active[state.index];
+  if (stage) {
+    stage.innerHTML = "";
+    if (mode === "video") {
+      const video = document.createElement("video");
+      video.className = "swm-wishlist-media-tooltip-video";
+      video.src = String(current?.url || "");
+      if (current?.posterUrl) {
+        video.poster = String(current.posterUrl);
+      }
+      video.controls = true;
+      video.autoplay = true;
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.preload = "none";
+      stage.appendChild(video);
+    } else {
+      const image = document.createElement("img");
+      image.className = "swm-wishlist-media-tooltip-image";
+      image.src = String(current || "");
+      image.alt = `Screenshot ${state.index + 1}`;
+      stage.appendChild(image);
+    }
+  }
+  if (status) {
+    status.textContent = mode === "video" ? "Video preview" : "Screenshot preview";
+  }
+  if (count) {
+    count.textContent = `${state.index + 1}/${active.length}`;
+  }
+  if (videoBtn) {
+    videoBtn.disabled = videos.length === 0;
+    videoBtn.classList.toggle("active", mode === "video");
+  }
+  if (imageBtn) {
+    imageBtn.disabled = images.length === 0;
+    imageBtn.classList.toggle("active", mode === "image");
+  }
+  if (prevBtn) {
+    prevBtn.disabled = active.length < 2;
+  }
+  if (nextBtn) {
+    nextBtn.disabled = active.length < 2;
+  }
+}
+
+async function openWishlistMediaTooltip(anchorEl, appId) {
+  const tooltip = ensureWishlistMediaTooltip();
+  const normalizedAppId = String(appId || "").trim();
+  const currentState = tooltip._state && typeof tooltip._state === "object" ? tooltip._state : {};
+  if (currentState.loading && String(currentState.appId || "") === normalizedAppId) {
+    positionWishlistMediaTooltip(tooltip, anchorEl);
+    return;
+  }
+  clearWishlistMediaTooltipHideTimer();
+  tooltip.classList.remove("hidden");
+  positionWishlistMediaTooltip(tooltip, anchorEl);
+  tooltip._state = { appId: normalizedAppId, mode: "video", index: 0, videos: [], images: [], loading: true };
+  renderWishlistMediaTooltipState(tooltip);
+  const status = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+  if (status) {
+    status.textContent = "Loading media from Steam page...";
+  }
+  const seq = ++wishlistMediaTooltipHoverSeq;
+  const url = `https://store.steampowered.com/app/${encodeURIComponent(normalizedAppId)}/?l=english`;
+  try {
+    const htmlText = await Promise.race([
+      fetch(url, { cache: "no-store", credentials: "include" }).then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.text();
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("media fetch timeout")), WISHLIST_MEDIA_FETCH_TIMEOUT_MS))
+    ]);
+    if (seq !== wishlistMediaTooltipHoverSeq) {
+      return;
+    }
+    const media = parseWishlistStoreMedia(htmlText);
+    let resolvedMedia = media;
+    if ((media.videos.length + media.images.length) === 0) {
+      try {
+        resolvedMedia = await Promise.race([
+          fetchWishlistAppDetailsMedia(normalizedAppId),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("appdetails media timeout")), WISHLIST_MEDIA_FETCH_TIMEOUT_MS))
+        ]);
+      } catch (fallbackError) {
+        reportNonFatal("wishlist-media.appdetails-fallback", fallbackError);
+      }
+    }
+    tooltip._state = {
+      appId: normalizedAppId,
+      mode: resolvedMedia.videos.length > 0 ? "video" : "image",
+      index: 0,
+      videos: resolvedMedia.videos,
+      images: resolvedMedia.images,
+      loading: false
+    };
+    renderWishlistMediaTooltipState(tooltip);
+    positionWishlistMediaTooltip(tooltip, anchorEl);
+  } catch (error) {
+    if (seq !== wishlistMediaTooltipHoverSeq) {
+      return;
+    }
+    if (status) {
+      status.textContent = `Failed to load media: ${String(error?.message || "unknown error")}`;
+    }
+    tooltip._state = {
+      appId: normalizedAppId,
+      mode: "video",
+      index: 0,
+      videos: [],
+      images: [],
+      loading: false
+    };
+  }
+}
+
+function bindWishlistRowMediaPreview(row, appId) {
+  if (!(row instanceof HTMLElement) || !appId) {
+    return;
+  }
+  if (row.dataset.swmMediaHoverBound === "1") {
+    return;
+  }
+  row.dataset.swmMediaHoverBound = "1";
+  const anchor = row.querySelector("a[href*='/app/'], .capsule, img, a");
+  const hoverTarget = anchor instanceof HTMLElement ? anchor : row;
+  hoverTarget.addEventListener("mouseenter", () => {
+    openWishlistMediaTooltip(hoverTarget, appId).catch((error) => reportNonFatal("wishlist-media.open", error));
+  });
+  hoverTarget.addEventListener("mouseleave", () => {
+    scheduleWishlistMediaTooltipHide(150);
+  });
+}
+
+function bindWishlistMediaTooltipDelegation() {
+  if (wishlistMediaDelegationBound) {
+    return;
+  }
+  wishlistMediaDelegationBound = true;
+  let lastHoverAppId = "";
+  let lastHoverAt = 0;
+
+  const resolveRowFromEventTarget = (target) => {
+    if (!(target instanceof Element)) {
+      return null;
+    }
+    const direct = target.closest(".wishlist_row, [id^='game_']");
+    if (direct instanceof HTMLElement) {
+      return direct;
+    }
+    const fallbackLink = target.closest(APP_LINK_SELECTOR);
+    return fallbackLink instanceof HTMLElement ? findWishlistRowFromAppLink(fallbackLink) : null;
+  };
+
+  document.addEventListener("pointerover", (event) => {
+    const row = resolveRowFromEventTarget(event.target);
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+    const appId = getAppIdFromWishlistRow(row);
+    const now = Date.now();
+    if (!appId) {
+      return;
+    }
+    if (appId === lastHoverAppId && (now - lastHoverAt) < 1000) {
+      return;
+    }
+    lastHoverAppId = appId;
+    lastHoverAt = now;
+    const anchor = row.querySelector("a[href*='/app/'], .capsule, img, a");
+    const hoverTarget = anchor instanceof HTMLElement ? anchor : row;
+    openWishlistMediaTooltip(hoverTarget, appId).catch((error) => reportNonFatal("wishlist-media.delegate-open", error));
+  }, true);
+
+  document.addEventListener("pointerout", (event) => {
+    const row = resolveRowFromEventTarget(event.target);
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+    const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+    if (related && row.contains(related)) {
+      return;
+    }
+    lastHoverAppId = "";
+    scheduleWishlistMediaTooltipHide(150);
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    const row = resolveRowFromEventTarget(event.target);
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+    const appId = getAppIdFromWishlistRow(row);
+    if (!appId) {
+      return;
+    }
+    const anchor = row.querySelector("a[href*='/app/'], .capsule, img, a");
+    const hoverTarget = anchor instanceof HTMLElement ? anchor : row;
+    openWishlistMediaTooltip(hoverTarget, appId).catch((error) => reportNonFatal("wishlist-media.delegate-click", error));
+  }, true);
 }
 
 function parseNumberLoose(value, fallback = 0) {
@@ -2255,6 +2767,7 @@ function initWishlistFollowUi() {
   }
   logWishlistDevRuntimeInfoOnce();
   requestSidebarCloseForWishlist();
+  bindWishlistMediaTooltipDelegation();
   scheduleWishlistFollowUiDecorate();
   if (!wishlistFollowUiWindowHooksAdded) {
     window.addEventListener("resize", scheduleWishlistFollowUiDecorate, { passive: true });
