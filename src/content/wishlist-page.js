@@ -803,6 +803,10 @@ function ensureWishlistFollowUiStyle() {
       outline: 1px solid rgba(102, 192, 244, 0.65);
       outline-offset: 0;
     }
+    .swm-state-filter-bar .swm-tags-wrap {
+      position: relative;
+      display: inline-block;
+    }
     .swm-state-filter-bar #swm-tags-search {
       min-width: 180px;
       height: 34px;
@@ -815,11 +819,23 @@ function ensureWishlistFollowUiStyle() {
       box-sizing: border-box;
     }
     .swm-state-filter-bar .swm-inline-tags-field {
-      display: flex;
-      align-items: center;
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      z-index: 2147483001;
+      display: grid;
       gap: 6px;
-      flex-wrap: wrap;
-      flex: 0 0 100%;
+      min-width: 320px;
+      max-height: 280px;
+      overflow: auto;
+      padding: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 4px;
+      background: rgba(18, 28, 42, 0.98);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+    }
+    .swm-state-filter-bar .swm-inline-tags-field.swm-tags-dropdown-hidden {
+      display: none !important;
     }
     .swm-state-filter-bar .swm-inline-tags-field .tag-options {
       display: flex;
@@ -1118,6 +1134,16 @@ function ensureWishlistStateFilterControl(stateItems) {
     bar.appendChild(select);
   }
 
+  let tagsWrap = document.getElementById("swm-tags-wrap");
+  if (!tagsWrap) {
+    tagsWrap = document.createElement("div");
+    tagsWrap.id = "swm-tags-wrap";
+    tagsWrap.className = "swm-tags-wrap";
+  }
+  if (tagsWrap.parentElement !== bar) {
+    bar.appendChild(tagsWrap);
+  }
+
   let tagSearchInput = document.getElementById("swm-tags-search");
   if (!tagSearchInput) {
     tagSearchInput = document.createElement("input");
@@ -1125,30 +1151,41 @@ function ensureWishlistStateFilterControl(stateItems) {
     tagSearchInput.type = "search";
     tagSearchInput.placeholder = "Search tags...";
   }
-  if (tagSearchInput.parentElement !== bar) {
-    bar.appendChild(tagSearchInput);
+  if (tagSearchInput.parentElement !== tagsWrap) {
+    tagsWrap.appendChild(tagSearchInput);
   }
 
   let tagsField = document.getElementById("swm-inline-tags-field");
   if (!tagsField) {
     tagsField = document.createElement("div");
     tagsField.id = "swm-inline-tags-field";
-    tagsField.className = "swm-inline-tags-field";
+    tagsField.className = "swm-inline-tags-field swm-tags-dropdown-hidden";
     tagsField.innerHTML = `
       <div id="swm-tags-options" class="tag-options"></div>
       <button id="swm-tags-show-more" type="button" class="small-btn">Show more</button>
     `;
   }
-  if (tagsField.parentElement !== bar) {
-    bar.appendChild(tagsField);
+  if (tagsField.parentElement !== tagsWrap) {
+    tagsWrap.appendChild(tagsField);
   }
+
+  const syncTagsDropdownVisibility = () => {
+    const show = String(tagSearchInput?.value || "").trim().length > 0;
+    tagsField.classList.toggle("swm-tags-dropdown-hidden", !show);
+    if (show) {
+      renderWishlistTagOptions(bar, stateItems);
+    }
+  };
 
   if (tagSearchInput && !tagSearchInput.dataset.swmBound) {
     tagSearchInput.dataset.swmBound = "1";
     tagSearchInput.addEventListener("input", () => {
       wishlistTagSearchQuery = String(tagSearchInput.value || "").slice(0, 60);
       wishlistTagShowLimit = WISHLIST_TAG_SHOW_STEP;
-      renderWishlistTagOptions(bar, stateItems);
+      syncTagsDropdownVisibility();
+    });
+    tagSearchInput.addEventListener("focus", () => {
+      syncTagsDropdownVisibility();
     });
   }
   const tagShowMoreBtn = bar.querySelector("#swm-tags-show-more");
@@ -1159,7 +1196,15 @@ function ensureWishlistStateFilterControl(stateItems) {
       renderWishlistTagOptions(bar, stateItems);
     });
   }
-  renderWishlistTagOptions(bar, stateItems);
+  if (tagsWrap && !tagsWrap.dataset.swmBound) {
+    tagsWrap.dataset.swmBound = "1";
+    document.addEventListener("click", (event) => {
+      if (!tagsWrap.contains(event.target)) {
+        tagsField.classList.add("swm-tags-dropdown-hidden");
+      }
+    }, true);
+  }
+  syncTagsDropdownVisibility();
 
   if (!wishlistCurrentStateFilter) {
     wishlistCurrentStateFilter = "all";
