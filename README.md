@@ -167,6 +167,25 @@ there are no consistently documentable public query params for those filters in
 `/wishlist/profiles/.../`. In many cases, those states are client-side
 (local state/cookies/scripts) and do not map to simple query parameters.
 
+### `input_protobuf_encoded` and internal wishlist service
+
+Observed behavior in live tests:
+
+- Changing `Platform` triggers a `fetch` to:
+  - `https://api.steampowered.com/IWishlistService/GetWishlistSortedFiltered/v1`
+- Changing `Deck Compatibility` triggers the same endpoint.
+- Changing `Exclude` triggers the same endpoint.
+- In all cases, filters were sent through:
+  - `input_protobuf_encoded=<base64-protobuf-payload>`
+- Page URL did not change (`search`/`hash` stayed empty) and no relevant
+  `localStorage` changes were detected during these interactions.
+
+Implementation guidance:
+
+- Treat protobuf payload integration as non-official and version-sensitive.
+- Keep a local fallback filter path so UX remains functional if Steam changes
+  payload fields or endpoint behavior.
+
 ## Development
 
 - Install: `npm install`
