@@ -58,6 +58,40 @@ h2 {
   margin: 0 0 10px;
 }
 
+.filter-group {
+  margin: 0 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0d2239;
+}
+
+.filter-group summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #d7e6f5;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.filter-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.filter-group summary::after {
+  content: "▾";
+  float: right;
+  color: #93abc0;
+}
+
+.filter-group:not([open]) summary::after {
+  content: "▸";
+}
+
+.filter-content {
+  padding: 8px 10px 0;
+}
+
 label {
   display: block;
   margin: 0 0 4px;
