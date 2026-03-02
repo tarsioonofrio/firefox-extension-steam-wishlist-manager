@@ -92,6 +92,21 @@ h2 {
   padding: 8px 10px 0;
 }
 
+.inline-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: #9fb7cc;
+  font-size: 12px;
+}
+
+.inline-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
 label {
   display: block;
   margin: 0 0 4px;
@@ -159,6 +174,16 @@ select {
   font-size: 11px;
   cursor: pointer;
   margin-top: 4px;
+}
+
+.extra-filter-block {
+  margin: 0 0 10px;
+}
+
+.extra-filter-title {
+  font-size: 12px;
+  color: #9fb7cc;
+  margin: 0 0 4px;
 }
 
 .status {

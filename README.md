@@ -64,6 +64,31 @@ Notes:
 - `wishlistdata` and `dynamicstore/userdata` are internal Store endpoints and may be rate-limited/blocked.
 - Rank ordering should remain available from `GetWishlist/v1` even when metadata endpoints fail.
 
+## Wishlist URL / Endpoint Notes (Non-Official)
+
+As of March 2, 2026, Valve does not provide a single official document for all
+Wishlist page URL filter parameters. In practice, this project treats support in
+three levels:
+
+1. Stable URL filters used by the Wishlist page itself:
+   - `tagids=<id1,id2,...>` (tags)
+   - `sort=<mode>` (for example: `discount`, `price`, `reviews`, `releasedate`, `dateadded`, `topsellers`)
+   - `min_discount=<any|50|75>`
+   - `type_filters=games` (observed in page URLs)
+2. Public/official API surfaces:
+   - `IWishlistService/GetWishlist/v1` (rank/base snapshot)
+   - `appreviews` (review summary metrics)
+3. Internal/non-official endpoints (best effort only):
+   - `wishlistdata/?p={page}`
+   - `IWishlistService/GetWishlistSortedFiltered/v1` (protobuf request payload)
+
+Important:
+- Internal endpoints can change without notice.
+- Only filters explicitly reflected in Wishlist URL parameters should be treated
+  as shareable/deep-link behavior.
+- Advanced filters that are not represented in URL parameters should be applied
+  locally by extension logic.
+
 ## Development
 
 - Install: `npm install`

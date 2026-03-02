@@ -6,6 +6,20 @@ const WISHLIST_ROW_SELECTOR = ".wishlist_row, [id^='game_'], [data-app-id], .c-P
 const APP_LINK_SELECTOR = "a[href*='/app/']";
 const WISHLIST_STATE_FILTER_KEY = "swmWishlistStateFilter";
 const WISHLIST_TAG_SHOW_STEP = 12;
+const WISHLIST_MULTI_FILTER_KEYS = [
+  "types",
+  "players",
+  "features",
+  "hardware",
+  "accessibility",
+  "platforms",
+  "languages",
+  "fullAudioLanguages",
+  "subtitleLanguages",
+  "technologies",
+  "developers",
+  "publishers"
+];
 const WISHLIST_FILTERS_SIDEBAR_MODE = true;
 const WISHLIST_NATIVE_BROWSER_SIDEBAR_FILTERS = true;
 let domOrderSyncInFlight = false;
@@ -33,8 +47,15 @@ let wishlistAdvancedFilters = {
   priceMin: 0,
   priceMax: Number.MAX_SAFE_INTEGER,
   discountMin: 0,
-  discountMax: 100
+  discountMax: 100,
+  releaseTextEnabled: true,
+  releaseYearRangeEnabled: true,
+  releaseYearMin: 1970,
+  releaseYearMax: new Date().getUTCFullYear() + 1
 };
+let wishlistMultiFilters = Object.fromEntries(
+  WISHLIST_MULTI_FILTER_KEYS.map((key) => [key, new Set()])
+);
 const NON_FATAL_LOG_WINDOW_MS = 15000;
 const nonFatalLogAt = new Map();
 
@@ -1058,6 +1079,80 @@ function parsePriceLoose(text) {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeArrayFilterValue(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeWishlistMetaType(rawValue) {
+  const raw = normalizeArrayFilterValue(rawValue);
+  const lowered = raw.toLowerCase();
+  if (!raw) {
+    return "Unknown";
+  }
+  const known = {
+    game: "Game",
+    dlc: "DLC",
+    music: "Music",
+    demo: "Demo",
+    application: "Application",
+    video: "Video",
+    movie: "Video",
+    series: "Series",
+    tool: "Tool",
+    beta: "Beta"
+  };
+  return known[lowered] || raw;
+}
+
+function normalizeReleaseTextFilterValue(releaseText) {
+  const raw = normalizeArrayFilterValue(releaseText);
+  if (!raw || raw === "-") {
+    return "";
+  }
+  const lower = raw.toLowerCase();
+  if (lower.includes("coming soon") || lower === "soon") {
+    return "Soon";
+  }
+  if (lower.includes("tba") || lower.includes("to be announced")) {
+    return "TBA";
+  }
+  return "";
+}
+
+function extractYearFromReleaseText(releaseText) {
+  const match = String(releaseText || "").match(/\b(19\d{2}|20\d{2}|21\d{2})\b/);
+  if (!match?.[1]) {
+    return 0;
+  }
+  const n = Number(match[1]);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function getWishlistMetaArray(appId, key) {
+  const values = Array.isArray(wishlistMetaCache?.[appId]?.[key]) ? wishlistMetaCache[appId][key] : [];
+  return Array.from(
+    new Set(
+      values
+        .map(normalizeArrayFilterValue)
+        .filter(Boolean)
+    )
+  );
+}
+
+function getWishlistReleaseInfo(appId, rowText = "") {
+  const meta = appId ? (wishlistMetaCache?.[appId] || {}) : {};
+  const releaseText = String(meta?.releaseText || "").trim();
+  const textLabel = normalizeReleaseTextFilterValue(releaseText);
+  let year = 0;
+  const unix = Number(meta?.releaseUnix || 0);
+  if (Number.isFinite(unix) && unix > 0) {
+    year = new Date(unix * 1000).getUTCFullYear();
+  } else {
+    year = extractYearFromReleaseText(releaseText) || extractYearFromReleaseText(rowText);
+  }
+  return { textLabel, year };
+}
+
 function getRowTagNames(row) {
   if (!(row instanceof HTMLElement)) {
     return [];
@@ -1100,12 +1195,18 @@ function extractRowMetrics(row, stateItems) {
   const item = appId ? (stateItems?.[appId] || {}) : {};
   const intent = getWishlistIntentState(item);
   const bucket = getWishlistBucket(intent);
+  const metaType = normalizeWishlistMetaType(
+    wishlistMetaCache?.[appId]?.appType
+    || wishlistMetaCache?.[appId]?.appTypeRaw
+    || ""
+  );
 
   const text = String(row?.textContent || "");
   const lower = text.toLowerCase();
   const title = getItemTitleFromWishlistRow(row).toLowerCase();
   const tags = getRowTagNames(row);
   const tagSetLower = new Set(tags.map((tag) => String(tag || "").toLowerCase()));
+  const releaseInfo = getWishlistReleaseInfo(appId, text);
 
   const ratingMatch = text.match(/(\d{1,3})\s?%/);
   const rating = ratingMatch ? Math.max(0, Math.min(100, parseNumberLoose(ratingMatch[1], -1))) : -1;
@@ -1139,16 +1240,54 @@ function extractRowMetrics(row, stateItems) {
   }
 
   return {
+    appId,
     bucket,
     title,
     lower,
     tags,
     tagSetLower,
+    type: metaType,
+    arrays: {
+      players: getWishlistMetaArray(appId, "players"),
+      features: getWishlistMetaArray(appId, "features"),
+      hardware: getWishlistMetaArray(appId, "hardware"),
+      accessibility: getWishlistMetaArray(appId, "accessibility"),
+      platforms: getWishlistMetaArray(appId, "platforms"),
+      languages: getWishlistMetaArray(appId, "languages"),
+      fullAudioLanguages: getWishlistMetaArray(appId, "fullAudioLanguages"),
+      subtitleLanguages: getWishlistMetaArray(appId, "subtitleLanguages"),
+      technologies: getWishlistMetaArray(appId, "technologies"),
+      developers: getWishlistMetaArray(appId, "developers"),
+      publishers: getWishlistMetaArray(appId, "publishers")
+    },
+    releaseTextLabel: releaseInfo.textLabel,
+    releaseYear: Number(releaseInfo.year || 0),
     rating,
     reviews,
     discount,
     price
   };
+}
+
+function matchesArraySet(selectedSet, values, requireAll = false) {
+  if (!(selectedSet instanceof Set) || selectedSet.size === 0) {
+    return true;
+  }
+  const valueSet = new Set(Array.isArray(values) ? values : []);
+  if (requireAll) {
+    for (const entry of selectedSet) {
+      if (!valueSet.has(entry)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  for (const entry of selectedSet) {
+    if (valueSet.has(entry)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function passesAdvancedFilters(metrics) {
@@ -1182,6 +1321,62 @@ function passesAdvancedFilters(metrics) {
   }
   if (metrics.price !== null) {
     if (metrics.price < Number(f.priceMin || 0) || metrics.price > Number(f.priceMax || Number.MAX_SAFE_INTEGER)) {
+      return false;
+    }
+  }
+  if (wishlistMultiFilters.types?.size > 0 && !wishlistMultiFilters.types.has(String(metrics.type || "Unknown"))) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.players, metrics.arrays?.players)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.features, metrics.arrays?.features)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.hardware, metrics.arrays?.hardware)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.accessibility, metrics.arrays?.accessibility)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.platforms, metrics.arrays?.platforms)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.languages, metrics.arrays?.languages)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.fullAudioLanguages, metrics.arrays?.fullAudioLanguages, true)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.subtitleLanguages, metrics.arrays?.subtitleLanguages, true)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.technologies, metrics.arrays?.technologies)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.developers, metrics.arrays?.developers)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.publishers, metrics.arrays?.publishers)) {
+    return false;
+  }
+  const releaseTextEnabled = Boolean(f.releaseTextEnabled);
+  const releaseYearRangeEnabled = Boolean(f.releaseYearRangeEnabled);
+  if (releaseTextEnabled || releaseYearRangeEnabled) {
+    const textMatch = releaseTextEnabled ? Boolean(metrics.releaseTextLabel) : false;
+    const year = Number(metrics.releaseYear || 0);
+    const minYear = Number(f.releaseYearMin || 1970);
+    const maxYear = Number(f.releaseYearMax || (new Date().getUTCFullYear() + 1));
+    const rangeMatch = releaseYearRangeEnabled
+      ? (Number.isFinite(year) && year >= minYear && year <= maxYear)
+      : false;
+    if (releaseTextEnabled && releaseYearRangeEnabled) {
+      if (!textMatch && !rangeMatch) {
+        return false;
+      }
+    } else if (releaseTextEnabled && !textMatch) {
+      return false;
+    } else if (releaseYearRangeEnabled && !rangeMatch) {
       return false;
     }
   }
@@ -1228,6 +1423,44 @@ function buildWishlistTagCountsFromCache() {
       const entry = counts.get(key) || { name, count: 0 };
       entry.count += 1;
       counts.set(key, entry);
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) => {
+    const diff = Number(b.count || 0) - Number(a.count || 0);
+    if (diff !== 0) {
+      return diff;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+}
+
+function buildWishlistCountsFromCache(key) {
+  const counts = new Map();
+  const items = wishlistStateCache?.items && typeof wishlistStateCache.items === "object"
+    ? wishlistStateCache.items
+    : {};
+  for (const appId of Object.keys(items)) {
+    let values = [];
+    if (key === "types") {
+      values = [
+        normalizeWishlistMetaType(
+          wishlistMetaCache?.[appId]?.appType
+          || wishlistMetaCache?.[appId]?.appTypeRaw
+          || ""
+        )
+      ];
+    } else {
+      values = getWishlistMetaArray(appId, key);
+    }
+    for (const rawValue of values) {
+      const name = normalizeArrayFilterValue(rawValue);
+      if (!name) {
+        continue;
+      }
+      const lookup = String(name).toLowerCase();
+      const entry = counts.get(lookup) || { name, count: 0 };
+      entry.count += 1;
+      counts.set(lookup, entry);
     }
   }
   return Array.from(counts.values()).sort((a, b) => {
@@ -1329,6 +1562,20 @@ function hasActiveWishlistFilters() {
   }
   if (Number(f.discountMin || 0) > 0 || Number(f.discountMax || 100) < 100) {
     return true;
+  }
+  if (!Boolean(f.releaseTextEnabled)) {
+    return true;
+  }
+  const maxDefault = new Date().getUTCFullYear() + 1;
+  if (!Boolean(f.releaseYearRangeEnabled)
+    || Number(f.releaseYearMin || 1970) !== 1970
+    || Number(f.releaseYearMax || maxDefault) !== maxDefault) {
+    return true;
+  }
+  for (const key of WISHLIST_MULTI_FILTER_KEYS) {
+    if (wishlistMultiFilters[key]?.size > 0) {
+      return true;
+    }
   }
   return false;
 }
@@ -1535,6 +1782,14 @@ async function getWishlistFiltersSnapshot() {
     tagSearchQuery: String(wishlistTagSearchQuery || ""),
     tagShowLimit: Number(wishlistTagShowLimit || WISHLIST_TAG_SHOW_STEP),
     tagCounts,
+    multiFilters: {
+      selected: Object.fromEntries(
+        WISHLIST_MULTI_FILTER_KEYS.map((key) => [key, Array.from(wishlistMultiFilters?.[key] || [])])
+      ),
+      counts: Object.fromEntries(
+        WISHLIST_MULTI_FILTER_KEYS.map((key) => [key, buildWishlistCountsFromCache(key)])
+      )
+    },
     advanced: {
       ratingMin: Number(wishlistAdvancedFilters?.ratingMin || 0),
       ratingMax: Number(wishlistAdvancedFilters?.ratingMax || 100),
@@ -1543,7 +1798,11 @@ async function getWishlistFiltersSnapshot() {
       priceMin: Number(wishlistAdvancedFilters?.priceMin || 0),
       priceMax: Number(wishlistAdvancedFilters?.priceMax || Number.MAX_SAFE_INTEGER),
       discountMin: Number(wishlistAdvancedFilters?.discountMin || 0),
-      discountMax: Number(wishlistAdvancedFilters?.discountMax || 100)
+      discountMax: Number(wishlistAdvancedFilters?.discountMax || 100),
+      releaseTextEnabled: Boolean(wishlistAdvancedFilters?.releaseTextEnabled),
+      releaseYearRangeEnabled: Boolean(wishlistAdvancedFilters?.releaseYearRangeEnabled),
+      releaseYearMin: Number(wishlistAdvancedFilters?.releaseYearMin || 1970),
+      releaseYearMax: Number(wishlistAdvancedFilters?.releaseYearMax || (new Date().getUTCFullYear() + 1))
     }
   };
 }
@@ -1578,6 +1837,19 @@ async function applyWishlistFiltersPayload(payload) {
     const n = Number(payload.tagShowLimit || WISHLIST_TAG_SHOW_STEP);
     wishlistTagShowLimit = Number.isFinite(n) && n > 0 ? Math.floor(n) : WISHLIST_TAG_SHOW_STEP;
   }
+  if (payload.multiFilters && typeof payload.multiFilters === "object") {
+    const selected = payload.multiFilters.selected && typeof payload.multiFilters.selected === "object"
+      ? payload.multiFilters.selected
+      : {};
+    for (const key of WISHLIST_MULTI_FILTER_KEYS) {
+      const rawList = Array.isArray(selected[key]) ? selected[key] : [];
+      wishlistMultiFilters[key] = new Set(
+        rawList
+          .map(normalizeArrayFilterValue)
+          .filter(Boolean)
+      );
+    }
+  }
 
   const advanced = payload.advanced && typeof payload.advanced === "object" ? payload.advanced : {};
   if (advanced.ratingMin !== undefined) {
@@ -1608,6 +1880,22 @@ async function applyWishlistFiltersPayload(payload) {
   }
   if (advanced.discountMax !== undefined) {
     wishlistAdvancedFilters.discountMax = Math.max(0, Math.min(100, parseNumberLoose(advanced.discountMax, 100)));
+  }
+  if (advanced.releaseTextEnabled !== undefined) {
+    wishlistAdvancedFilters.releaseTextEnabled = Boolean(advanced.releaseTextEnabled);
+  }
+  if (advanced.releaseYearRangeEnabled !== undefined) {
+    wishlistAdvancedFilters.releaseYearRangeEnabled = Boolean(advanced.releaseYearRangeEnabled);
+  }
+  if (advanced.releaseYearMin !== undefined) {
+    wishlistAdvancedFilters.releaseYearMin = Math.max(1970, parseNumberLoose(advanced.releaseYearMin, 1970));
+  }
+  if (advanced.releaseYearMax !== undefined) {
+    const maxDefault = new Date().getUTCFullYear() + 1;
+    wishlistAdvancedFilters.releaseYearMax = Math.max(1970, parseNumberLoose(advanced.releaseYearMax, maxDefault));
+  }
+  if (Number(wishlistAdvancedFilters.releaseYearMin || 1970) > Number(wishlistAdvancedFilters.releaseYearMax || 1970)) {
+    wishlistAdvancedFilters.releaseYearMin = wishlistAdvancedFilters.releaseYearMax;
   }
 
   applyWishlistFiltersToRows(getWishlistRows(), wishlistStateCache?.items || {});
