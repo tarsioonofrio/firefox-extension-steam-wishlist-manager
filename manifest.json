@@ -19,10 +19,6 @@
     "default_title": "Steam Wishlist Manager",
     "default_popup": "src/popup/popup.html"
   },
-  "sidebar_action": {
-    "default_title": "Steam Wishlist Manager",
-    "default_panel": "src/sidebar/sidebar.html"
-  },
   "background": {
     "scripts": ["src/background.js"]
   },
