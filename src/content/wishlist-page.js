@@ -1307,7 +1307,8 @@ function normalizeWishlistMediaUrl(rawUrl) {
 }
 
 function parseWishlistStoreMedia(htmlText) {
-  const doc = new DOMParser().parseFromString(String(htmlText || ""), "text/html");
+  const rawHtml = String(htmlText || "");
+  const doc = new DOMParser().parseFromString(rawHtml, "text/html");
   const videos = [];
   const images = [];
   const seenVideos = new Set();
@@ -1341,6 +1342,20 @@ function parseWishlistStoreMedia(htmlText) {
       || posterEl?.getAttribute("data-src")
     );
     videos.push({ url: videoUrl, posterUrl });
+  }
+
+  // Fallback: parse direct mp4/webm links embedded in script blobs/escaped strings.
+  const directVideoMatches = Array.from(
+    rawHtml.matchAll(/https?:\\?\/\\?\/[^"'\\\s<>()]+?\.(?:mp4|webm)(?:\?[^"'\\\s<>()]*)?/gi)
+  );
+  for (const match of directVideoMatches) {
+    const raw = String(match?.[0] || "").replace(/\\\//g, "/");
+    const videoUrl = normalizeWishlistMediaUrl(raw);
+    if (!videoUrl || seenVideos.has(videoUrl)) {
+      continue;
+    }
+    seenVideos.add(videoUrl);
+    videos.push({ url: videoUrl, posterUrl: "" });
   }
 
   const imageNodes = doc.querySelectorAll(
@@ -1378,13 +1393,27 @@ async function fetchWishlistAppDetailsMedia(appId) {
   const seenImages = new Set();
 
   for (const movie of Array.isArray(data?.movies) ? data.movies : []) {
-    const mp4 = normalizeWishlistMediaUrl(movie?.mp4?.max || movie?.mp4?.["480"]);
-    if (!mp4 || seenVideos.has(mp4)) {
+    const candidates = [
+      movie?.mp4?.max,
+      movie?.mp4?.["480"],
+      movie?.webm?.max,
+      movie?.webm?.["480"]
+    ];
+    let picked = "";
+    for (const candidate of candidates) {
+      const normalized = normalizeWishlistMediaUrl(candidate);
+      if (!normalized || seenVideos.has(normalized)) {
+        continue;
+      }
+      picked = normalized;
+      break;
+    }
+    if (!picked) {
       continue;
     }
-    seenVideos.add(mp4);
+    seenVideos.add(picked);
     const posterUrl = normalizeWishlistMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
-    videos.push({ url: mp4, posterUrl });
+    videos.push({ url: picked, posterUrl });
   }
 
   for (const screenshot of Array.isArray(data?.screenshots) ? data.screenshots : []) {
