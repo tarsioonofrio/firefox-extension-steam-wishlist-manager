@@ -1,5 +1,6 @@
 (() => {
   const MEDIA_TOOLTIP_ID = "swm-media-tooltip";
+  const MEDIA_TOOLTIP_STYLE_ID = "swm-media-tooltip-style";
   const MEDIA_TOOLTIP_FETCH_LABEL = "media tooltip fetch timeout";
   const MEDIA_TOOLTIP_FETCH_TIMEOUT_MS = 12000;
   let mediaTooltipHoverSeq = 0;
@@ -23,7 +24,13 @@
   }
 
   function normalizeMediaUrl(rawUrl) {
-    const url = String(rawUrl || "").trim();
+    const url = String(rawUrl || "")
+      .trim()
+      .replace(/\\u0026/gi, "&")
+      .replace(/\\x26/gi, "&")
+      .replace(/\\u002f/gi, "/")
+      .replace(/&amp;/gi, "&")
+      .replace(/\\\//g, "/");
     if (!url) {
       return "";
     }
@@ -70,6 +77,19 @@
       videos.push({ url: mediaUrl, posterUrl });
     }
 
+    const directVideoMatches = Array.from(
+      String(htmlText || "").matchAll(/https?:\\?\/\\?\/[^"'\\\s<>()]+?\.(?:mp4|webm)(?:\?[^"'\\\s<>()]*)?/gi)
+    );
+    for (const match of directVideoMatches) {
+      const raw = String(match?.[0] || "").replace(/\\\//g, "/");
+      const mediaUrl = normalizeMediaUrl(raw);
+      if (!mediaUrl || seenVideos.has(mediaUrl)) {
+        continue;
+      }
+      seenVideos.add(mediaUrl);
+      videos.push({ url: mediaUrl, posterUrl: "" });
+    }
+
     const imageNodes = doc.querySelectorAll(
       ".highlight_strip_screenshot img, .highlight_screenshot_link img, [id^='thumb_screenshot_'] img"
     );
@@ -85,7 +105,190 @@
     return { videos, images };
   }
 
+  function deriveManifestCandidates(rawManifestUrl) {
+    const manifestUrl = normalizeMediaUrl(rawManifestUrl);
+    if (!manifestUrl) {
+      return [];
+    }
+    const queryIndex = manifestUrl.indexOf("?");
+    const query = queryIndex >= 0 ? manifestUrl.slice(queryIndex) : "";
+    const base = queryIndex >= 0 ? manifestUrl.slice(0, queryIndex) : manifestUrl;
+    const slashIndex = base.lastIndexOf("/");
+    if (slashIndex < 0) {
+      return [];
+    }
+    const dir = base.slice(0, slashIndex + 1);
+    return [
+      `${dir}movie_max.mp4${query}`,
+      `${dir}movie480.mp4${query}`,
+      `${dir}movie_max.webm${query}`,
+      `${dir}movie480.webm${query}`
+    ];
+  }
+
+  function deriveStaticMovieCandidates(movie) {
+    const out = [];
+    const movieId = String(movie?.id || "").trim();
+    const thumbUrl = normalizeMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
+    const thumbQueryIndex = thumbUrl.indexOf("?");
+    const thumbQuery = thumbQueryIndex >= 0 ? thumbUrl.slice(thumbQueryIndex) : "";
+    if (movieId) {
+      out.push(
+        `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie_max.mp4${thumbQuery}`,
+        `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie480.mp4${thumbQuery}`,
+        `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie_max.webm${thumbQuery}`,
+        `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie480.webm${thumbQuery}`
+      );
+    }
+    return out;
+  }
+
+  async function fetchAppDetailsMedia(appId) {
+    const id = String(appId || "").trim();
+    if (!id) {
+      return { videos: [], images: [] };
+    }
+    const videos = [];
+    const images = [];
+    const seenVideos = new Set();
+    const seenImages = new Set();
+    const addFromData = (data) => {
+      for (const movie of Array.isArray(data?.movies) ? data.movies : []) {
+        const candidates = [
+          movie?.mp4?.max,
+          movie?.mp4?.["480"],
+          movie?.webm?.max,
+          movie?.webm?.["480"],
+          ...deriveStaticMovieCandidates(movie),
+          ...deriveManifestCandidates(movie?.dash_h264),
+          ...deriveManifestCandidates(movie?.hls_h264),
+          ...deriveManifestCandidates(movie?.dash_av1)
+        ];
+        let picked = "";
+        for (const candidate of candidates) {
+          const normalized = normalizeMediaUrl(candidate);
+          if (!normalized || seenVideos.has(normalized)) {
+            continue;
+          }
+          picked = normalized;
+          break;
+        }
+        if (!picked) {
+          continue;
+        }
+        seenVideos.add(picked);
+        const posterUrl = normalizeMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
+        videos.push({ url: picked, posterUrl });
+      }
+      for (const screenshot of Array.isArray(data?.screenshots) ? data.screenshots : []) {
+        const imageUrl = normalizeMediaUrl(screenshot?.path_full || screenshot?.path_thumbnail);
+        if (!imageUrl || seenImages.has(imageUrl)) {
+          continue;
+        }
+        seenImages.add(imageUrl);
+        images.push(imageUrl);
+      }
+    };
+
+    const ccCandidates = ["us", "br", ""];
+    for (const cc of ccCandidates) {
+      const ccParam = cc ? `&cc=${encodeURIComponent(cc)}` : "";
+      const url = `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(id)}&l=english${ccParam}&filters=movies,screenshots`;
+      try {
+        const json = await fetch(url, { cache: "no-store", credentials: "include" }).then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return response.json();
+        });
+        const entry = json?.[id];
+        const data = entry?.success ? (entry.data || {}) : {};
+        addFromData(data);
+      } catch {
+        continue;
+      }
+      if (videos.length > 0 && images.length > 0) {
+        break;
+      }
+    }
+
+    return { videos, images };
+  }
+
+  function ensureMediaTooltipStyle() {
+    if (document.getElementById(MEDIA_TOOLTIP_STYLE_ID)) {
+      return;
+    }
+    const style = document.createElement("style");
+    style.id = MEDIA_TOOLTIP_STYLE_ID;
+    style.textContent = `
+      .swm-media-tooltip {
+        position: fixed;
+        z-index: 2147483647;
+        width: min(420px, calc(100vw - 20px));
+        min-height: 210px;
+        background: rgba(20, 27, 35, 0.97);
+        border: 1px solid rgba(108, 166, 202, 0.55);
+        border-radius: 8px;
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+        padding: 8px;
+        color: #c7d5e0;
+        pointer-events: auto;
+      }
+      .swm-media-tooltip.hidden { display: none !important; }
+      .swm-media-tooltip-stage {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #000;
+      }
+      .swm-media-tooltip-video, .swm-media-tooltip-image {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+        background: #000;
+        border: 0;
+      }
+      .swm-media-tooltip-status {
+        margin: 6px 0 0;
+        color: #9fb7cc;
+        font-size: 11px;
+      }
+      .swm-media-tooltip-controls {
+        margin-top: 6px;
+        display: grid;
+        grid-template-columns: auto auto 1fr auto auto;
+        gap: 6px;
+        align-items: center;
+      }
+      .swm-media-tooltip-controls button {
+        height: 24px;
+        min-width: 56px;
+        font-size: 11px;
+        padding: 0 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 2px;
+        background: #2b3b4a;
+        color: #c7d5e0;
+        cursor: pointer;
+      }
+      .swm-media-tooltip-controls button.active {
+        border-color: #6ca6ca;
+        background: #447196;
+      }
+      .swm-media-tooltip-count {
+        text-align: center;
+        color: #9fb7cc;
+        font-size: 11px;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
   function ensureMediaTooltip() {
+    ensureMediaTooltipStyle();
     let tooltip = document.getElementById(MEDIA_TOOLTIP_ID);
     if (tooltip) {
       return tooltip;
@@ -191,6 +394,39 @@
     const imageList = Array.isArray(state.images) ? state.images : [];
     const activeMode = state.mode === "image" ? "image" : "video";
     const activeList = activeMode === "video" ? videoList : imageList;
+    const showSteamPlayerFallback = Boolean(state.steamPlayerFallback && state.appId);
+    if (showSteamPlayerFallback) {
+      if (stage) {
+        stage.innerHTML = "";
+        const iframe = document.createElement("iframe");
+        iframe.className = "swm-media-tooltip-video";
+        iframe.src = `https://store.steampowered.com/video/${encodeURIComponent(String(state.appId))}/?l=english`;
+        iframe.setAttribute("allow", "autoplay; fullscreen");
+        iframe.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
+        stage.appendChild(iframe);
+      }
+      if (status) {
+        status.textContent = "Steam player preview";
+      }
+      if (count) {
+        count.textContent = "—";
+      }
+      if (videoBtn) {
+        videoBtn.disabled = false;
+        videoBtn.classList.add("active");
+      }
+      if (imageBtn) {
+        imageBtn.disabled = imageList.length === 0;
+        imageBtn.classList.remove("active");
+      }
+      if (prevBtn) {
+        prevBtn.disabled = true;
+      }
+      if (nextBtn) {
+        nextBtn.disabled = true;
+      }
+      return;
+    }
     if (!Array.isArray(activeList) || activeList.length === 0) {
       if (stage) {
         stage.innerHTML = "";
@@ -237,6 +473,29 @@
         video.loop = true;
         video.playsInline = true;
         video.preload = "none";
+        video.addEventListener("error", () => {
+          const nextState = tooltip._state && typeof tooltip._state === "object" ? tooltip._state : {};
+          if (nextState.appId && !nextState.steamPlayerFallback) {
+            nextState.steamPlayerFallback = true;
+            renderMediaTooltipState(tooltip);
+            const nextStatus = tooltip.querySelector(".swm-media-tooltip-status");
+            if (nextStatus) {
+              nextStatus.textContent = "Direct video failed; trying Steam player.";
+            }
+            return;
+          }
+          const fallbackImages = Array.isArray(nextState.images) ? nextState.images : [];
+          if (fallbackImages.length > 0 && nextState.mode === "video" && !nextState.videoFallbackUsed) {
+            nextState.videoFallbackUsed = true;
+            nextState.mode = "image";
+            nextState.index = Math.max(0, Math.min(fallbackImages.length - 1, nextState.index || 0));
+            renderMediaTooltipState(tooltip);
+            const nextStatus = tooltip.querySelector(".swm-media-tooltip-status");
+            if (nextStatus) {
+              nextStatus.textContent = "Video unavailable for this game; showing screenshots.";
+            }
+          }
+        });
         stage.appendChild(video);
       } else {
         const image = document.createElement("img");
@@ -282,20 +541,21 @@
     if (status) {
       status.textContent = "Loading media from Steam page...";
     }
-    tooltip._state = { appId: String(appId || ""), mode: "", index: 0, videos: [], images: [] };
+    tooltip._state = { appId: String(appId || ""), mode: "", index: 0, videos: [], images: [], steamPlayerFallback: false };
     renderMediaTooltipState(tooltip);
 
     const fetchText = window?.SWMSteamFetch?.fetchText;
-    if (typeof fetchText !== "function") {
-      if (status) {
-        status.textContent = "Media loader unavailable.";
-      }
-      return;
-    }
     const seq = ++mediaTooltipHoverSeq;
     const storeUrl = `https://store.steampowered.com/app/${encodeURIComponent(String(appId || "").trim())}/?l=english`;
     try {
-      const fetchPromise = fetchText(storeUrl, { cache: "no-store" });
+      const fetchPromise = typeof fetchText === "function"
+        ? fetchText(storeUrl, { cache: "no-store" })
+        : fetch(storeUrl, { cache: "no-store", credentials: "include" }).then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return response.text();
+        });
       const htmlText = await Promise.race([
         fetchPromise,
         new Promise((_, reject) => {
@@ -305,13 +565,26 @@
       if (seq !== mediaTooltipHoverSeq) {
         return;
       }
-      const parsed = parseStoreMediaFromHtml(htmlText);
+      let parsed = parseStoreMediaFromHtml(htmlText);
+      if ((parsed.videos.length + parsed.images.length) === 0) {
+        try {
+          parsed = await Promise.race([
+            fetchAppDetailsMedia(appId),
+            new Promise((_, reject) => {
+              setTimeout(() => reject(new Error(MEDIA_TOOLTIP_FETCH_LABEL)), MEDIA_TOOLTIP_FETCH_TIMEOUT_MS);
+            })
+          ]);
+        } catch {
+          // noop
+        }
+      }
       tooltip._state = {
         appId: String(appId || ""),
         mode: parsed.videos.length > 0 ? "video" : "image",
         index: 0,
         videos: parsed.videos,
-        images: parsed.images
+        images: parsed.images,
+        steamPlayerFallback: false
       };
       renderMediaTooltipState(tooltip);
       positionMediaTooltip(tooltip, anchorEl);
@@ -322,6 +595,15 @@
       if (status) {
         status.textContent = `Failed to load media: ${String(error?.message || "unknown error")}`;
       }
+      tooltip._state = {
+        appId: String(appId || ""),
+        mode: "video",
+        index: 0,
+        videos: [],
+        images: [],
+        steamPlayerFallback: true
+      };
+      renderMediaTooltipState(tooltip);
     }
   }
 
@@ -442,16 +724,19 @@
     }
     if (card.coverLink) {
       card.coverLink.href = card.link;
+      bindMediaPreviewHover(card.coverLink, appId);
     }
     if (card.cover) {
       const imageCandidates = buildImageCandidates(appId, imageUrl);
       attachImageFallback(card.cover, imageCandidates);
       card.cover.alt = card.title;
       card.cover.loading = "lazy";
+      bindMediaPreviewHover(card.cover, appId);
     }
     if (card.titleEl) {
       card.titleEl.textContent = card.title;
       card.titleEl.href = card.link;
+      bindMediaPreviewHover(card.titleEl, appId);
     }
     if (card.appidEl) {
       card.appidEl.textContent = `AppID: ${appId}`;
