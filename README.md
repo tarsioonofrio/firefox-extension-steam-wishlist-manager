@@ -16,6 +16,7 @@ Main goal: make prioritization practical while keeping local intent as the sourc
 ## What It Does (User View)
 
 - Opens a dedicated **Collections** page from the extension icon.
+- Opens a dedicated **Discover Queue** page from the extension icon (one game at a time workflow).
 - Opens a dedicated **Feed / Acompanhar** page from the extension icon.
 - Reads your wishlist rank from Steam API (`Your rank`), and enriches game metadata locally.
 - Lets you add/remove a game to/from static collections from card and line views.
@@ -43,8 +44,14 @@ This section is the user-facing map of current screens and capabilities.
 
 ### Extension Popup
 
-- Opens key pages quickly: `Collections`, `Feed / Acompanhar`, and `Configurations`.
+- Opens key pages quickly: `Collections`, `Discover Queue`, `Feed / Acompanhar`, and `Configurations`.
 - Acts as the main entry point while browsing Steam pages.
+
+### Discover Queue Page
+
+- Shows one game at a time in a triage flow.
+- Includes media controls (videos/screenshots with previous/next navigation).
+- Shows card-style metadata (price, discount, reviews, release, tags) and quick actions (`Confirm`, `Maybe`, `Follow`, `Archive`, target price).
 
 ### Collections Page
 

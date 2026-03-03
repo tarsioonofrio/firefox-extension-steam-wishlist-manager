@@ -4,6 +4,12 @@ document.getElementById("open-collections")?.addEventListener("click", async () 
   window.close();
 });
 
+document.getElementById("open-queue")?.addEventListener("click", async () => {
+  const url = browser.runtime.getURL("src/pages/queue.html");
+  await browser.tabs.create({ url });
+  window.close();
+});
+
 document.getElementById("open-feed")?.addEventListener("click", async () => {
   const url = browser.runtime.getURL("src/pages/feed.html");
   await browser.tabs.create({ url });
