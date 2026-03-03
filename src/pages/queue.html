@@ -9,7 +9,22 @@
 <body>
   <main class="container">
     <header class="top">
-      <h1>Discover Queue</h1>
+      <div class="top-title-row">
+        <h1>Discover Queue</h1>
+        <div id="queue-header-bar" class="queue-header-bar hidden">
+          <div class="queue-topbar-left">
+            <div id="queue-nav" class="queue-nav hidden">
+              <button id="prev-btn" type="button">Previous</button>
+              <button id="next-btn" type="button">Next</button>
+            </div>
+          </div>
+          <div class="queue-topbar-right">
+            <a id="game-link" class="title" target="_blank" rel="noopener noreferrer"></a>
+            <span id="game-appid" class="meta"></span>
+            <span id="queue-pos" class="meta"></span>
+          </div>
+        </div>
+      </div>
       <div class="setup-panel">
         <label>
           <span>Collection</span>
@@ -27,19 +42,6 @@
           </select>
         </label>
         <button id="go-btn" type="button">Go!</button>
-      </div>
-      <div id="queue-header-bar" class="queue-header-bar hidden">
-        <div class="queue-topbar-left">
-          <div id="queue-nav" class="queue-nav hidden">
-            <button id="prev-btn" type="button">Previous</button>
-            <button id="next-btn" type="button">Next</button>
-          </div>
-        </div>
-        <div class="queue-topbar-right">
-          <a id="game-link" class="title" target="_blank" rel="noopener noreferrer"></a>
-          <span id="game-appid" class="meta"></span>
-          <span id="queue-pos" class="meta"></span>
-        </div>
       </div>
       <p id="status" class="status"></p>
     </header>

@@ -24,9 +24,17 @@ body {
   gap: 8px;
 }
 
+.top-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 h1 {
   margin: 0;
   font-size: 24px;
+  flex: 0 0 auto;
 }
 
 .setup-panel {
@@ -91,6 +99,8 @@ button.active {
 }
 
 .queue-header-bar {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -256,6 +266,10 @@ button.active {
   }
 
   .queue-header-bar {
+    flex-wrap: wrap;
+  }
+
+  .top-title-row {
     flex-wrap: wrap;
   }
 }
