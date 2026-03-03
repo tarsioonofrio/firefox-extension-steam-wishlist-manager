@@ -1284,6 +1284,9 @@ function isMetaIncomplete(meta) {
   const title = String(meta.titleText || "").trim();
   const release = String(meta.releaseText || "").trim();
   const price = String(meta.priceText || "").trim();
+  const headerImage = String(meta.headerImage || "").trim();
+  const capsuleImage = String(meta.capsuleImage || "").trim();
+  const capsuleImageV5 = String(meta.capsuleImageV5 || "").trim();
 
   if (!title) {
     return true;
@@ -1291,6 +1294,10 @@ function isMetaIncomplete(meta) {
 
   // Known bad cache state for games where appdetails failed/partial.
   if (release === "-" && price === "-") {
+    return true;
+  }
+
+  if (!headerImage && !capsuleImage && !capsuleImageV5) {
     return true;
   }
 
@@ -2235,19 +2242,48 @@ async function saveTrackFeedCache() {
 }
 
 function getCardImageUrl(appId) {
-  return `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}/capsule_184x69.jpg`;
+  const id = String(appId || "");
+  const cached = metaCache[id] || {};
+  const preferred = [
+    String(cached.capsuleImageV5 || "").trim(),
+    String(cached.capsuleImage || "").trim(),
+    String(cached.headerImage || "").trim()
+  ].find(Boolean);
+  return preferred || `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}/capsule_184x69.jpg`;
 }
 
 function getCardImageCandidates(appId) {
   const id = String(appId || "");
-  const base = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}`;
+  const baseCloudflare = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}`;
+  const baseAkamai = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${id}`;
+  const cached = metaCache[id] || {};
+  const primary = getCardImageUrl(id);
+  const primaryDir = primary.includes("/")
+    ? primary.slice(0, primary.lastIndexOf("/") + 1)
+    : "";
   return [
-    getCardImageUrl(id),
-    `${base}/capsule_231x87.jpg`,
-    `${base}/header.jpg`,
-    `${base}/capsule_616x353.jpg`,
-    `${base}/library_600x900.jpg`,
-    `${base}/library_600x900_2x.jpg`
+    primary,
+    String(cached.capsuleImageV5 || "").trim(),
+    String(cached.capsuleImage || "").trim(),
+    String(cached.headerImage || "").trim(),
+    `${baseCloudflare}/capsule_184x69.jpg`,
+    `${baseCloudflare}/capsule_231x87.jpg`,
+    `${baseCloudflare}/header.jpg`,
+    `${baseCloudflare}/header_alt_assets_0.jpg`,
+    `${baseCloudflare}/header_alt_assets_1.jpg`,
+    `${baseCloudflare}/capsule_616x353.jpg`,
+    `${baseCloudflare}/library_600x900.jpg`,
+    `${baseCloudflare}/library_600x900_2x.jpg`,
+    `${baseAkamai}/capsule_184x69.jpg`,
+    `${baseAkamai}/capsule_231x87.jpg`,
+    `${baseAkamai}/header.jpg`,
+    `${baseAkamai}/header_alt_assets_0.jpg`,
+    `${baseAkamai}/header_alt_assets_1.jpg`,
+    `${baseAkamai}/capsule_616x353.jpg`,
+    `${baseAkamai}/library_600x900.jpg`,
+    `${baseAkamai}/library_600x900_2x.jpg`,
+    primaryDir ? `${primaryDir}header.jpg` : "",
+    primaryDir ? `${primaryDir}header_alt_assets_0.jpg` : ""
   ];
 }
 
@@ -2269,6 +2305,7 @@ function attachImageFallback(imgEl, candidates) {
       imgEl.style.visibility = "hidden";
       return;
     }
+    imgEl.style.visibility = "";
     imgEl.src = candidate;
   };
 
@@ -2466,6 +2503,9 @@ async function fetchAppMeta(appId, options = {}) {
     const meta = {
       cachedAt: now,
       titleText: String(appData?.name || "").trim(),
+      headerImage: String(appData?.header_image || "").trim(),
+      capsuleImage: String(appData?.capsule_image || "").trim(),
+      capsuleImageV5: String(appData?.capsule_imagev5 || "").trim(),
       priceText,
       priceFinal: Number(appData?.price_overview?.final || 0),
       discountText: appData?.price_overview?.discount_percent
@@ -2501,6 +2541,9 @@ async function fetchAppMeta(appId, options = {}) {
     return {
       cachedAt: now,
       titleText: "",
+      headerImage: "",
+      capsuleImage: "",
+      capsuleImageV5: "",
       priceText: "-",
       priceFinal: 0,
       discountText: "-",
@@ -4019,6 +4062,7 @@ function createLineRow(options) {
   return {
     row,
     titleEl,
+    thumbImg,
     reviewEl,
     targetEl: null,
     priceEl,
@@ -4439,6 +4483,16 @@ async function renderCards() {
       cardsEl.appendChild(line.row);
 
       fetchAppMeta(appId).then((meta) => {
+        if (line.thumbImg) {
+          attachImageFallback(
+            line.thumbImg,
+            getCardImageCandidates(appId).concat([
+              String(meta?.capsuleImageV5 || "").trim(),
+              String(meta?.capsuleImage || "").trim(),
+              String(meta?.headerImage || "").trim()
+            ])
+          );
+        }
         if (line.titleEl && !state?.items?.[appId]?.title && meta.titleText) {
           line.titleEl.textContent = meta.titleText;
         }

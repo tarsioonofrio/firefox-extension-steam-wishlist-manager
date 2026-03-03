@@ -624,14 +624,32 @@
   }
 
   function buildImageCandidates(appId, primaryUrl) {
-    const base = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}`;
+    const baseCloudflare = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}`;
+    const baseAkamai = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}`;
+    const primary = String(primaryUrl || "").trim();
+    const primaryDir = primary.includes("/")
+      ? primary.slice(0, primary.lastIndexOf("/") + 1)
+      : "";
     const list = [
-      String(primaryUrl || "").trim(),
-      `${base}/capsule_231x87.jpg`,
-      `${base}/header.jpg`,
-      `${base}/capsule_616x353.jpg`,
-      `${base}/library_600x900.jpg`,
-      `${base}/library_600x900_2x.jpg`
+      primary,
+      `${baseCloudflare}/capsule_184x69.jpg`,
+      `${baseCloudflare}/capsule_231x87.jpg`,
+      `${baseCloudflare}/header.jpg`,
+      `${baseCloudflare}/header_alt_assets_0.jpg`,
+      `${baseCloudflare}/header_alt_assets_1.jpg`,
+      `${baseCloudflare}/capsule_616x353.jpg`,
+      `${baseCloudflare}/library_600x900.jpg`,
+      `${baseCloudflare}/library_600x900_2x.jpg`,
+      `${baseAkamai}/capsule_184x69.jpg`,
+      `${baseAkamai}/capsule_231x87.jpg`,
+      `${baseAkamai}/header.jpg`,
+      `${baseAkamai}/header_alt_assets_0.jpg`,
+      `${baseAkamai}/header_alt_assets_1.jpg`,
+      `${baseAkamai}/capsule_616x353.jpg`,
+      `${baseAkamai}/library_600x900.jpg`,
+      `${baseAkamai}/library_600x900_2x.jpg`,
+      primaryDir ? `${primaryDir}header.jpg` : "",
+      primaryDir ? `${primaryDir}header_alt_assets_0.jpg` : ""
     ];
     const out = [];
     const seen = new Set();
@@ -661,6 +679,7 @@
         imgEl.style.visibility = "hidden";
         return;
       }
+      imgEl.style.visibility = "";
       imgEl.src = candidate;
     };
 
@@ -1078,6 +1097,12 @@
     }
 
     fetchMeta(appId).then((meta) => {
+      if (card.cover) {
+        const preferredCover = String(meta?.capsuleImageV5 || meta?.capsuleImage || meta?.headerImage || "").trim();
+        if (preferredCover) {
+          attachImageFallback(card.cover, buildImageCandidates(appId, preferredCover));
+        }
+      }
       if (card.titleEl && !hasStateTitle && meta.titleText) {
         card.titleEl.textContent = meta.titleText;
       }
