@@ -8,6 +8,7 @@
     "dev:default": "npm run dev",
     "dev:raw": "web-ext run --source-dir . --target=firefox-desktop",
     "dev:steam": "bash scripts/dev/run-web-ext-steam-dev.sh",
+    "dev:steam:fresh": "bash scripts/dev/restart-web-ext-steam-dev.sh",
     "dev:steam:no-launch": "bash scripts/dev/run-web-ext-steam-dev.sh --no-launch",
     "dev:steam:dry-run": "bash scripts/dev/run-web-ext-steam-dev.sh --no-launch --dry-run",
     "check:env": "bash scripts/dev/check-env.sh",

@@ -9,6 +9,8 @@ const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const TRACK_FEED_CACHE_KEY = "steamWishlistTrackFeedV1";
 const TRACK_FEED_META_KEY = "steamWishlistTrackFeedMetaV1";
 const TRACK_FEED_DISMISSED_KEY = "steamWishlistTrackFeedDismissedV1";
+const FILTERS_SIDEBAR_WIDTH_KEY = "swmCollectionsFiltersSidebarWidthV1";
+const FILTERS_SIDEBAR_COLLAPSED_KEY = "swmCollectionsFiltersSidebarCollapsedV1";
 const TRACK_FEED_AUTO_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const TRACK_FEED_AUTO_RETRY_INTERVAL_MS = 2 * 60 * 1000;
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -165,6 +167,8 @@ let lastSteamWriteDiagnostics = null;
 let searchInputDebounceTimer = null;
 const filterTextInputDebounceTimers = new Map();
 let intentMutationQueue = Promise.resolve();
+let filtersSidebarWidth = 340;
+let filtersSidebarCollapsed = false;
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -1284,6 +1288,9 @@ function isMetaIncomplete(meta) {
   const title = String(meta.titleText || "").trim();
   const release = String(meta.releaseText || "").trim();
   const price = String(meta.priceText || "").trim();
+  const headerImage = String(meta.headerImage || "").trim();
+  const capsuleImage = String(meta.capsuleImage || "").trim();
+  const capsuleImageV5 = String(meta.capsuleImageV5 || "").trim();
 
   if (!title) {
     return true;
@@ -1291,6 +1298,10 @@ function isMetaIncomplete(meta) {
 
   // Known bad cache state for games where appdetails failed/partial.
   if (release === "-" && price === "-") {
+    return true;
+  }
+
+  if (!headerImage && !capsuleImage && !capsuleImageV5) {
     return true;
   }
 
@@ -2235,19 +2246,48 @@ async function saveTrackFeedCache() {
 }
 
 function getCardImageUrl(appId) {
-  return `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}/capsule_184x69.jpg`;
+  const id = String(appId || "");
+  const cached = metaCache[id] || {};
+  const preferred = [
+    String(cached.capsuleImageV5 || "").trim(),
+    String(cached.capsuleImage || "").trim(),
+    String(cached.headerImage || "").trim()
+  ].find(Boolean);
+  return preferred || `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}/capsule_184x69.jpg`;
 }
 
 function getCardImageCandidates(appId) {
   const id = String(appId || "");
-  const base = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}`;
+  const baseCloudflare = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}`;
+  const baseAkamai = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${id}`;
+  const cached = metaCache[id] || {};
+  const primary = getCardImageUrl(id);
+  const primaryDir = primary.includes("/")
+    ? primary.slice(0, primary.lastIndexOf("/") + 1)
+    : "";
   return [
-    getCardImageUrl(id),
-    `${base}/capsule_231x87.jpg`,
-    `${base}/header.jpg`,
-    `${base}/capsule_616x353.jpg`,
-    `${base}/library_600x900.jpg`,
-    `${base}/library_600x900_2x.jpg`
+    primary,
+    String(cached.capsuleImageV5 || "").trim(),
+    String(cached.capsuleImage || "").trim(),
+    String(cached.headerImage || "").trim(),
+    `${baseCloudflare}/capsule_184x69.jpg`,
+    `${baseCloudflare}/capsule_231x87.jpg`,
+    `${baseCloudflare}/header.jpg`,
+    `${baseCloudflare}/header_alt_assets_0.jpg`,
+    `${baseCloudflare}/header_alt_assets_1.jpg`,
+    `${baseCloudflare}/capsule_616x353.jpg`,
+    `${baseCloudflare}/library_600x900.jpg`,
+    `${baseCloudflare}/library_600x900_2x.jpg`,
+    `${baseAkamai}/capsule_184x69.jpg`,
+    `${baseAkamai}/capsule_231x87.jpg`,
+    `${baseAkamai}/header.jpg`,
+    `${baseAkamai}/header_alt_assets_0.jpg`,
+    `${baseAkamai}/header_alt_assets_1.jpg`,
+    `${baseAkamai}/capsule_616x353.jpg`,
+    `${baseAkamai}/library_600x900.jpg`,
+    `${baseAkamai}/library_600x900_2x.jpg`,
+    primaryDir ? `${primaryDir}header.jpg` : "",
+    primaryDir ? `${primaryDir}header_alt_assets_0.jpg` : ""
   ];
 }
 
@@ -2269,6 +2309,7 @@ function attachImageFallback(imgEl, candidates) {
       imgEl.style.visibility = "hidden";
       return;
     }
+    imgEl.style.visibility = "";
     imgEl.src = candidate;
   };
 
@@ -2466,6 +2507,9 @@ async function fetchAppMeta(appId, options = {}) {
     const meta = {
       cachedAt: now,
       titleText: String(appData?.name || "").trim(),
+      headerImage: String(appData?.header_image || "").trim(),
+      capsuleImage: String(appData?.capsule_image || "").trim(),
+      capsuleImageV5: String(appData?.capsule_imagev5 || "").trim(),
       priceText,
       priceFinal: Number(appData?.price_overview?.final || 0),
       discountText: appData?.price_overview?.discount_percent
@@ -2501,6 +2545,9 @@ async function fetchAppMeta(appId, options = {}) {
     return {
       cachedAt: now,
       titleText: "",
+      headerImage: "",
+      capsuleImage: "",
+      capsuleImageV5: "",
       priceText: "-",
       priceFinal: 0,
       discountText: "-",
@@ -3763,6 +3810,49 @@ function renderCollectionSelect() {
   }
 }
 
+function renderTriageFilterSelect() {
+  const select = document.getElementById("triage-filter-select");
+  if (!select) {
+    return;
+  }
+  const sourceIds = getCurrentSourceAppIds();
+  let inboxCount = 0;
+  let trackCount = 0;
+  let maybeCount = 0;
+  let buyCount = 0;
+  let archiveCount = 0;
+  for (const appId of sourceIds) {
+    const intent = getItemIntentState(appId);
+    if (intent.owned) {
+      archiveCount += 1;
+      continue;
+    }
+    if (intent.bucket === "INBOX") {
+      inboxCount += 1;
+    }
+    if (intent.track > 0) {
+      trackCount += 1;
+    }
+    if (intent.buy === 1) {
+      maybeCount += 1;
+    } else if (intent.buy === 2) {
+      buyCount += 1;
+    }
+  }
+  const setLabel = (value, label, count) => {
+    const option = select.querySelector(`option[value='${value}']`);
+    if (option) {
+      option.textContent = `${label} (${count})`;
+    }
+  };
+  setLabel("all", "All states", sourceIds.length);
+  setLabel("inbox", "Inbox", inboxCount);
+  setLabel("track", "Follow", trackCount);
+  setLabel("maybe", "Maybe", maybeCount);
+  setLabel("buy", "Confirmed", buyCount);
+  setLabel("archive", "Archive", archiveCount);
+}
+
 function renderPager(totalItems) {
   const result = uiControlsUtils.renderPager({
     totalItems,
@@ -3918,7 +4008,7 @@ function createLineRow(options) {
   const buyBtn = document.createElement("button");
   buyBtn.type = "button";
   buyBtn.className = "line-btn line-col-action";
-  buyBtn.textContent = "Buy";
+  buyBtn.textContent = "Confirm";
   buyBtn.classList.toggle("active", itemIntent.buy === 2);
   bindLineAction(buyBtn, async () => {
     try {
@@ -3948,7 +4038,7 @@ function createLineRow(options) {
   const trackBtn = document.createElement("button");
   trackBtn.type = "button";
   trackBtn.className = "line-btn line-col-action";
-  trackBtn.textContent = itemIntent.track > 0 ? "Unfollow" : "Follow";
+  trackBtn.textContent = "Follow";
   trackBtn.classList.toggle("active", itemIntent.track > 0);
   bindLineAction(trackBtn, async () => {
     try {
@@ -3979,6 +4069,9 @@ function createLineRow(options) {
   attachImageFallback(thumbImg, getCardImageCandidates(appId).concat(imageUrl || []));
   thumbWrap.appendChild(thumbImg);
   imageCol.appendChild(thumbWrap);
+  if (typeof cardRenderUtils?.bindMediaPreviewHover === "function") {
+    cardRenderUtils.bindMediaPreviewHover(thumbWrap, appId);
+  }
 
   const nameCol = document.createElement("div");
   nameCol.className = "line-col-name";
@@ -4016,6 +4109,7 @@ function createLineRow(options) {
   return {
     row,
     titleEl,
+    thumbImg,
     reviewEl,
     targetEl: null,
     priceEl,
@@ -4436,6 +4530,16 @@ async function renderCards() {
       cardsEl.appendChild(line.row);
 
       fetchAppMeta(appId).then((meta) => {
+        if (line.thumbImg) {
+          attachImageFallback(
+            line.thumbImg,
+            getCardImageCandidates(appId).concat([
+              String(meta?.capsuleImageV5 || "").trim(),
+              String(meta?.capsuleImage || "").trim(),
+              String(meta?.headerImage || "").trim()
+            ])
+          );
+        }
         if (line.titleEl && !state?.items?.[appId]?.title && meta.titleText) {
           line.titleEl.textContent = meta.titleText;
         }
@@ -4813,6 +4917,7 @@ async function render() {
     viewSelect.value = viewMode;
   }
   if (triageFilterSelect) {
+    renderTriageFilterSelect();
     triageFilterSelect.value = triageFilter;
   }
   if (underTargetCheckbox) {
@@ -5157,6 +5262,88 @@ function scrollToTopAfterPageChange() {
   }
 }
 
+function clampFiltersSidebarWidth(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return 340;
+  }
+  return Math.max(240, Math.min(560, Math.round(n)));
+}
+
+function applyFiltersSidebarState() {
+  document.documentElement.style.setProperty("--collections-sidebar-width", `${clampFiltersSidebarWidth(filtersSidebarWidth)}px`);
+  document.body.classList.toggle("filters-sidebar-collapsed", Boolean(filtersSidebarCollapsed));
+  const mainToggle = document.getElementById("toggle-filters-sidebar-btn");
+  const sideToggle = document.getElementById("toggle-filters-sidebar-btn-sidebar");
+  const mainLabel = filtersSidebarCollapsed ? "Show filters" : "Hide filters";
+  const sideLabel = filtersSidebarCollapsed ? "Show" : "Hide";
+  if (mainToggle) {
+    mainToggle.textContent = mainLabel;
+  }
+  if (sideToggle) {
+    sideToggle.textContent = sideLabel;
+  }
+}
+
+function persistFiltersSidebarState() {
+  try {
+    window.localStorage.setItem(FILTERS_SIDEBAR_WIDTH_KEY, String(clampFiltersSidebarWidth(filtersSidebarWidth)));
+    window.localStorage.setItem(FILTERS_SIDEBAR_COLLAPSED_KEY, filtersSidebarCollapsed ? "1" : "0");
+  } catch {}
+}
+
+function bindFiltersSidebarControls() {
+  try {
+    filtersSidebarWidth = clampFiltersSidebarWidth(Number(window.localStorage.getItem(FILTERS_SIDEBAR_WIDTH_KEY) || 340));
+    filtersSidebarCollapsed = window.localStorage.getItem(FILTERS_SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {}
+  applyFiltersSidebarState();
+
+  const toggleFromMain = document.getElementById("toggle-filters-sidebar-btn");
+  const toggleFromSidebar = document.getElementById("toggle-filters-sidebar-btn-sidebar");
+  const onToggle = () => {
+    filtersSidebarCollapsed = !filtersSidebarCollapsed;
+    applyFiltersSidebarState();
+    persistFiltersSidebarState();
+  };
+  toggleFromMain?.addEventListener("click", onToggle);
+  toggleFromSidebar?.addEventListener("click", onToggle);
+
+  const resizeHandle = document.getElementById("filters-sidebar-resize-handle");
+  if (!resizeHandle) {
+    return;
+  }
+  resizeHandle.addEventListener("mousedown", (event) => {
+    if (window.matchMedia("(max-width: 760px)").matches) {
+      return;
+    }
+    event.preventDefault();
+    let collapsedTriggered = false;
+    const onMouseMove = (moveEvent) => {
+      const nextWidth = Number(window.innerWidth || 0) - Number(moveEvent.clientX || 0);
+      if (nextWidth <= 24) {
+        collapsedTriggered = true;
+        filtersSidebarCollapsed = true;
+      } else {
+        filtersSidebarCollapsed = false;
+        filtersSidebarWidth = clampFiltersSidebarWidth(nextWidth);
+      }
+      applyFiltersSidebarState();
+    };
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      if (!collapsedTriggered) {
+        filtersSidebarWidth = clampFiltersSidebarWidth(filtersSidebarWidth);
+      }
+      applyFiltersSidebarState();
+      persistFiltersSidebarState();
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  });
+}
+
 function bindFilterControls() {
   generalBindingsUtils.bindGeneralControls({
     onSearchInput: async (value) => {
@@ -5370,6 +5557,7 @@ function attachEvents() {
   bindCollectionMenuControls();
   bindBatchControls();
   bindFilterControls();
+  bindFiltersSidebarControls();
   bindGlobalPanelClose();
   bindKeyboardShortcuts();
   const copyBtn = document.getElementById("copy-steam-write-diagnostics");

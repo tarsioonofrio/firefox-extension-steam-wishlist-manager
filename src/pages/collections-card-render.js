@@ -1,13 +1,768 @@
 (() => {
+  const MEDIA_TOOLTIP_ID = "swm-media-tooltip";
+  const MEDIA_TOOLTIP_STYLE_ID = "swm-media-tooltip-style";
+  const MEDIA_TOOLTIP_SIZE_KEY = "swm-media-tooltip-size-v1";
+  const MEDIA_TOOLTIP_FETCH_LABEL = "media tooltip fetch timeout";
+  const MEDIA_TOOLTIP_FETCH_TIMEOUT_MS = 12000;
+  let mediaTooltipHoverSeq = 0;
+  let mediaTooltipHideTimer = null;
+
+  function clearMediaTooltipHideTimer() {
+    if (mediaTooltipHideTimer) {
+      clearTimeout(mediaTooltipHideTimer);
+      mediaTooltipHideTimer = null;
+    }
+  }
+
+  function scheduleMediaTooltipHide(delay = 120) {
+    clearMediaTooltipHideTimer();
+    mediaTooltipHideTimer = setTimeout(() => {
+      const tooltip = document.getElementById(MEDIA_TOOLTIP_ID);
+      if (tooltip) {
+        tooltip.classList.add("hidden");
+      }
+    }, Math.max(0, Number(delay || 0)));
+  }
+
+  function readTooltipSize() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(MEDIA_TOOLTIP_SIZE_KEY) || "{}");
+      const width = Number(parsed?.width || 0);
+      return {
+        width: Number.isFinite(width) ? Math.max(280, Math.min(900, Math.round(width))) : 0
+      };
+    } catch {
+      return { width: 0 };
+    }
+  }
+
+  function saveTooltipSize(tooltip) {
+    if (!(tooltip instanceof HTMLElement)) {
+      return;
+    }
+    const width = Math.max(280, Math.min(900, Math.round(Number(tooltip.offsetWidth || 0))));
+    try {
+      localStorage.setItem(MEDIA_TOOLTIP_SIZE_KEY, JSON.stringify({ width }));
+    } catch {
+      // noop
+    }
+  }
+
+  function getTooltipChromeHeight(tooltip) {
+    if (!(tooltip instanceof HTMLElement)) {
+      return 96;
+    }
+    const px = (value) => {
+      const n = Number.parseFloat(String(value || "0"));
+      return Number.isFinite(n) ? n : 0;
+    };
+    const computed = getComputedStyle(tooltip);
+    const status = tooltip.querySelector(".swm-media-tooltip-status");
+    const controls = tooltip.querySelector(".swm-media-tooltip-controls");
+    const statusStyle = status ? getComputedStyle(status) : null;
+    const controlsStyle = controls ? getComputedStyle(controls) : null;
+    const chrome = (
+      px(computed.paddingTop)
+      + px(computed.paddingBottom)
+      + px(computed.borderTopWidth)
+      + px(computed.borderBottomWidth)
+      + (status ? status.getBoundingClientRect().height : 0)
+      + (controls ? controls.getBoundingClientRect().height : 0)
+      + (statusStyle ? px(statusStyle.marginTop) + px(statusStyle.marginBottom) : 0)
+      + (controlsStyle ? px(controlsStyle.marginTop) + px(controlsStyle.marginBottom) : 0)
+    );
+    return Math.max(72, Math.min(220, Math.round(chrome || 96)));
+  }
+
+  function applyTooltipProportionalSize(tooltip, preferredWidth = 0) {
+    if (!(tooltip instanceof HTMLElement)) {
+      return;
+    }
+    const fallbackWidth = Number(tooltip.offsetWidth || 420) || 420;
+    const width = Math.max(280, Math.min(900, Math.round(Number(preferredWidth || fallbackWidth))));
+    const chromeHeight = getTooltipChromeHeight(tooltip);
+    const stageHeight = Math.round(width * 9 / 16);
+    const height = Math.max(210, Math.min(760, stageHeight + chromeHeight));
+    tooltip.style.width = `${width}px`;
+    tooltip.style.height = `${height}px`;
+  }
+
+  function enableTooltipResizePersistence(tooltip) {
+    if (!(tooltip instanceof HTMLElement) || tooltip.dataset.swmResizeBound === "1") {
+      return;
+    }
+    tooltip.dataset.swmResizeBound = "1";
+    tooltip.style.resize = "both";
+    tooltip.style.overflow = "hidden";
+    let debounce = null;
+    let applyingSize = false;
+    const observer = new ResizeObserver(() => {
+      if (tooltip.classList.contains("hidden") || applyingSize) {
+        return;
+      }
+      const expectedWidth = Math.max(280, Math.min(900, Math.round(Number(tooltip.offsetWidth || 0))));
+      const chromeHeight = getTooltipChromeHeight(tooltip);
+      const expectedHeight = Math.max(210, Math.min(760, Math.round((expectedWidth * 9 / 16) + chromeHeight)));
+      if (Math.abs(expectedHeight - Number(tooltip.offsetHeight || 0)) > 1) {
+        applyingSize = true;
+        tooltip.style.height = `${expectedHeight}px`;
+        requestAnimationFrame(() => {
+          applyingSize = false;
+        });
+      }
+      clearTimeout(debounce);
+      debounce = setTimeout(() => saveTooltipSize(tooltip), 180);
+    });
+    observer.observe(tooltip);
+  }
+
+  function normalizeMediaUrl(rawUrl) {
+    const url = String(rawUrl || "")
+      .trim()
+      .replace(/\\u0026/gi, "&")
+      .replace(/\\x26/gi, "&")
+      .replace(/\\u002f/gi, "/")
+      .replace(/&amp;/gi, "&")
+      .replace(/\\\//g, "/");
+    if (!url) {
+      return "";
+    }
+    if (url.startsWith("//")) {
+      return `https:${url}`;
+    }
+    return url;
+  }
+
+  function parseStoreMediaFromHtml(htmlText) {
+    const doc = new DOMParser().parseFromString(String(htmlText || ""), "text/html");
+    const videos = [];
+    const images = [];
+    const seenVideos = new Set();
+    const seenImages = new Set();
+
+    const movieNodes = doc.querySelectorAll(".highlight_movie, [id^='highlight_movie_']");
+    for (const movie of movieNodes) {
+      const sourceNodes = movie.querySelectorAll("video source, source");
+      const sourceCandidates = [
+        movie.getAttribute("data-mp4-source"),
+        movie.getAttribute("data-webm-source"),
+        ...(Array.from(sourceNodes).map((node) => node.getAttribute("src")))
+      ];
+      let mediaUrl = "";
+      for (const candidate of sourceCandidates) {
+        const normalized = normalizeMediaUrl(candidate);
+        if (!normalized) {
+          continue;
+        }
+        mediaUrl = normalized;
+        break;
+      }
+      if (!mediaUrl || seenVideos.has(mediaUrl)) {
+        continue;
+      }
+      seenVideos.add(mediaUrl);
+      const posterEl = movie.querySelector("img");
+      const posterUrl = normalizeMediaUrl(
+        movie.getAttribute("data-poster")
+        || posterEl?.getAttribute("src")
+        || posterEl?.getAttribute("data-src")
+      );
+      videos.push({ url: mediaUrl, posterUrl });
+    }
+
+    const directVideoMatches = Array.from(
+      String(htmlText || "").matchAll(/https?:\\?\/\\?\/[^"'\\\s<>()]+?\.(?:mp4|webm)(?:\?[^"'\\\s<>()]*)?/gi)
+    );
+    for (const match of directVideoMatches) {
+      const raw = String(match?.[0] || "").replace(/\\\//g, "/");
+      const mediaUrl = normalizeMediaUrl(raw);
+      if (!mediaUrl || seenVideos.has(mediaUrl)) {
+        continue;
+      }
+      seenVideos.add(mediaUrl);
+      videos.push({ url: mediaUrl, posterUrl: "" });
+    }
+
+    const imageNodes = doc.querySelectorAll(
+      ".highlight_strip_screenshot img, .highlight_screenshot_link img, [id^='thumb_screenshot_'] img"
+    );
+    for (const img of imageNodes) {
+      const normalized = normalizeMediaUrl(img.getAttribute("src") || img.getAttribute("data-src"));
+      if (!normalized || seenImages.has(normalized)) {
+        continue;
+      }
+      seenImages.add(normalized);
+      images.push(normalized);
+    }
+
+    return { videos, images };
+  }
+
+  function deriveManifestCandidates(rawManifestUrl) {
+    const manifestUrl = normalizeMediaUrl(rawManifestUrl);
+    if (!manifestUrl) {
+      return [];
+    }
+    const queryIndex = manifestUrl.indexOf("?");
+    const query = queryIndex >= 0 ? manifestUrl.slice(queryIndex) : "";
+    const base = queryIndex >= 0 ? manifestUrl.slice(0, queryIndex) : manifestUrl;
+    const slashIndex = base.lastIndexOf("/");
+    if (slashIndex < 0) {
+      return [];
+    }
+    const dir = base.slice(0, slashIndex + 1);
+    return [
+      `${dir}movie_max.mp4${query}`,
+      `${dir}movie480.mp4${query}`,
+      `${dir}movie_max.webm${query}`,
+      `${dir}movie480.webm${query}`
+    ];
+  }
+
+  function deriveStaticMovieCandidates(movie) {
+    const out = [];
+    const movieId = String(movie?.id || "").trim();
+    const thumbUrl = normalizeMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
+    const thumbQueryIndex = thumbUrl.indexOf("?");
+    const thumbQuery = thumbQueryIndex >= 0 ? thumbUrl.slice(thumbQueryIndex) : "";
+    if (movieId) {
+      out.push(
+        `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie_max.mp4${thumbQuery}`,
+        `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie480.mp4${thumbQuery}`,
+        `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie_max.webm${thumbQuery}`,
+        `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie480.webm${thumbQuery}`
+      );
+    }
+    return out;
+  }
+
+  async function fetchAppDetailsMedia(appId) {
+    const id = String(appId || "").trim();
+    if (!id) {
+      return { videos: [], images: [] };
+    }
+    const videos = [];
+    const images = [];
+    const seenVideos = new Set();
+    const seenImages = new Set();
+    const addFromData = (data) => {
+      for (const movie of Array.isArray(data?.movies) ? data.movies : []) {
+        const candidates = [
+          movie?.mp4?.max,
+          movie?.mp4?.["480"],
+          movie?.webm?.max,
+          movie?.webm?.["480"],
+          ...deriveStaticMovieCandidates(movie),
+          ...deriveManifestCandidates(movie?.dash_h264),
+          ...deriveManifestCandidates(movie?.hls_h264),
+          ...deriveManifestCandidates(movie?.dash_av1)
+        ];
+        let picked = "";
+        for (const candidate of candidates) {
+          const normalized = normalizeMediaUrl(candidate);
+          if (!normalized || seenVideos.has(normalized)) {
+            continue;
+          }
+          picked = normalized;
+          break;
+        }
+        if (!picked) {
+          continue;
+        }
+        seenVideos.add(picked);
+        const posterUrl = normalizeMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
+        videos.push({ url: picked, posterUrl });
+      }
+      for (const screenshot of Array.isArray(data?.screenshots) ? data.screenshots : []) {
+        const imageUrl = normalizeMediaUrl(screenshot?.path_full || screenshot?.path_thumbnail);
+        if (!imageUrl || seenImages.has(imageUrl)) {
+          continue;
+        }
+        seenImages.add(imageUrl);
+        images.push(imageUrl);
+      }
+    };
+
+    const ccCandidates = ["us", "br", ""];
+    for (const cc of ccCandidates) {
+      const ccParam = cc ? `&cc=${encodeURIComponent(cc)}` : "";
+      const url = `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(id)}&l=english${ccParam}&filters=movies,screenshots`;
+      try {
+        const json = await fetch(url, { cache: "no-store", credentials: "include" }).then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return response.json();
+        });
+        const entry = json?.[id];
+        const data = entry?.success ? (entry.data || {}) : {};
+        addFromData(data);
+      } catch {
+        continue;
+      }
+      if (videos.length > 0 && images.length > 0) {
+        break;
+      }
+    }
+
+    return { videos, images };
+  }
+
+  function ensureMediaTooltipStyle() {
+    if (document.getElementById(MEDIA_TOOLTIP_STYLE_ID)) {
+      return;
+    }
+    const style = document.createElement("style");
+    style.id = MEDIA_TOOLTIP_STYLE_ID;
+    style.textContent = `
+      .swm-media-tooltip {
+        position: fixed;
+        z-index: 2147483647;
+        width: min(420px, calc(100vw - 20px));
+        max-width: calc(100vw - 20px);
+        min-height: 210px;
+        background: rgba(20, 27, 35, 0.97);
+        border: 1px solid rgba(108, 166, 202, 0.55);
+        border-radius: 8px;
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+        padding: 8px;
+        color: #c7d5e0;
+        pointer-events: auto;
+      }
+      .swm-media-tooltip.hidden { display: none !important; }
+      .swm-media-tooltip-stage {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #000;
+      }
+      .swm-media-tooltip-video, .swm-media-tooltip-image {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+        background: #000;
+        border: 0;
+      }
+      .swm-media-tooltip-status {
+        margin: 6px 0 0;
+        color: #9fb7cc;
+        font-size: 11px;
+      }
+      .swm-media-tooltip-controls {
+        margin-top: 6px;
+        display: grid;
+        grid-template-columns: auto auto 1fr auto auto;
+        gap: 6px;
+        align-items: center;
+      }
+      .swm-media-tooltip-controls button {
+        height: 24px;
+        min-width: 56px;
+        font-size: 11px;
+        padding: 0 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 2px;
+        background: #2b3b4a;
+        color: #c7d5e0;
+        cursor: pointer;
+      }
+      .swm-media-tooltip-controls button.active {
+        border-color: #6ca6ca;
+        background: #447196;
+      }
+      .swm-media-tooltip-count {
+        text-align: center;
+        color: #9fb7cc;
+        font-size: 11px;
+      }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function ensureMediaTooltip() {
+    ensureMediaTooltipStyle();
+    let tooltip = document.getElementById(MEDIA_TOOLTIP_ID);
+    if (tooltip) {
+      return tooltip;
+    }
+
+    tooltip = document.createElement("div");
+    tooltip.id = MEDIA_TOOLTIP_ID;
+    tooltip.className = "swm-media-tooltip hidden";
+    tooltip.innerHTML = `
+      <div class="swm-media-tooltip-stage"></div>
+      <p class="swm-media-tooltip-status">Hover a capsule to preview media.</p>
+      <div class="swm-media-tooltip-controls">
+        <button type="button" data-mode="video">Videos</button>
+        <button type="button" data-mode="image">Images</button>
+        <button type="button" data-nav="prev" aria-label="Previous">‹</button>
+        <span class="swm-media-tooltip-count">0/0</span>
+        <button type="button" data-nav="next" aria-label="Next">›</button>
+      </div>
+    `;
+    tooltip._state = {
+      appId: "",
+      mode: "",
+      index: 0,
+      videos: [],
+      images: []
+    };
+    enableTooltipResizePersistence(tooltip);
+
+    tooltip.addEventListener("mouseenter", () => clearMediaTooltipHideTimer());
+    tooltip.addEventListener("mouseleave", () => scheduleMediaTooltipHide(120));
+    tooltip.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!target) {
+        return;
+      }
+      const state = tooltip._state || {};
+      const nav = target.getAttribute("data-nav");
+      const mode = target.getAttribute("data-mode");
+      if (mode) {
+        if (mode === "video" && Array.isArray(state.videos) && state.videos.length > 0) {
+          state.mode = "video";
+          state.index = 0;
+          renderMediaTooltipState(tooltip);
+        } else if (mode === "image" && Array.isArray(state.images) && state.images.length > 0) {
+          state.mode = "image";
+          state.index = 0;
+          renderMediaTooltipState(tooltip);
+        }
+        return;
+      }
+      if (!nav) {
+        return;
+      }
+      const list = state.mode === "video" ? state.videos : state.images;
+      if (!Array.isArray(list) || list.length === 0) {
+        return;
+      }
+      if (nav === "prev") {
+        state.index = (state.index - 1 + list.length) % list.length;
+      } else if (nav === "next") {
+        state.index = (state.index + 1) % list.length;
+      }
+      renderMediaTooltipState(tooltip);
+    });
+
+    document.body.appendChild(tooltip);
+    return tooltip;
+  }
+
+  function positionMediaTooltip(tooltip, anchorEl) {
+    if (!tooltip || !anchorEl) {
+      return;
+    }
+    const saved = readTooltipSize();
+    if (saved.width > 0) {
+      applyTooltipProportionalSize(tooltip, saved.width);
+    } else {
+      applyTooltipProportionalSize(tooltip, Number(tooltip.offsetWidth || 420));
+    }
+    const rect = anchorEl.getBoundingClientRect();
+    const width = Math.max(360, Number(tooltip.offsetWidth || 0));
+    const height = Math.max(240, Number(tooltip.offsetHeight || 0));
+    const margin = 10;
+    const preferRightLeft = rect.right + margin;
+    const rightFits = preferRightLeft + width <= window.innerWidth - margin;
+    const left = rightFits
+      ? preferRightLeft
+      : Math.max(margin, Math.min(window.innerWidth - width - margin, rect.left - width - margin));
+    const top = Math.max(
+      margin,
+      Math.min(window.innerHeight - height - margin, rect.top + ((rect.height - height) / 2))
+    );
+    tooltip.style.left = `${Math.round(left)}px`;
+    tooltip.style.top = `${Math.round(top)}px`;
+  }
+
+  function renderMediaTooltipState(tooltip) {
+    if (!tooltip) {
+      return;
+    }
+    const state = tooltip._state || {};
+    const stage = tooltip.querySelector(".swm-media-tooltip-stage");
+    const status = tooltip.querySelector(".swm-media-tooltip-status");
+    const count = tooltip.querySelector(".swm-media-tooltip-count");
+    const videoBtn = tooltip.querySelector("[data-mode='video']");
+    const imageBtn = tooltip.querySelector("[data-mode='image']");
+    const prevBtn = tooltip.querySelector("[data-nav='prev']");
+    const nextBtn = tooltip.querySelector("[data-nav='next']");
+    const videoList = Array.isArray(state.videos) ? state.videos : [];
+    const imageList = Array.isArray(state.images) ? state.images : [];
+    const activeMode = state.mode === "image" ? "image" : "video";
+    const activeList = activeMode === "video" ? videoList : imageList;
+    const showSteamPlayerFallback = Boolean(state.steamPlayerFallback && state.appId);
+    if (showSteamPlayerFallback) {
+      if (stage) {
+        stage.innerHTML = "";
+        const iframe = document.createElement("iframe");
+        iframe.className = "swm-media-tooltip-video";
+        iframe.src = `https://store.steampowered.com/video/${encodeURIComponent(String(state.appId))}/?l=english`;
+        iframe.setAttribute("allow", "autoplay; fullscreen");
+        iframe.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
+        stage.appendChild(iframe);
+      }
+      if (status) {
+        status.textContent = "Steam player preview";
+      }
+      if (count) {
+        count.textContent = "—";
+      }
+      if (videoBtn) {
+        videoBtn.disabled = false;
+        videoBtn.classList.add("active");
+      }
+      if (imageBtn) {
+        imageBtn.disabled = imageList.length === 0;
+        imageBtn.classList.remove("active");
+      }
+      if (prevBtn) {
+        prevBtn.disabled = true;
+      }
+      if (nextBtn) {
+        nextBtn.disabled = true;
+      }
+      return;
+    }
+    if (!Array.isArray(activeList) || activeList.length === 0) {
+      if (stage) {
+        stage.innerHTML = "";
+      }
+      if (status) {
+        status.textContent = "No media available for this game.";
+      }
+      if (count) {
+        count.textContent = "0/0";
+      }
+      if (videoBtn) {
+        videoBtn.disabled = videoList.length === 0;
+        videoBtn.classList.toggle("active", activeMode === "video");
+      }
+      if (imageBtn) {
+        imageBtn.disabled = imageList.length === 0;
+        imageBtn.classList.toggle("active", activeMode === "image");
+      }
+      if (prevBtn) {
+        prevBtn.disabled = true;
+      }
+      if (nextBtn) {
+        nextBtn.disabled = true;
+      }
+      return;
+    }
+
+    state.mode = activeMode;
+    state.index = Math.max(0, Math.min(activeList.length - 1, Number(state.index || 0)));
+    const current = activeList[state.index];
+
+    if (stage) {
+      stage.innerHTML = "";
+      if (activeMode === "video") {
+        const video = document.createElement("video");
+        video.className = "swm-media-tooltip-video";
+        video.src = String(current?.url || "");
+        if (current?.posterUrl) {
+          video.poster = String(current.posterUrl);
+        }
+        video.controls = true;
+        video.muted = true;
+        video.autoplay = true;
+        video.loop = videoList.length <= 1;
+        video.playsInline = true;
+        video.preload = "none";
+        video.addEventListener("ended", () => {
+          const nextState = tooltip._state && typeof tooltip._state === "object" ? tooltip._state : null;
+          if (!nextState || nextState.mode !== "video") {
+            return;
+          }
+          const nextVideos = Array.isArray(nextState.videos) ? nextState.videos : [];
+          if (nextVideos.length === 0) {
+            return;
+          }
+          nextState.index = (Number(nextState.index || 0) + 1) % nextVideos.length;
+          renderMediaTooltipState(tooltip);
+        });
+        video.addEventListener("error", () => {
+          const nextState = tooltip._state && typeof tooltip._state === "object" ? tooltip._state : {};
+          if (nextState.appId && !nextState.steamPlayerFallback) {
+            nextState.steamPlayerFallback = true;
+            renderMediaTooltipState(tooltip);
+            const nextStatus = tooltip.querySelector(".swm-media-tooltip-status");
+            if (nextStatus) {
+              nextStatus.textContent = "Direct video failed; trying Steam player.";
+            }
+            return;
+          }
+          const fallbackImages = Array.isArray(nextState.images) ? nextState.images : [];
+          if (fallbackImages.length > 0 && nextState.mode === "video" && !nextState.videoFallbackUsed) {
+            nextState.videoFallbackUsed = true;
+            nextState.mode = "image";
+            nextState.index = Math.max(0, Math.min(fallbackImages.length - 1, nextState.index || 0));
+            renderMediaTooltipState(tooltip);
+            const nextStatus = tooltip.querySelector(".swm-media-tooltip-status");
+            if (nextStatus) {
+              nextStatus.textContent = "Video unavailable for this game; showing screenshots.";
+            }
+          }
+        });
+        stage.appendChild(video);
+      } else {
+        const image = document.createElement("img");
+        image.className = "swm-media-tooltip-image";
+        image.src = String(current || "");
+        image.alt = `Screenshot ${state.index + 1}`;
+        image.loading = "eager";
+        stage.appendChild(image);
+      }
+    }
+    if (status) {
+      status.textContent = activeMode === "video" ? "Video preview" : "Screenshot preview";
+    }
+    if (count) {
+      count.textContent = `${state.index + 1}/${activeList.length}`;
+    }
+    if (videoBtn) {
+      videoBtn.disabled = videoList.length === 0;
+      videoBtn.classList.toggle("active", activeMode === "video");
+    }
+    if (imageBtn) {
+      imageBtn.disabled = imageList.length === 0;
+      imageBtn.classList.toggle("active", activeMode === "image");
+    }
+    if (prevBtn) {
+      prevBtn.disabled = activeList.length < 2;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = activeList.length < 2;
+    }
+  }
+
+  async function openMediaTooltip(anchorEl, appId) {
+    const tooltip = ensureMediaTooltip();
+    clearMediaTooltipHideTimer();
+    tooltip.classList.remove("hidden");
+    positionMediaTooltip(tooltip, anchorEl);
+    const status = tooltip.querySelector(".swm-media-tooltip-status");
+    const stage = tooltip.querySelector(".swm-media-tooltip-stage");
+    if (stage) {
+      stage.innerHTML = "";
+    }
+    if (status) {
+      status.textContent = "Loading media from Steam page...";
+    }
+    tooltip._state = { appId: String(appId || ""), mode: "", index: 0, videos: [], images: [], steamPlayerFallback: false };
+    renderMediaTooltipState(tooltip);
+
+    const fetchText = window?.SWMSteamFetch?.fetchText;
+    const seq = ++mediaTooltipHoverSeq;
+    const storeUrl = `https://store.steampowered.com/app/${encodeURIComponent(String(appId || "").trim())}/?l=english`;
+    try {
+      const fetchPromise = typeof fetchText === "function"
+        ? fetchText(storeUrl, { cache: "no-store" })
+        : fetch(storeUrl, { cache: "no-store", credentials: "include" }).then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return response.text();
+        });
+      const htmlText = await Promise.race([
+        fetchPromise,
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error(MEDIA_TOOLTIP_FETCH_LABEL)), MEDIA_TOOLTIP_FETCH_TIMEOUT_MS);
+        })
+      ]);
+      if (seq !== mediaTooltipHoverSeq) {
+        return;
+      }
+      let parsed = parseStoreMediaFromHtml(htmlText);
+      if ((parsed.videos.length + parsed.images.length) === 0) {
+        try {
+          parsed = await Promise.race([
+            fetchAppDetailsMedia(appId),
+            new Promise((_, reject) => {
+              setTimeout(() => reject(new Error(MEDIA_TOOLTIP_FETCH_LABEL)), MEDIA_TOOLTIP_FETCH_TIMEOUT_MS);
+            })
+          ]);
+        } catch {
+          // noop
+        }
+      }
+      tooltip._state = {
+        appId: String(appId || ""),
+        mode: parsed.videos.length > 0 ? "video" : "image",
+        index: 0,
+        videos: parsed.videos,
+        images: parsed.images,
+        steamPlayerFallback: false
+      };
+      renderMediaTooltipState(tooltip);
+      positionMediaTooltip(tooltip, anchorEl);
+    } catch (error) {
+      if (seq !== mediaTooltipHoverSeq) {
+        return;
+      }
+      if (status) {
+        status.textContent = `Failed to load media: ${String(error?.message || "unknown error")}`;
+      }
+      tooltip._state = {
+        appId: String(appId || ""),
+        mode: "video",
+        index: 0,
+        videos: [],
+        images: [],
+        steamPlayerFallback: true
+      };
+      renderMediaTooltipState(tooltip);
+    }
+  }
+
+  function bindMediaPreviewHover(anchorEl, appId) {
+    if (!anchorEl) {
+      return;
+    }
+    if (anchorEl.dataset.swmMediaHoverBound === "1") {
+      return;
+    }
+    anchorEl.dataset.swmMediaHoverBound = "1";
+    anchorEl.addEventListener("mouseenter", () => {
+      openMediaTooltip(anchorEl, appId).catch(() => {});
+    });
+    anchorEl.addEventListener("mouseleave", () => {
+      scheduleMediaTooltipHide(120);
+    });
+  }
+
   function buildImageCandidates(appId, primaryUrl) {
-    const base = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}`;
+    const baseCloudflare = `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${appId}`;
+    const baseAkamai = `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${appId}`;
+    const primary = String(primaryUrl || "").trim();
+    const primaryDir = primary.includes("/")
+      ? primary.slice(0, primary.lastIndexOf("/") + 1)
+      : "";
     const list = [
-      String(primaryUrl || "").trim(),
-      `${base}/capsule_231x87.jpg`,
-      `${base}/header.jpg`,
-      `${base}/capsule_616x353.jpg`,
-      `${base}/library_600x900.jpg`,
-      `${base}/library_600x900_2x.jpg`
+      primary,
+      `${baseCloudflare}/capsule_184x69.jpg`,
+      `${baseCloudflare}/capsule_231x87.jpg`,
+      `${baseCloudflare}/header.jpg`,
+      `${baseCloudflare}/header_alt_assets_0.jpg`,
+      `${baseCloudflare}/header_alt_assets_1.jpg`,
+      `${baseCloudflare}/capsule_616x353.jpg`,
+      `${baseCloudflare}/library_600x900.jpg`,
+      `${baseCloudflare}/library_600x900_2x.jpg`,
+      `${baseAkamai}/capsule_184x69.jpg`,
+      `${baseAkamai}/capsule_231x87.jpg`,
+      `${baseAkamai}/header.jpg`,
+      `${baseAkamai}/header_alt_assets_0.jpg`,
+      `${baseAkamai}/header_alt_assets_1.jpg`,
+      `${baseAkamai}/capsule_616x353.jpg`,
+      `${baseAkamai}/library_600x900.jpg`,
+      `${baseAkamai}/library_600x900_2x.jpg`,
+      primaryDir ? `${primaryDir}header.jpg` : "",
+      primaryDir ? `${primaryDir}header_alt_assets_0.jpg` : ""
     ];
     const out = [];
     const seen = new Set();
@@ -37,6 +792,7 @@
         imgEl.style.visibility = "hidden";
         return;
       }
+      imgEl.style.visibility = "";
       imgEl.src = candidate;
     };
 
@@ -66,22 +822,15 @@
       appidEl: fragment.querySelector(".appid"),
       pricingEl: fragment.querySelector(".pricing"),
       discountEl: fragment.querySelector(".discount"),
-      targetStatusEl: fragment.querySelector(".target-status"),
       tagsRowEl: fragment.querySelector(".tags-row"),
       reviewEl: fragment.querySelector(".review"),
       releaseEl: fragment.querySelector(".release"),
       wishlistAddedEl: fragment.querySelector(".wishlist-added"),
-      triageBucketEl: fragment.querySelector(".triage-bucket"),
       triageBuyBtn: fragment.querySelector(".triage-buy-btn"),
       triageMaybeBtn: fragment.querySelector(".triage-maybe-btn"),
       triageTrackBtn: fragment.querySelector(".triage-track-btn"),
       triageArchiveBtn: fragment.querySelector(".triage-archive-btn"),
       targetPriceInput: fragment.querySelector(".target-price-input"),
-      targetSaveBtn: fragment.querySelector(".target-save-btn"),
-      targetClearBtn: fragment.querySelector(".target-clear-btn"),
-      noteInput: fragment.querySelector(".note-input"),
-      noteSaveBtn: fragment.querySelector(".note-save-btn"),
-      noteClearBtn: fragment.querySelector(".note-clear-btn"),
       refreshItemBtn: fragment.querySelector(".refresh-item-btn"),
       collectionsToggleBtn: fragment.querySelector(".collections-toggle-btn"),
       collectionsDropdown: fragment.querySelector(".collections-dropdown"),
@@ -100,12 +849,14 @@
     }
     if (card.coverLink) {
       card.coverLink.href = card.link;
+      bindMediaPreviewHover(card.coverLink, appId);
     }
     if (card.cover) {
       const imageCandidates = buildImageCandidates(appId, imageUrl);
       attachImageFallback(card.cover, imageCandidates);
       card.cover.alt = card.title;
       card.cover.loading = "lazy";
+      bindMediaPreviewHover(card.cover, appId);
     }
     if (card.titleEl) {
       card.titleEl.textContent = card.title;
@@ -115,10 +866,7 @@
       card.appidEl.textContent = `AppID: ${appId}`;
     }
     if (card.wishlistAddedEl) {
-      const buyIntent = String(itemIntent.buyIntent || "UNSET").toUpperCase();
-      const trackIntent = String(itemIntent.trackIntent || "UNSET").toUpperCase();
-      const steamWishlistHint = itemIntent.steamWishlisted ? "Steam" : "-";
-      card.wishlistAddedEl.textContent = `Wishlisted: ${wishlistDate} | Steam: ${steamWishlistHint} | BuyIntent: ${buyIntent} | TrackIntent: ${trackIntent}`;
+      card.wishlistAddedEl.textContent = `Wishlisted: ${wishlistDate}`;
     }
   }
 
@@ -133,11 +881,9 @@
     const setStatus = options?.setStatus || (() => {});
     const confirmFn = options?.confirmFn || ((message) => window.confirm(message));
     const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
-    const currentBucket = String(itemIntent.bucket || "INBOX").toUpperCase();
     const targetPriceCents = Number.isFinite(Number(itemIntent.targetPriceCents))
       ? Math.max(0, Math.floor(Number(itemIntent.targetPriceCents)))
       : null;
-    const noteText = String(itemIntent.note || "");
     if (!card) {
       return;
     }
@@ -146,10 +892,6 @@
       card.refreshItemBtn.addEventListener("click", () => {
         onRefreshItem(appId).catch(() => setStatus("Failed to refresh item.", true));
       });
-    }
-
-    if (card.triageBucketEl) {
-      card.triageBucketEl.textContent = `Bucket: ${currentBucket}`;
     }
 
     const triageActions = [
@@ -178,7 +920,7 @@
         continue;
       }
       if (action.key === "track") {
-        action.btn.textContent = itemIntent.track > 0 ? "Unfollow" : "Follow";
+        action.btn.textContent = "Follow";
       }
       action.btn.classList.toggle("active", Boolean(action.isActive?.(itemIntent)));
       action.btn.addEventListener("click", async () => {
@@ -207,12 +949,6 @@
         }
       });
     }
-    if (card.targetStatusEl) {
-      card.targetStatusEl.textContent = targetPriceCents > 0
-        ? `Target: ${(targetPriceCents / 100).toFixed(2)}`
-        : "Target: -";
-    }
-
     const parseTargetValueToCents = (raw) => {
       const normalized = String(raw || "").trim().replace(",", ".");
       if (!normalized) {
@@ -233,77 +969,22 @@
           return;
         }
         event.preventDefault();
-        const nextTarget = parseTargetValueToCents(card.targetPriceInput.value);
-        if (nextTarget === null) {
-          setStatus("Enter a valid target price (for example: 59.90).", true);
-          return;
-        }
         try {
+          const rawTarget = String(card.targetPriceInput.value || "").trim();
+          if (!rawTarget) {
+            await onSetIntent(appId, { targetPriceCents: null });
+            setStatus("Target price cleared.");
+            return;
+          }
+          const nextTarget = parseTargetValueToCents(rawTarget);
+          if (nextTarget === null) {
+            setStatus("Enter a valid target price (for example: 59.90).", true);
+            return;
+          }
           await onSetIntent(appId, { targetPriceCents: nextTarget });
           setStatus("Target price saved.");
         } catch (error) {
           setStatus(String(error?.message || "Failed to save target price."), true);
-        }
-      });
-    }
-    if (card.targetSaveBtn) {
-      card.targetSaveBtn.addEventListener("click", async () => {
-        const nextTarget = parseTargetValueToCents(card.targetPriceInput?.value || "");
-        if (nextTarget === null) {
-          setStatus("Enter a valid target price (for example: 59.90).", true);
-          return;
-        }
-        try {
-          await onSetIntent(appId, { targetPriceCents: nextTarget });
-          setStatus("Target price saved.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to save target price."), true);
-        }
-      });
-    }
-    if (card.targetClearBtn) {
-      card.targetClearBtn.addEventListener("click", async () => {
-        try {
-          await onSetIntent(appId, { targetPriceCents: null });
-          setStatus("Target price cleared.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to clear target price."), true);
-        }
-      });
-    }
-
-    if (card.noteInput) {
-      card.noteInput.value = noteText;
-      card.noteInput.addEventListener("keydown", async (event) => {
-        if (event.key !== "Enter") {
-          return;
-        }
-        event.preventDefault();
-        try {
-          await onSetIntent(appId, { note: String(card.noteInput?.value || "").slice(0, 600) });
-          setStatus("Note saved.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to save note."), true);
-        }
-      });
-    }
-    if (card.noteSaveBtn) {
-      card.noteSaveBtn.addEventListener("click", async () => {
-        try {
-          await onSetIntent(appId, { note: String(card.noteInput?.value || "").slice(0, 600) });
-          setStatus("Note saved.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to save note."), true);
-        }
-      });
-    }
-    if (card.noteClearBtn) {
-      card.noteClearBtn.addEventListener("click", async () => {
-        try {
-          await onSetIntent(appId, { note: "" });
-          setStatus("Note cleared.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to clear note."), true);
         }
       });
     }
@@ -452,6 +1133,12 @@
     }
 
     fetchMeta(appId).then((meta) => {
+      if (card.cover) {
+        const preferredCover = String(meta?.capsuleImageV5 || meta?.capsuleImage || meta?.headerImage || "").trim();
+        if (preferredCover) {
+          attachImageFallback(card.cover, buildImageCandidates(appId, preferredCover));
+        }
+      }
       if (card.titleEl && !hasStateTitle && meta.titleText) {
         card.titleEl.textContent = meta.titleText;
       }
@@ -461,23 +1148,13 @@
       if (card.discountEl) {
         card.discountEl.textContent = `Discount: ${meta.discountText || "-"}`;
       }
-      if (card.targetStatusEl) {
-        const priceLabel = String(meta?.priceText || "").trim().toLowerCase();
-        const priceKnown = priceLabel && priceLabel !== "-" && priceLabel !== "not announced";
-        const priceCents = Number(meta?.priceFinal || 0);
-        const hasTarget = Number.isFinite(targetPriceCents) && targetPriceCents > 0;
-        const hit = hasTarget && priceKnown && Number.isFinite(priceCents) && priceCents <= targetPriceCents;
-        if (hasTarget) {
-          card.targetStatusEl.textContent = hit
-            ? `Target: ${(targetPriceCents / 100).toFixed(2)} (hit)`
-            : `Target: ${(targetPriceCents / 100).toFixed(2)}`;
-        } else {
-          card.targetStatusEl.textContent = "Target: -";
-        }
-        card.targetStatusEl.classList.toggle("target-hit", hit);
-        if (card.cardEl) {
-          card.cardEl.classList.toggle("target-hit", hit);
-        }
+      const priceLabel = String(meta?.priceText || "").trim().toLowerCase();
+      const priceKnown = priceLabel && priceLabel !== "-" && priceLabel !== "not announced";
+      const priceCents = Number(meta?.priceFinal || 0);
+      const hasTarget = Number.isFinite(targetPriceCents) && targetPriceCents > 0;
+      const hit = hasTarget && priceKnown && Number.isFinite(priceCents) && priceCents <= targetPriceCents;
+      if (card.cardEl) {
+        card.cardEl.classList.toggle("target-hit", hit);
       }
       if (card.reviewEl) {
         card.reviewEl.textContent = `Reviews: ${meta.reviewText || "-"}`;
@@ -501,6 +1178,7 @@
     createCardNodes,
     fillCardStatic,
     bindCardActions,
-    hydrateCardMeta
+    hydrateCardMeta,
+    bindMediaPreviewHover
   };
 })();
