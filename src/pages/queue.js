@@ -2,6 +2,7 @@ const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const QUEUE_COLLECTION_KEY = "swmQueueCollectionV2";
 const QUEUE_STATE_KEY = "swmQueueStateV2";
 const QUEUE_INDEX_KEY = "swmQueueIndexV2";
+const QUEUE_LEFT_WIDTH_KEY = "swmQueueLeftWidthV1";
 
 const steamFetchUtils = window.SWMSteamFetch || {};
 
@@ -83,6 +84,30 @@ function persistUiState() {
     localStorage.setItem(QUEUE_COLLECTION_KEY, currentQueueConfig.collection);
     localStorage.setItem(QUEUE_STATE_KEY, currentQueueConfig.state);
     localStorage.setItem(QUEUE_INDEX_KEY, String(queueIndex));
+  } catch {
+    // noop
+  }
+}
+
+function applyQueueLeftWidth(widthPx) {
+  const queueBody = document.querySelector(".queue-body");
+  const leftCol = document.querySelector(".queue-left");
+  if (!queueBody || !leftCol) {
+    return;
+  }
+  const bodyWidth = queueBody.getBoundingClientRect().width || 0;
+  const minLeft = 260;
+  const maxLeft = Math.max(minLeft, Math.floor(bodyWidth - 360));
+  const next = Math.max(minLeft, Math.min(maxLeft, Math.floor(Number(widthPx) || 0)));
+  queueBody.style.setProperty("--queue-left-width", `${next}px`);
+}
+
+function hydrateQueueLeftWidth() {
+  try {
+    const raw = Number(localStorage.getItem(QUEUE_LEFT_WIDTH_KEY) || 0);
+    if (Number.isFinite(raw) && raw > 0) {
+      applyQueueLeftWidth(raw);
+    }
   } catch {
     // noop
   }
@@ -511,7 +536,7 @@ function fitLayoutToViewport() {
       - cardGap
     )
   );
-  const fixedLeft = (controls?.getBoundingClientRect().height || 0) + leftGap;
+  const fixedLeft = controls ? ((controls.getBoundingClientRect().height || 0) + leftGap) : 0;
   const stageHeight = Math.max(120, Math.floor(leftHeight - fixedLeft));
   card.style.setProperty("--queue-media-height", `${stageHeight}px`);
 }
@@ -785,7 +810,44 @@ function bindEvents() {
     await rerenderAfterAction();
   });
 
-  window.addEventListener("resize", () => fitLayoutToViewport());
+  const resizeHandle = document.getElementById("queue-column-resize-handle");
+  if (resizeHandle) {
+    resizeHandle.addEventListener("mousedown", (event) => {
+      if (window.matchMedia("(max-width: 980px)").matches) {
+        return;
+      }
+      event.preventDefault();
+      const queueBody = document.querySelector(".queue-body");
+      const leftCol = document.querySelector(".queue-left");
+      if (!queueBody || !leftCol) {
+        return;
+      }
+      const startX = event.clientX;
+      const startWidth = leftCol.getBoundingClientRect().width;
+      const onMove = (moveEvent) => {
+        const delta = moveEvent.clientX - startX;
+        applyQueueLeftWidth(startWidth + delta);
+        fitLayoutToViewport();
+      };
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        const currentWidth = leftCol.getBoundingClientRect().width;
+        try {
+          localStorage.setItem(QUEUE_LEFT_WIDTH_KEY, String(Math.round(currentWidth)));
+        } catch {
+          // noop
+        }
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  }
+
+  window.addEventListener("resize", () => {
+    hydrateQueueLeftWidth();
+    fitLayoutToViewport();
+  });
 }
 
 async function init() {
@@ -793,6 +855,7 @@ async function init() {
   await loadWishlistOrder();
   populateCollectionSelect();
   hydrateUiState();
+  hydrateQueueLeftWidth();
   bindEvents();
   setStatus("");
 }

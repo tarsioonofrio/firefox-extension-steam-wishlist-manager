@@ -53,13 +53,11 @@
           <div class="media-stage">
             <video id="media-video" class="media hidden" controls muted playsinline preload="none"></video>
             <img id="media-image" class="media hidden" alt="">
-          </div>
-          <div class="media-controls">
-            <button id="media-prev-btn" type="button">‹</button>
-            <span id="media-count">0/0</span>
-            <button id="media-next-btn" type="button">›</button>
+            <button id="media-prev-btn" class="media-nav-btn media-nav-prev" type="button" aria-label="Previous media">‹</button>
+            <button id="media-next-btn" class="media-nav-btn media-nav-next" type="button" aria-label="Next media">›</button>
           </div>
         </div>
+        <div id="queue-column-resize-handle" class="queue-column-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize queue columns"></div>
         <div class="info">
           <img id="capsule-image" class="capsule-image" alt="">
           <div class="actions">
