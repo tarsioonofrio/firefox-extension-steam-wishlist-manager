@@ -35,6 +35,46 @@ Main goal: make prioritization practical without changing your Steam account dat
 - Supports local per-game notes (saved in browser storage); search matches title, appid, and notes.
 - Keeps all collection data local in your browser profile.
 
+## User Screens and Features
+
+This section is the user-facing map of current screens and capabilities.
+
+### Extension Popup
+
+- Opens key pages quickly: `Collections`, `Feed / Acompanhar`, and settings-related flows.
+- Acts as the main entry point while browsing Steam pages.
+
+### Collections Page
+
+- Main workspace for triage and organization of large wishlists.
+- Supports static collections (manual) and dynamic collections (saved filters + sort).
+- Supports independent intent actions per game: `Buy`, `Maybe`, `Track`, `Archive`.
+- Supports mute/unmute, target price, notes, and batch actions.
+- Includes sorting, rich filters, pagination, and card/line style workflows.
+
+### Feed / Acompanhar Page
+
+- Focused stream for tracked games and updates/news-related signals.
+- Supports filtering and quick intent actions without leaving the feed workflow.
+
+### Wishlist Page Integration (`store.steampowered.com/wishlist/...`)
+
+- Adds extension controls to wishlist cards for faster actions.
+- Adds filter UX through extension sidebar and wishlist integration points.
+- Uses URL-based filters when possible (`tagids`, `sort`, etc.) and internal Steam
+  service integration for advanced option filters where applicable.
+
+### Configurations and Backup
+
+- Allows export/import style flows for local state continuity.
+- Supports diagnostics and operational checks used for troubleshooting.
+
+### Data and Safety Behavior
+
+- Local state is stored in browser local storage.
+- Steam-side actions are best-effort and degrade gracefully when endpoints are unstable.
+- Existing local intent state remains consistent even when Steam write operations fail.
+
 ## What It Does Not Do
 
 - It does not rewrite Steam server-side wishlist order.
