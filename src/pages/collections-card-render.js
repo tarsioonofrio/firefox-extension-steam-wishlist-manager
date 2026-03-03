@@ -908,7 +908,7 @@
         continue;
       }
       if (action.key === "track") {
-        action.btn.textContent = itemIntent.track > 0 ? "Unfollow" : "Follow";
+        action.btn.textContent = "Follow";
       }
       action.btn.classList.toggle("active", Boolean(action.isActive?.(itemIntent)));
       action.btn.addEventListener("click", async () => {

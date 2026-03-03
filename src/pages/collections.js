@@ -3961,7 +3961,7 @@ function createLineRow(options) {
   const buyBtn = document.createElement("button");
   buyBtn.type = "button";
   buyBtn.className = "line-btn line-col-action";
-  buyBtn.textContent = "Buy";
+  buyBtn.textContent = "Confirm";
   buyBtn.classList.toggle("active", itemIntent.buy === 2);
   bindLineAction(buyBtn, async () => {
     try {
@@ -3991,7 +3991,7 @@ function createLineRow(options) {
   const trackBtn = document.createElement("button");
   trackBtn.type = "button";
   trackBtn.className = "line-btn line-col-action";
-  trackBtn.textContent = itemIntent.track > 0 ? "Unfollow" : "Follow";
+  trackBtn.textContent = "Follow";
   trackBtn.classList.toggle("active", itemIntent.track > 0);
   bindLineAction(trackBtn, async () => {
     try {
