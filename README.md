@@ -94,6 +94,15 @@ This section is the user-facing map of current screens and capabilities.
   - Uses `appid`, `priority`, `date_added`.
 - `date_added` is used in card line `Wishlist: ...`.
 
+## States / Buckets Semantics
+
+- `Inbox`: default triage state (no strong decision yet).
+- `Maybe`: medium buy intent (`buy=1`, bucket `MAYBE`).
+- `Confirmed`: strong buy intent (`buy=2`, bucket `BUY`).
+- `Follow`: tracking intent (`track=1`) independent from buy intent.
+- `Archive`: considered done/owned (`owned=true`, `track=0`, `buy=0`, bucket `ARCHIVE`).
+- `Mute`: local visibility control only (not a bucket; does not change `buy`, `track`, or `owned`).
+
 ## Data Sources
 
 Primary:
