@@ -3979,6 +3979,9 @@ function createLineRow(options) {
   attachImageFallback(thumbImg, getCardImageCandidates(appId).concat(imageUrl || []));
   thumbWrap.appendChild(thumbImg);
   imageCol.appendChild(thumbWrap);
+  if (typeof cardRenderUtils?.bindMediaPreviewHover === "function") {
+    cardRenderUtils.bindMediaPreviewHover(thumbWrap, appId);
+  }
 
   const nameCol = document.createElement("div");
   nameCol.className = "line-col-name";

@@ -736,7 +736,6 @@
     if (card.titleEl) {
       card.titleEl.textContent = card.title;
       card.titleEl.href = card.link;
-      bindMediaPreviewHover(card.titleEl, appId);
     }
     if (card.appidEl) {
       card.appidEl.textContent = `AppID: ${appId}`;
@@ -1128,6 +1127,7 @@
     createCardNodes,
     fillCardStatic,
     bindCardActions,
-    hydrateCardMeta
+    hydrateCardMeta,
+    bindMediaPreviewHover
   };
 })();
