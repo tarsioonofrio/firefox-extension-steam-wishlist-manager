@@ -9,6 +9,8 @@ const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
 const TRACK_FEED_CACHE_KEY = "steamWishlistTrackFeedV1";
 const TRACK_FEED_META_KEY = "steamWishlistTrackFeedMetaV1";
 const TRACK_FEED_DISMISSED_KEY = "steamWishlistTrackFeedDismissedV1";
+const FILTERS_SIDEBAR_WIDTH_KEY = "swmCollectionsFiltersSidebarWidthV1";
+const FILTERS_SIDEBAR_COLLAPSED_KEY = "swmCollectionsFiltersSidebarCollapsedV1";
 const TRACK_FEED_AUTO_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const TRACK_FEED_AUTO_RETRY_INTERVAL_MS = 2 * 60 * 1000;
 const WISHLIST_FULL_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -165,6 +167,8 @@ let lastSteamWriteDiagnostics = null;
 let searchInputDebounceTimer = null;
 const filterTextInputDebounceTimers = new Map();
 let intentMutationQueue = Promise.resolve();
+let filtersSidebarWidth = 340;
+let filtersSidebarCollapsed = false;
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -5214,6 +5218,88 @@ function scrollToTopAfterPageChange() {
   }
 }
 
+function clampFiltersSidebarWidth(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return 340;
+  }
+  return Math.max(240, Math.min(560, Math.round(n)));
+}
+
+function applyFiltersSidebarState() {
+  document.documentElement.style.setProperty("--collections-sidebar-width", `${clampFiltersSidebarWidth(filtersSidebarWidth)}px`);
+  document.body.classList.toggle("filters-sidebar-collapsed", Boolean(filtersSidebarCollapsed));
+  const mainToggle = document.getElementById("toggle-filters-sidebar-btn");
+  const sideToggle = document.getElementById("toggle-filters-sidebar-btn-sidebar");
+  const mainLabel = filtersSidebarCollapsed ? "Show filters" : "Hide filters";
+  const sideLabel = filtersSidebarCollapsed ? "Show" : "Hide";
+  if (mainToggle) {
+    mainToggle.textContent = mainLabel;
+  }
+  if (sideToggle) {
+    sideToggle.textContent = sideLabel;
+  }
+}
+
+function persistFiltersSidebarState() {
+  try {
+    window.localStorage.setItem(FILTERS_SIDEBAR_WIDTH_KEY, String(clampFiltersSidebarWidth(filtersSidebarWidth)));
+    window.localStorage.setItem(FILTERS_SIDEBAR_COLLAPSED_KEY, filtersSidebarCollapsed ? "1" : "0");
+  } catch {}
+}
+
+function bindFiltersSidebarControls() {
+  try {
+    filtersSidebarWidth = clampFiltersSidebarWidth(Number(window.localStorage.getItem(FILTERS_SIDEBAR_WIDTH_KEY) || 340));
+    filtersSidebarCollapsed = window.localStorage.getItem(FILTERS_SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {}
+  applyFiltersSidebarState();
+
+  const toggleFromMain = document.getElementById("toggle-filters-sidebar-btn");
+  const toggleFromSidebar = document.getElementById("toggle-filters-sidebar-btn-sidebar");
+  const onToggle = () => {
+    filtersSidebarCollapsed = !filtersSidebarCollapsed;
+    applyFiltersSidebarState();
+    persistFiltersSidebarState();
+  };
+  toggleFromMain?.addEventListener("click", onToggle);
+  toggleFromSidebar?.addEventListener("click", onToggle);
+
+  const resizeHandle = document.getElementById("filters-sidebar-resize-handle");
+  if (!resizeHandle) {
+    return;
+  }
+  resizeHandle.addEventListener("mousedown", (event) => {
+    if (window.matchMedia("(max-width: 760px)").matches) {
+      return;
+    }
+    event.preventDefault();
+    let collapsedTriggered = false;
+    const onMouseMove = (moveEvent) => {
+      const nextWidth = Number(window.innerWidth || 0) - Number(moveEvent.clientX || 0);
+      if (nextWidth <= 24) {
+        collapsedTriggered = true;
+        filtersSidebarCollapsed = true;
+      } else {
+        filtersSidebarCollapsed = false;
+        filtersSidebarWidth = clampFiltersSidebarWidth(nextWidth);
+      }
+      applyFiltersSidebarState();
+    };
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      if (!collapsedTriggered) {
+        filtersSidebarWidth = clampFiltersSidebarWidth(filtersSidebarWidth);
+      }
+      applyFiltersSidebarState();
+      persistFiltersSidebarState();
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  });
+}
+
 function bindFilterControls() {
   generalBindingsUtils.bindGeneralControls({
     onSearchInput: async (value) => {
@@ -5427,6 +5513,7 @@ function attachEvents() {
   bindCollectionMenuControls();
   bindBatchControls();
   bindFilterControls();
+  bindFiltersSidebarControls();
   bindGlobalPanelClose();
   bindKeyboardShortcuts();
   const copyBtn = document.getElementById("copy-steam-write-diagnostics");

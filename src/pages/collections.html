@@ -51,6 +51,7 @@
             <span>At/under target</span>
           </label>
           <button id="view-menu-btn" type="button">View</button>
+          <button id="toggle-filters-sidebar-btn" type="button">Hide filters</button>
           <select id="view-select" class="native-select-hidden">
             <option value="card">Card</option>
             <option value="line">Line</option>
@@ -117,6 +118,9 @@
 
     <aside class="sidebar">
       <div class="sidebar-inner">
+        <div class="sidebar-header">
+          <button id="toggle-filters-sidebar-btn-sidebar" type="button" class="small-btn">Hide</button>
+        </div>
         <div class="controls">
         </div>
         <details class="filter-group" open>
@@ -268,6 +272,7 @@
           </div>
         </details>
       </div>
+      <div id="filters-sidebar-resize-handle" class="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize filters sidebar"></div>
     </aside>
   </div>
   <p id="status" class="status status-floating"></p>
