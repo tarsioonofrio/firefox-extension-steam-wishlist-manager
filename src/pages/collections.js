@@ -3810,6 +3810,49 @@ function renderCollectionSelect() {
   }
 }
 
+function renderTriageFilterSelect() {
+  const select = document.getElementById("triage-filter-select");
+  if (!select) {
+    return;
+  }
+  const sourceIds = getCurrentSourceAppIds();
+  let inboxCount = 0;
+  let trackCount = 0;
+  let maybeCount = 0;
+  let buyCount = 0;
+  let archiveCount = 0;
+  for (const appId of sourceIds) {
+    const intent = getItemIntentState(appId);
+    if (intent.owned) {
+      archiveCount += 1;
+      continue;
+    }
+    if (intent.bucket === "INBOX") {
+      inboxCount += 1;
+    }
+    if (intent.track > 0) {
+      trackCount += 1;
+    }
+    if (intent.buy === 1) {
+      maybeCount += 1;
+    } else if (intent.buy === 2) {
+      buyCount += 1;
+    }
+  }
+  const setLabel = (value, label, count) => {
+    const option = select.querySelector(`option[value='${value}']`);
+    if (option) {
+      option.textContent = `${label} (${count})`;
+    }
+  };
+  setLabel("all", "All states", sourceIds.length);
+  setLabel("inbox", "Inbox", inboxCount);
+  setLabel("track", "Follow", trackCount);
+  setLabel("maybe", "Maybe", maybeCount);
+  setLabel("buy", "Confirmed", buyCount);
+  setLabel("archive", "Archive", archiveCount);
+}
+
 function renderPager(totalItems) {
   const result = uiControlsUtils.renderPager({
     totalItems,
@@ -4874,6 +4917,7 @@ async function render() {
     viewSelect.value = viewMode;
   }
   if (triageFilterSelect) {
+    renderTriageFilterSelect();
     triageFilterSelect.value = triageFilter;
   }
   if (underTargetCheckbox) {
