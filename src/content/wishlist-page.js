@@ -1296,7 +1296,13 @@ function scheduleWishlistMediaTooltipHide(delayMs = 120) {
 }
 
 function normalizeWishlistMediaUrl(rawUrl) {
-  const url = String(rawUrl || "").trim();
+  const url = String(rawUrl || "")
+    .trim()
+    .replace(/\\u0026/gi, "&")
+    .replace(/\\x26/gi, "&")
+    .replace(/\\u002f/gi, "/")
+    .replace(/&amp;/gi, "&")
+    .replace(/\\\//g, "/");
   if (!url) {
     return "";
   }
@@ -1304,6 +1310,61 @@ function normalizeWishlistMediaUrl(rawUrl) {
     return `https:${url}`;
   }
   return url;
+}
+
+function deriveWishlistManifestVideoCandidates(rawManifestUrl) {
+  const manifestUrl = normalizeWishlistMediaUrl(rawManifestUrl);
+  if (!manifestUrl) {
+    return [];
+  }
+  const queryIndex = manifestUrl.indexOf("?");
+  const query = queryIndex >= 0 ? manifestUrl.slice(queryIndex) : "";
+  const base = queryIndex >= 0 ? manifestUrl.slice(0, queryIndex) : manifestUrl;
+  const slashIndex = base.lastIndexOf("/");
+  if (slashIndex < 0) {
+    return [manifestUrl];
+  }
+  const dir = base.slice(0, slashIndex + 1);
+  return [
+    `${dir}movie_max.mp4${query}`,
+    `${dir}movie480.mp4${query}`,
+    `${dir}movie_max.webm${query}`,
+    `${dir}movie480.webm${query}`,
+    `${dir}trailer.mp4${query}`,
+    `${dir}trailer_480p.mp4${query}`
+  ];
+}
+
+function deriveWishlistStaticMovieCandidates(movie) {
+  const out = [];
+  const movieId = String(movie?.id || "").trim();
+  const thumbUrl = normalizeWishlistMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
+  const thumbQueryIndex = thumbUrl.indexOf("?");
+  const thumbQuery = thumbQueryIndex >= 0 ? thumbUrl.slice(thumbQueryIndex) : "";
+  if (movieId) {
+    out.push(
+      `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie_max.mp4${thumbQuery}`,
+      `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie480.mp4${thumbQuery}`,
+      `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie_max.webm${thumbQuery}`,
+      `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie480.webm${thumbQuery}`
+    );
+  }
+  if (thumbUrl) {
+    const queryIndex = thumbUrl.indexOf("?");
+    const query = queryIndex >= 0 ? thumbUrl.slice(queryIndex) : "";
+    const base = queryIndex >= 0 ? thumbUrl.slice(0, queryIndex) : thumbUrl;
+    const slashIndex = base.lastIndexOf("/");
+    if (slashIndex > 0) {
+      const dir = base.slice(0, slashIndex + 1);
+      out.push(
+        `${dir}movie_max.mp4${query}`,
+        `${dir}movie480.mp4${query}`,
+        `${dir}movie_max.webm${query}`,
+        `${dir}movie480.webm${query}`
+      );
+    }
+  }
+  return out;
 }
 
 function parseWishlistStoreMedia(htmlText) {
@@ -1378,51 +1439,84 @@ async function fetchWishlistAppDetailsMedia(appId) {
   if (!id) {
     return { videos: [], images: [] };
   }
-  const url = `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(id)}&l=english&cc=us`;
-  const json = await fetch(url, { cache: "no-store", credentials: "include" }).then((response) => {
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    return response.json();
-  });
-  const entry = json?.[id];
-  const data = entry?.success ? (entry.data || {}) : {};
   const videos = [];
   const images = [];
   const seenVideos = new Set();
   const seenImages = new Set();
+  const addFromData = (data) => {
+    for (const movie of Array.isArray(data?.movies) ? data.movies : []) {
+      const candidates = [
+        movie?.mp4?.max,
+        movie?.mp4?.["480"],
+        movie?.webm?.max,
+        movie?.webm?.["480"],
+        ...deriveWishlistStaticMovieCandidates(movie),
+        ...deriveWishlistManifestVideoCandidates(movie?.dash_h264),
+        ...deriveWishlistManifestVideoCandidates(movie?.hls_h264),
+        ...deriveWishlistManifestVideoCandidates(movie?.dash_av1)
+      ];
+      let picked = "";
+      for (const candidate of candidates) {
+        const normalized = normalizeWishlistMediaUrl(candidate);
+        if (!normalized || seenVideos.has(normalized)) {
+          continue;
+        }
+        picked = normalized;
+        break;
+      }
+      if (!picked) {
+        continue;
+      }
+      seenVideos.add(picked);
+      const posterUrl = normalizeWishlistMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
+      videos.push({ url: picked, posterUrl });
+    }
 
-  for (const movie of Array.isArray(data?.movies) ? data.movies : []) {
-    const candidates = [
-      movie?.mp4?.max,
-      movie?.mp4?.["480"],
-      movie?.webm?.max,
-      movie?.webm?.["480"]
+    for (const screenshot of Array.isArray(data?.screenshots) ? data.screenshots : []) {
+      const imageUrl = normalizeWishlistMediaUrl(screenshot?.path_full || screenshot?.path_thumbnail);
+      if (!imageUrl || seenImages.has(imageUrl)) {
+        continue;
+      }
+      seenImages.add(imageUrl);
+      images.push(imageUrl);
+    }
+  };
+
+  const ccCandidates = ["us", "br", ""];
+  for (const cc of ccCandidates) {
+    const ccParam = cc ? `&cc=${encodeURIComponent(cc)}` : "";
+    const url = `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(id)}&l=english${ccParam}&filters=movies,screenshots`;
+    try {
+      const json = await fetch(url, { cache: "no-store", credentials: "include" }).then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+      });
+      const entry = json?.[id];
+      const data = entry?.success ? (entry.data || {}) : {};
+      addFromData(data);
+    } catch {
+      continue;
+    }
+    if (videos.length > 0 && images.length > 0) {
+      break;
+    }
+  }
+
+  if (videos.length === 0) {
+    const microTrailerCandidates = [
+      `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}/microtrailer.mp4`,
+      `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}/microtrailer.webm`
     ];
-    let picked = "";
-    for (const candidate of candidates) {
+    for (const candidate of microTrailerCandidates) {
       const normalized = normalizeWishlistMediaUrl(candidate);
       if (!normalized || seenVideos.has(normalized)) {
         continue;
       }
-      picked = normalized;
-      break;
+      seenVideos.add(normalized);
+      videos.push({ url: normalized, posterUrl: "" });
     }
-    if (!picked) {
-      continue;
-    }
-    seenVideos.add(picked);
-    const posterUrl = normalizeWishlistMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
-    videos.push({ url: picked, posterUrl });
-  }
-
-  for (const screenshot of Array.isArray(data?.screenshots) ? data.screenshots : []) {
-    const imageUrl = normalizeWishlistMediaUrl(screenshot?.path_full || screenshot?.path_thumbnail);
-    if (!imageUrl || seenImages.has(imageUrl)) {
-      continue;
-    }
-    seenImages.add(imageUrl);
-    images.push(imageUrl);
   }
 
   return { videos, images };
@@ -1519,6 +1613,51 @@ function renderWishlistMediaTooltipState(tooltip) {
   const images = Array.isArray(state.images) ? state.images : [];
   const mode = state.mode === "image" ? "image" : "video";
   const active = mode === "video" ? videos : images;
+  const showSteamPlayerFallback = Boolean(state.steamPlayerFallback && state.appId);
+
+  if (showSteamPlayerFallback) {
+    if (stage) {
+      stage.innerHTML = "";
+      const iframe = document.createElement("iframe");
+      iframe.className = "swm-wishlist-media-tooltip-video";
+      iframe.src = `https://store.steampowered.com/video/${encodeURIComponent(String(state.appId))}/?l=english`;
+      iframe.setAttribute("allow", "autoplay; fullscreen");
+      iframe.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
+      iframe.style.width = "100%";
+      iframe.style.height = "100%";
+      iframe.style.border = "0";
+      stage.appendChild(iframe);
+      const openLink = document.createElement("a");
+      openLink.href = `https://store.steampowered.com/video/${encodeURIComponent(String(state.appId))}/?l=english`;
+      openLink.target = "_blank";
+      openLink.rel = "noopener noreferrer";
+      openLink.textContent = "Open Steam video in new window";
+      openLink.style.display = "inline-block";
+      openLink.style.marginTop = "6px";
+      stage.appendChild(openLink);
+    }
+    if (status) {
+      status.textContent = "Steam player preview (use link if embed is blocked).";
+    }
+    if (count) {
+      count.textContent = "—";
+    }
+    if (videoBtn) {
+      videoBtn.disabled = false;
+      videoBtn.classList.add("active");
+    }
+    if (imageBtn) {
+      imageBtn.disabled = images.length === 0;
+      imageBtn.classList.remove("active");
+    }
+    if (prevBtn) {
+      prevBtn.disabled = true;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = true;
+    }
+    return;
+  }
 
   if (!Array.isArray(active) || active.length === 0) {
     if (stage) {
@@ -1564,6 +1703,34 @@ function renderWishlistMediaTooltipState(tooltip) {
       video.loop = true;
       video.playsInline = true;
       video.preload = "none";
+      video.addEventListener("error", () => {
+        const nextState = tooltip._state && typeof tooltip._state === "object" ? tooltip._state : {};
+        if (nextState.appId && !nextState.steamPlayerFallback) {
+          nextState.steamPlayerFallback = true;
+          renderWishlistMediaTooltipState(tooltip);
+          const nextStatus = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+          if (nextStatus) {
+            nextStatus.textContent = "Direct video failed; opening Steam player preview.";
+          }
+          return;
+        }
+        const fallbackImages = Array.isArray(nextState.images) ? nextState.images : [];
+        if (fallbackImages.length > 0 && nextState.mode === "video" && !nextState.videoFallbackUsed) {
+          nextState.videoFallbackUsed = true;
+          nextState.mode = "image";
+          nextState.index = Math.max(0, Math.min(fallbackImages.length - 1, nextState.index || 0));
+          renderWishlistMediaTooltipState(tooltip);
+          const nextStatus = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+          if (nextStatus) {
+            nextStatus.textContent = "Video unavailable for this game; showing screenshots.";
+          }
+          return;
+        }
+        const nextStatus = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+        if (nextStatus) {
+          nextStatus.textContent = "Video unavailable for this game.";
+        }
+      });
       stage.appendChild(video);
     } else {
       const image = document.createElement("img");
@@ -1645,6 +1812,7 @@ async function openWishlistMediaTooltip(anchorEl, appId) {
       index: 0,
       videos: resolvedMedia.videos,
       images: resolvedMedia.images,
+      steamPlayerFallback: false,
       loading: false
     };
     renderWishlistMediaTooltipState(tooltip);
@@ -1662,6 +1830,7 @@ async function openWishlistMediaTooltip(anchorEl, appId) {
       index: 0,
       videos: [],
       images: [],
+      steamPlayerFallback: true,
       loading: false
     };
   }
