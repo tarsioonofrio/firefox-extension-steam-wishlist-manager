@@ -28,51 +28,56 @@
         </label>
         <button id="go-btn" type="button">Go!</button>
       </div>
-      <div id="queue-nav" class="queue-nav hidden">
-        <button id="prev-btn" type="button">Previous</button>
-        <button id="next-btn" type="button">Next</button>
+      <div id="queue-header-bar" class="queue-header-bar hidden">
+        <div class="queue-topbar-left">
+          <div id="queue-nav" class="queue-nav hidden">
+            <button id="prev-btn" type="button">Previous</button>
+            <button id="next-btn" type="button">Next</button>
+          </div>
+        </div>
+        <div class="queue-topbar-right">
+          <a id="game-link" class="title" target="_blank" rel="noopener noreferrer"></a>
+          <span id="game-appid" class="meta"></span>
+          <span id="queue-pos" class="meta"></span>
+        </div>
       </div>
       <p id="status" class="status"></p>
     </header>
 
     <section id="empty" class="empty hidden">No games for current source/filter.</section>
     <article id="queue-card" class="queue-card hidden">
-      <div class="media-stage">
-        <video id="media-video" class="media hidden" controls muted playsinline preload="none"></video>
-        <img id="media-image" class="media hidden" alt="">
-      </div>
-      <div class="media-controls">
-        <button id="mode-video-btn" type="button">Videos</button>
-        <button id="mode-image-btn" type="button">Images</button>
-        <button id="media-prev-btn" type="button">‹</button>
-        <span id="media-count">0/0</span>
-        <button id="media-next-btn" type="button">›</button>
-      </div>
-
-      <div class="info">
-        <div class="title-row">
-          <a id="game-link" class="title" target="_blank" rel="noopener noreferrer"></a>
-          <span id="game-appid" class="meta"></span>
-          <span id="queue-pos" class="meta"></span>
+      <div class="queue-body">
+        <div class="queue-left">
+          <div class="media-stage">
+            <video id="media-video" class="media hidden" controls muted playsinline preload="none"></video>
+            <img id="media-image" class="media hidden" alt="">
+          </div>
+          <div class="media-controls">
+            <button id="media-prev-btn" type="button">‹</button>
+            <span id="media-count">0/0</span>
+            <button id="media-next-btn" type="button">›</button>
+          </div>
         </div>
-        <div class="meta-grid">
-          <p id="price-text" class="meta">Price: -</p>
-          <p id="discount-text" class="meta">Discount: -</p>
-          <p id="review-text" class="meta">Reviews: -</p>
-          <p id="release-text" class="meta">Release: -</p>
+        <div class="info">
+          <img id="capsule-image" class="capsule-image" alt="">
+          <div class="actions">
+            <button id="action-confirm-btn" type="button">Confirm</button>
+            <button id="action-maybe-btn" type="button">Maybe</button>
+            <button id="action-track-btn" type="button">Follow</button>
+            <button id="action-archive-btn" type="button">Archive</button>
+            <label class="target">
+              <span>Target</span>
+              <input id="target-input" type="number" min="0" step="0.01" placeholder="">
+            </label>
+          </div>
+          <div class="meta-grid">
+            <p id="price-text" class="meta">Price: -</p>
+            <p id="discount-text" class="meta">Discount: -</p>
+            <p id="review-text" class="meta">Reviews: -</p>
+            <p id="release-text" class="meta">Release: -</p>
+          </div>
+          <div id="tags-row" class="tags-row"></div>
         </div>
-        <div id="tags-row" class="tags-row"></div>
-      </div>
-
-      <div class="actions">
-        <button id="action-confirm-btn" type="button">Confirm</button>
-        <button id="action-maybe-btn" type="button">Maybe</button>
-        <button id="action-track-btn" type="button">Follow</button>
-        <button id="action-archive-btn" type="button">Archive</button>
-        <label class="target">
-          <span>Target</span>
-          <input id="target-input" type="number" min="0" step="0.01" placeholder="">
-        </label>
       </div>
     </article>
   </main>

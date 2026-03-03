@@ -10,7 +10,7 @@ let wishlistOrderedIds = [];
 let queueIds = [];
 let queueIndex = 0;
 let currentQueueConfig = { collection: "__wishlist__", state: "all" };
-let mediaState = { mode: "video", index: 0, videos: [], images: [] };
+let mediaState = { index: 0, items: [] };
 let mediaSeq = 0;
 const metaCache = new Map();
 
@@ -197,6 +197,7 @@ async function fetchMeta(appId) {
   }
   const fallback = {
     titleText: "",
+    capsuleImage: "",
     releaseText: "-",
     reviewText: "No user reviews",
     priceText: "-",
@@ -227,6 +228,7 @@ async function fetchMeta(appId) {
     const categories = Array.isArray(appData?.categories) ? appData.categories.map((x) => String(x?.description || "").trim()).filter(Boolean) : [];
     const meta = {
       titleText: String(appData?.name || "").trim(),
+      capsuleImage: String(appData?.capsule_imagev5 || appData?.capsule_image || appData?.header_image || "").trim(),
       releaseText: String(appData?.release_date?.date || (appData?.release_date?.coming_soon ? "Coming soon" : "-")),
       reviewText: totalVotes > 0 ? `${positivePct}% positive (${totalVotes} reviews)` : "No user reviews",
       priceText: appData?.is_free === true
@@ -247,6 +249,82 @@ async function fetchMeta(appId) {
 
 async function fetchMedia(appId) {
   const fetchJson = steamFetchUtils.fetchJson || ((url, options = {}) => fetch(url, options).then((r) => r.json()));
+  const fetchText = steamFetchUtils.fetchText || ((url, options = {}) => fetch(url, options).then((r) => r.text()));
+  const normalizeMediaUrl = (rawUrl) => {
+    const url = String(rawUrl || "")
+      .trim()
+      .replace(/\\u0026/gi, "&")
+      .replace(/\\x26/gi, "&")
+      .replace(/\\u002f/gi, "/")
+      .replace(/&amp;/gi, "&")
+      .replace(/\\\//g, "/");
+    if (!url) {
+      return "";
+    }
+    if (url.startsWith("//")) {
+      return `https:${url}`;
+    }
+    return url;
+  };
+  const parseStoreMediaFromHtml = (htmlText) => {
+    const doc = new DOMParser().parseFromString(String(htmlText || ""), "text/html");
+    const videos = [];
+    const images = [];
+    const seenVideos = new Set();
+    const seenImages = new Set();
+    const movieNodes = doc.querySelectorAll(".highlight_movie, [id^='highlight_movie_']");
+    for (const movie of movieNodes) {
+      const sourceNodes = movie.querySelectorAll("video source, source");
+      const sourceCandidates = [
+        movie.getAttribute("data-mp4-source"),
+        movie.getAttribute("data-webm-source"),
+        ...(Array.from(sourceNodes).map((node) => node.getAttribute("src")))
+      ];
+      let mediaUrl = "";
+      for (const candidate of sourceCandidates) {
+        const normalized = normalizeMediaUrl(candidate);
+        if (!normalized) {
+          continue;
+        }
+        mediaUrl = normalized;
+        break;
+      }
+      if (!mediaUrl || seenVideos.has(mediaUrl)) {
+        continue;
+      }
+      seenVideos.add(mediaUrl);
+      const posterEl = movie.querySelector("img");
+      const posterUrl = normalizeMediaUrl(
+        movie.getAttribute("data-poster")
+        || posterEl?.getAttribute("src")
+        || posterEl?.getAttribute("data-src")
+      );
+      videos.push({ url: mediaUrl, posterUrl });
+    }
+    const directVideoMatches = Array.from(
+      String(htmlText || "").matchAll(/https?:\\?\/\\?\/[^"'\\\s<>()]+?\.(?:mp4|webm)(?:\?[^"'\\\s<>()]*)?/gi)
+    );
+    for (const match of directVideoMatches) {
+      const mediaUrl = normalizeMediaUrl(String(match?.[0] || "").replace(/\\\//g, "/"));
+      if (!mediaUrl || seenVideos.has(mediaUrl)) {
+        continue;
+      }
+      seenVideos.add(mediaUrl);
+      videos.push({ url: mediaUrl, posterUrl: "" });
+    }
+    const imageNodes = doc.querySelectorAll(
+      ".highlight_strip_screenshot img, .highlight_screenshot_link img, [id^='thumb_screenshot_'] img"
+    );
+    for (const img of imageNodes) {
+      const imageUrl = normalizeMediaUrl(img.getAttribute("src") || img.getAttribute("data-src"));
+      if (!imageUrl || seenImages.has(imageUrl)) {
+        continue;
+      }
+      seenImages.add(imageUrl);
+      images.push(imageUrl);
+    }
+    return { videos, images };
+  };
   try {
     const payload = await fetchJson(
       `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(appId)}&l=english&filters=movies,screenshots`,
@@ -278,9 +356,37 @@ async function fetchMedia(appId) {
       }
       images.push(src);
     }
+    if (videos.length === 0) {
+      try {
+        const html = await fetchText(
+          `https://store.steampowered.com/app/${encodeURIComponent(appId)}/?l=english`,
+          { cache: "no-store", credentials: "include" }
+        );
+        const parsed = parseStoreMediaFromHtml(html);
+        if (parsed.videos.length > 0) {
+          return {
+            videos: parsed.videos,
+            images: images.length > 0 ? images : parsed.images
+          };
+        }
+        if (images.length === 0 && parsed.images.length > 0) {
+          return { videos: [], images: parsed.images };
+        }
+      } catch {
+        // keep appdetails result
+      }
+    }
     return { videos, images };
   } catch {
-    return { videos: [], images: [] };
+    try {
+      const html = await fetchText(
+        `https://store.steampowered.com/app/${encodeURIComponent(appId)}/?l=english`,
+        { cache: "no-store", credentials: "include" }
+      );
+      return parseStoreMediaFromHtml(html);
+    } catch {
+      return { videos: [], images: [] };
+    }
   }
 }
 
@@ -288,11 +394,9 @@ function renderMedia() {
   const videoEl = document.getElementById("media-video");
   const imageEl = document.getElementById("media-image");
   const countEl = document.getElementById("media-count");
-  const videoBtn = document.getElementById("mode-video-btn");
-  const imageBtn = document.getElementById("mode-image-btn");
   const prevBtn = document.getElementById("media-prev-btn");
   const nextBtn = document.getElementById("media-next-btn");
-  const list = mediaState.mode === "video" ? mediaState.videos : mediaState.images;
+  const list = Array.isArray(mediaState.items) ? mediaState.items : [];
   const total = Array.isArray(list) ? list.length : 0;
   if (total === 0) {
     videoEl?.pause();
@@ -314,14 +418,6 @@ function renderMedia() {
     if (nextBtn) {
       nextBtn.disabled = true;
     }
-    if (videoBtn) {
-      videoBtn.classList.toggle("active", mediaState.mode === "video");
-      videoBtn.disabled = (mediaState.videos || []).length === 0;
-    }
-    if (imageBtn) {
-      imageBtn.classList.toggle("active", mediaState.mode === "image");
-      imageBtn.disabled = (mediaState.images || []).length === 0;
-    }
     return;
   }
 
@@ -335,17 +431,9 @@ function renderMedia() {
   if (nextBtn) {
     nextBtn.disabled = total < 2;
   }
-  if (videoBtn) {
-    videoBtn.classList.toggle("active", mediaState.mode === "video");
-    videoBtn.disabled = (mediaState.videos || []).length === 0;
-  }
-  if (imageBtn) {
-    imageBtn.classList.toggle("active", mediaState.mode === "image");
-    imageBtn.disabled = (mediaState.images || []).length === 0;
-  }
-
-  if (mediaState.mode === "video") {
-    const video = mediaState.videos[mediaState.index] || {};
+  const current = list[mediaState.index] || {};
+  if (current.type === "video") {
+    const video = current || {};
     if (imageEl) {
       imageEl.classList.add("hidden");
       imageEl.removeAttribute("src");
@@ -354,7 +442,7 @@ function renderMedia() {
       videoEl.classList.remove("hidden");
       videoEl.src = String(video.url || "");
       videoEl.poster = String(video.posterUrl || "");
-      videoEl.loop = mediaState.videos.length <= 1;
+      videoEl.loop = total <= 1;
       videoEl.play().catch(() => {});
     }
   } else {
@@ -366,7 +454,7 @@ function renderMedia() {
     }
     if (imageEl) {
       imageEl.classList.remove("hidden");
-      imageEl.src = String(mediaState.images[mediaState.index] || "");
+      imageEl.src = String(current.url || "");
       imageEl.alt = `Screenshot ${mediaState.index + 1}`;
     }
   }
@@ -395,11 +483,10 @@ function fitLayoutToViewport() {
   const container = document.querySelector(".container");
   const header = document.querySelector(".top");
   const card = document.getElementById("queue-card");
-  const stage = card?.querySelector(".media-stage");
+  const body = card?.querySelector(".queue-body");
+  const leftCol = card?.querySelector(".queue-left");
   const controls = card?.querySelector(".media-controls");
-  const info = card?.querySelector(".info");
-  const actions = card?.querySelector(".actions");
-  if (!container || !header || !card || !stage || card.classList.contains("hidden")) {
+  if (!container || !header || !card || !body || !leftCol || card.classList.contains("hidden")) {
     return;
   }
   const viewportHeight = window.innerHeight;
@@ -412,14 +499,20 @@ function fitLayoutToViewport() {
   const cardStyles = getComputedStyle(card);
   const cardPadTop = Number.parseFloat(cardStyles.paddingTop || "0") || 0;
   const cardPadBottom = Number.parseFloat(cardStyles.paddingBottom || "0") || 0;
-  const gap = Number.parseFloat(cardStyles.rowGap || cardStyles.gap || "0") || 0;
-  const fixedHeight = (controls?.getBoundingClientRect().height || 0)
-    + (info?.getBoundingClientRect().height || 0)
-    + (actions?.getBoundingClientRect().height || 0)
-    + cardPadTop
-    + cardPadBottom
-    + (gap * 3);
-  const stageHeight = Math.max(120, Math.floor(availableHeight - fixedHeight));
+  const leftStyles = getComputedStyle(leftCol);
+  const leftGap = Number.parseFloat(leftStyles.rowGap || leftStyles.gap || "0") || 0;
+  const cardGap = Number.parseFloat(cardStyles.rowGap || cardStyles.gap || "0") || 0;
+  const leftHeight = Math.max(
+    120,
+    Math.floor(
+      availableHeight
+      - cardPadTop
+      - cardPadBottom
+      - cardGap
+    )
+  );
+  const fixedLeft = (controls?.getBoundingClientRect().height || 0) + leftGap;
+  const stageHeight = Math.max(120, Math.floor(leftHeight - fixedLeft));
   card.style.setProperty("--queue-media-height", `${stageHeight}px`);
 }
 
@@ -427,13 +520,15 @@ async function renderCurrent() {
   const emptyEl = document.getElementById("empty");
   const cardEl = document.getElementById("queue-card");
   const navEl = document.getElementById("queue-nav");
-  if (!emptyEl || !cardEl || !navEl) {
+  const headerBarEl = document.getElementById("queue-header-bar");
+  if (!emptyEl || !cardEl || !navEl || !headerBarEl) {
     return;
   }
   if (queueIds.length === 0) {
     emptyEl.classList.remove("hidden");
     cardEl.classList.add("hidden");
     navEl.classList.add("hidden");
+    headerBarEl.classList.add("hidden");
     setStatus("No games found for selected collection/state.");
     return;
   }
@@ -443,6 +538,7 @@ async function renderCurrent() {
   const intent = getIntent(appId);
   emptyEl.classList.add("hidden");
   cardEl.classList.remove("hidden");
+  headerBarEl.classList.remove("hidden");
   navEl.classList.remove("hidden");
 
   const titleEl = document.getElementById("game-link");
@@ -475,6 +571,7 @@ async function renderCurrent() {
   const discountText = document.getElementById("discount-text");
   const reviewText = document.getElementById("review-text");
   const releaseText = document.getElementById("release-text");
+  const capsuleImage = document.getElementById("capsule-image");
   if (priceText) {
     priceText.textContent = `Price: ${meta.priceText || "-"}`;
   }
@@ -486,6 +583,16 @@ async function renderCurrent() {
   }
   if (releaseText) {
     releaseText.textContent = `Release: ${meta.releaseText || "-"}`;
+  }
+  if (capsuleImage) {
+    const capsuleUrl = String(meta?.capsuleImage || "").trim();
+    if (capsuleUrl) {
+      capsuleImage.src = capsuleUrl;
+      capsuleImage.classList.remove("hidden");
+    } else {
+      capsuleImage.removeAttribute("src");
+      capsuleImage.classList.add("hidden");
+    }
   }
   const tagsRow = document.getElementById("tags-row");
   if (tagsRow) {
@@ -505,15 +612,25 @@ async function renderCurrent() {
   if (seq !== mediaSeq) {
     return;
   }
+  const mediaItems = [
+    ...(Array.isArray(media.videos) ? media.videos.map((video) => ({
+      type: "video",
+      url: String(video?.url || ""),
+      posterUrl: String(video?.posterUrl || "")
+    })) : []),
+    ...(Array.isArray(media.images) ? media.images.map((imageUrl) => ({
+      type: "image",
+      url: String(imageUrl || ""),
+      posterUrl: ""
+    })) : [])
+  ].filter((item) => item.url);
   mediaState = {
-    mode: media.videos.length > 0 ? "video" : "image",
     index: 0,
-    videos: media.videos,
-    images: media.images
+    items: mediaItems
   };
   renderMedia();
   fitLayoutToViewport();
-  setStatus(media.videos.length + media.images.length > 0 ? "Ready." : "No media for this game.");
+  setStatus(mediaItems.length > 0 ? "" : "No media for this game.");
 }
 
 async function setIntent(appId, patch) {
@@ -542,6 +659,14 @@ async function startQueue() {
   const stateFilter = getStateSelection();
   queueIndex = 0;
   buildQueueIds(collection, stateFilter);
+  const setupPanelEl = document.querySelector(".setup-panel");
+  const headerBarEl = document.getElementById("queue-header-bar");
+  if (setupPanelEl) {
+    setupPanelEl.classList.add("hidden");
+  }
+  if (headerBarEl) {
+    headerBarEl.classList.remove("hidden");
+  }
   await renderCurrent();
 }
 
@@ -573,24 +698,8 @@ function bindEvents() {
     await renderCurrent();
   });
 
-  document.getElementById("mode-video-btn")?.addEventListener("click", () => {
-    if ((mediaState.videos || []).length === 0) {
-      return;
-    }
-    mediaState.mode = "video";
-    mediaState.index = 0;
-    renderMedia();
-  });
-  document.getElementById("mode-image-btn")?.addEventListener("click", () => {
-    if ((mediaState.images || []).length === 0) {
-      return;
-    }
-    mediaState.mode = "image";
-    mediaState.index = 0;
-    renderMedia();
-  });
   document.getElementById("media-prev-btn")?.addEventListener("click", () => {
-    const list = mediaState.mode === "video" ? mediaState.videos : mediaState.images;
+    const list = Array.isArray(mediaState.items) ? mediaState.items : [];
     if (!Array.isArray(list) || list.length < 2) {
       return;
     }
@@ -598,7 +707,7 @@ function bindEvents() {
     renderMedia();
   });
   document.getElementById("media-next-btn")?.addEventListener("click", () => {
-    const list = mediaState.mode === "video" ? mediaState.videos : mediaState.images;
+    const list = Array.isArray(mediaState.items) ? mediaState.items : [];
     if (!Array.isArray(list) || list.length < 2) {
       return;
     }
@@ -606,10 +715,11 @@ function bindEvents() {
     renderMedia();
   });
   document.getElementById("media-video")?.addEventListener("ended", () => {
-    if (mediaState.mode !== "video" || !Array.isArray(mediaState.videos) || mediaState.videos.length < 2) {
+    const list = Array.isArray(mediaState.items) ? mediaState.items : [];
+    if (list.length < 2) {
       return;
     }
-    mediaState.index = (mediaState.index + 1) % mediaState.videos.length;
+    mediaState.index = (mediaState.index + 1) % list.length;
     renderMedia();
   });
 
@@ -684,10 +794,7 @@ async function init() {
   populateCollectionSelect();
   hydrateUiState();
   bindEvents();
-  if (currentQueueConfig.collection) {
-    buildQueueIds(currentQueueConfig.collection, currentQueueConfig.state);
-    await renderCurrent();
-  }
+  setStatus("");
 }
 
 init().catch((error) => {
