@@ -10,15 +10,25 @@
   <main class="container">
     <header class="top">
       <h1>Discover Queue</h1>
-      <div class="top-controls">
-        <select id="source-select">
-          <option value="wishlist">Wishlist (all games)</option>
-          <option value="confirmed">Confirmed</option>
-          <option value="maybe">Maybe</option>
-          <option value="track">Follow</option>
-          <option value="archive">Archive</option>
-        </select>
-        <input id="search-input" type="search" placeholder="Filter by title/appid">
+      <div class="setup-panel">
+        <label>
+          <span>Collection</span>
+          <select id="collection-select"></select>
+        </label>
+        <label>
+          <span>State</span>
+          <select id="state-select">
+            <option value="all">All states</option>
+            <option value="inbox">Inbox</option>
+            <option value="track">Follow</option>
+            <option value="maybe">Maybe</option>
+            <option value="buy">Confirmed</option>
+            <option value="archive">Archive</option>
+          </select>
+        </label>
+        <button id="go-btn" type="button">Go!</button>
+      </div>
+      <div id="queue-nav" class="queue-nav hidden">
         <button id="prev-btn" type="button">Previous</button>
         <button id="next-btn" type="button">Next</button>
       </div>

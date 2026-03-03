@@ -1,7 +1,7 @@
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
-const SOURCE_KEY = "swmQueueSourceV1";
-const SEARCH_KEY = "swmQueueSearchV1";
-const INDEX_KEY = "swmQueueIndexV1";
+const QUEUE_COLLECTION_KEY = "swmQueueCollectionV2";
+const QUEUE_STATE_KEY = "swmQueueStateV2";
+const QUEUE_INDEX_KEY = "swmQueueIndexV2";
 
 const steamFetchUtils = window.SWMSteamFetch || {};
 
@@ -9,6 +9,7 @@ let state = null;
 let wishlistOrderedIds = [];
 let queueIds = [];
 let queueIndex = 0;
+let currentQueueConfig = { collection: "__wishlist__", state: "all" };
 let mediaState = { mode: "video", index: 0, videos: [], images: [] };
 let mediaSeq = 0;
 const metaCache = new Map();
@@ -20,6 +21,15 @@ function setStatus(message, isError = false) {
   }
   el.textContent = String(message || "");
   el.style.color = isError ? "#ff9696" : "#9db5c9";
+}
+
+function shuffleIds(ids) {
+  const out = Array.isArray(ids) ? [...ids] : [];
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
 
 function getIntent(appId) {
@@ -40,21 +50,39 @@ function getIntent(appId) {
   };
 }
 
-function getSelectedSource() {
-  const select = document.getElementById("source-select");
-  return String(select?.value || "wishlist");
+function matchesStateFilter(appId, stateFilter) {
+  const intent = getIntent(appId);
+  switch (String(stateFilter || "all")) {
+    case "inbox":
+      return !intent.owned && intent.track <= 0 && intent.buy <= 0;
+    case "track":
+      return !intent.owned && intent.track > 0;
+    case "maybe":
+      return !intent.owned && intent.buy === 1;
+    case "buy":
+      return !intent.owned && intent.buy === 2;
+    case "archive":
+      return intent.owned === true;
+    default:
+      return true;
+  }
 }
 
-function getSearchQuery() {
-  const input = document.getElementById("search-input");
-  return String(input?.value || "").trim().toLowerCase();
+function getCollectionSelection() {
+  const collectionEl = document.getElementById("collection-select");
+  return String(collectionEl?.value || "__wishlist__");
+}
+
+function getStateSelection() {
+  const stateEl = document.getElementById("state-select");
+  return String(stateEl?.value || "all");
 }
 
 function persistUiState() {
   try {
-    localStorage.setItem(SOURCE_KEY, getSelectedSource());
-    localStorage.setItem(SEARCH_KEY, document.getElementById("search-input")?.value || "");
-    localStorage.setItem(INDEX_KEY, String(queueIndex));
+    localStorage.setItem(QUEUE_COLLECTION_KEY, currentQueueConfig.collection);
+    localStorage.setItem(QUEUE_STATE_KEY, currentQueueConfig.state);
+    localStorage.setItem(QUEUE_INDEX_KEY, String(queueIndex));
   } catch {
     // noop
   }
@@ -62,20 +90,21 @@ function persistUiState() {
 
 function hydrateUiState() {
   try {
-    const source = String(localStorage.getItem(SOURCE_KEY) || "wishlist");
-    const query = String(localStorage.getItem(SEARCH_KEY) || "");
-    const index = Number(localStorage.getItem(INDEX_KEY) || 0);
-    const sourceEl = document.getElementById("source-select");
-    const searchEl = document.getElementById("search-input");
-    if (sourceEl) {
-      sourceEl.value = source;
+    const collection = String(localStorage.getItem(QUEUE_COLLECTION_KEY) || "__wishlist__");
+    const stateValue = String(localStorage.getItem(QUEUE_STATE_KEY) || "all");
+    const index = Number(localStorage.getItem(QUEUE_INDEX_KEY) || 0);
+    const collectionEl = document.getElementById("collection-select");
+    const stateEl = document.getElementById("state-select");
+    if (collectionEl) {
+      collectionEl.value = collection;
     }
-    if (searchEl) {
-      searchEl.value = query;
+    if (stateEl) {
+      stateEl.value = stateValue;
     }
     if (Number.isFinite(index) && index >= 0) {
       queueIndex = Math.floor(index);
     }
+    currentQueueConfig = { collection, state: stateValue };
   } catch {
     // noop
   }
@@ -98,81 +127,67 @@ async function loadWishlistOrder() {
       credentials: "include",
       cache: "no-store"
     });
-    const ids = Array.isArray(userdata?.rgWishlist)
+    wishlistOrderedIds = Array.isArray(userdata?.rgWishlist)
       ? userdata.rgWishlist.map((id) => String(id || "").trim()).filter(Boolean)
       : [];
-    wishlistOrderedIds = ids;
   } catch {
     wishlistOrderedIds = [];
   }
 }
 
-function buildQueueIds() {
-  const source = getSelectedSource();
-  const q = getSearchQuery();
-  const allKnownIds = new Set(Object.keys(state?.items || {}).map((id) => String(id || "").trim()).filter(Boolean));
-  const order = wishlistOrderedIds.length > 0 ? wishlistOrderedIds : Array.from(allKnownIds);
-  for (const id of order) {
-    allKnownIds.add(id);
+function populateCollectionSelect() {
+  const el = document.getElementById("collection-select");
+  if (!el) {
+    return;
   }
-  const out = [];
+  const selectedValue = String(el.value || "__wishlist__");
+  const options = [
+    { value: "__wishlist__", label: "Wishlist (all games)" }
+  ];
+  for (const name of Array.isArray(state?.collectionOrder) ? state.collectionOrder : []) {
+    if (state?.dynamicCollections?.[name]) {
+      continue;
+    }
+    options.push({ value: String(name), label: String(name) });
+  }
+  el.innerHTML = "";
+  for (const option of options) {
+    const node = document.createElement("option");
+    node.value = option.value;
+    node.textContent = option.label;
+    el.appendChild(node);
+  }
+  el.value = options.some((x) => x.value === selectedValue) ? selectedValue : "__wishlist__";
+}
+
+function resolveBaseIdsByCollection(collection) {
+  if (collection === "__wishlist__") {
+    if (wishlistOrderedIds.length > 0) {
+      return wishlistOrderedIds;
+    }
+    return Object.keys(state?.items || {});
+  }
+  return Array.isArray(state?.collections?.[collection]) ? state.collections[collection] : [];
+}
+
+function buildQueueIds(collection, stateFilter) {
+  const base = resolveBaseIdsByCollection(collection);
+  const deduped = [];
   const seen = new Set();
-  for (const appId of order) {
+  for (const rawId of base) {
+    const appId = String(rawId || "").trim();
     if (!appId || seen.has(appId)) {
       continue;
     }
-    const item = state?.items?.[appId] || {};
-    const title = String(item.title || "").toLowerCase();
-    const intent = getIntent(appId);
-    if (source === "confirmed" && intent.buy !== 2) {
+    if (!matchesStateFilter(appId, stateFilter)) {
       continue;
     }
-    if (source === "maybe" && intent.buy !== 1) {
-      continue;
-    }
-    if (source === "track" && intent.track <= 0) {
-      continue;
-    }
-    if (source === "archive" && !intent.owned) {
-      continue;
-    }
-    if (q && !(`${title} ${appId}`).includes(q)) {
-      continue;
-    }
-    out.push(appId);
+    deduped.push(appId);
     seen.add(appId);
   }
-  if (source !== "wishlist") {
-    for (const appId of allKnownIds) {
-      if (!appId || seen.has(appId)) {
-        continue;
-      }
-      const item = state?.items?.[appId] || {};
-      const title = String(item.title || "").toLowerCase();
-      const intent = getIntent(appId);
-      if (source === "confirmed" && intent.buy !== 2) {
-        continue;
-      }
-      if (source === "maybe" && intent.buy !== 1) {
-        continue;
-      }
-      if (source === "track" && intent.track <= 0) {
-        continue;
-      }
-      if (source === "archive" && !intent.owned) {
-        continue;
-      }
-      if (q && !(`${title} ${appId}`).includes(q)) {
-        continue;
-      }
-      out.push(appId);
-      seen.add(appId);
-    }
-  }
-  queueIds = out;
-  if (queueIndex >= queueIds.length) {
-    queueIndex = Math.max(0, queueIds.length - 1);
-  }
+  queueIds = shuffleIds(deduped);
+  queueIndex = queueIds.length > 0 ? Math.min(queueIndex, queueIds.length - 1) : 0;
+  currentQueueConfig = { collection, state: stateFilter };
   persistUiState();
 }
 
@@ -279,7 +294,7 @@ function renderMedia() {
   const nextBtn = document.getElementById("media-next-btn");
   const list = mediaState.mode === "video" ? mediaState.videos : mediaState.images;
   const total = Array.isArray(list) ? list.length : 0;
-  if (!Array.isArray(list) || total === 0) {
+  if (total === 0) {
     videoEl?.pause();
     if (videoEl) {
       videoEl.classList.add("hidden");
@@ -309,6 +324,7 @@ function renderMedia() {
     }
     return;
   }
+
   mediaState.index = Math.max(0, Math.min(total - 1, Number(mediaState.index || 0)));
   if (countEl) {
     countEl.textContent = `${mediaState.index + 1}/${total}`;
@@ -342,7 +358,6 @@ function renderMedia() {
       videoEl.play().catch(() => {});
     }
   } else {
-    const image = String(mediaState.images[mediaState.index] || "");
     videoEl?.pause();
     if (videoEl) {
       videoEl.classList.add("hidden");
@@ -351,7 +366,7 @@ function renderMedia() {
     }
     if (imageEl) {
       imageEl.classList.remove("hidden");
-      imageEl.src = image;
+      imageEl.src = String(mediaState.images[mediaState.index] || "");
       imageEl.alt = `Screenshot ${mediaState.index + 1}`;
     }
   }
@@ -376,23 +391,59 @@ function updateActionButtons(intent) {
   }
 }
 
+function fitLayoutToViewport() {
+  const container = document.querySelector(".container");
+  const header = document.querySelector(".top");
+  const card = document.getElementById("queue-card");
+  const stage = card?.querySelector(".media-stage");
+  const controls = card?.querySelector(".media-controls");
+  const info = card?.querySelector(".info");
+  const actions = card?.querySelector(".actions");
+  if (!container || !header || !card || !stage || card.classList.contains("hidden")) {
+    return;
+  }
+  const viewportHeight = window.innerHeight;
+  const containerStyles = getComputedStyle(container);
+  const padTop = Number.parseFloat(containerStyles.paddingTop || "0") || 0;
+  const padBottom = Number.parseFloat(containerStyles.paddingBottom || "0") || 0;
+  const availableHeight = Math.max(320, viewportHeight - padTop - padBottom - header.getBoundingClientRect().height - 12);
+  card.style.height = `${Math.floor(availableHeight)}px`;
+
+  const cardStyles = getComputedStyle(card);
+  const cardPadTop = Number.parseFloat(cardStyles.paddingTop || "0") || 0;
+  const cardPadBottom = Number.parseFloat(cardStyles.paddingBottom || "0") || 0;
+  const gap = Number.parseFloat(cardStyles.rowGap || cardStyles.gap || "0") || 0;
+  const fixedHeight = (controls?.getBoundingClientRect().height || 0)
+    + (info?.getBoundingClientRect().height || 0)
+    + (actions?.getBoundingClientRect().height || 0)
+    + cardPadTop
+    + cardPadBottom
+    + (gap * 3);
+  const stageHeight = Math.max(120, Math.floor(availableHeight - fixedHeight));
+  card.style.setProperty("--queue-media-height", `${stageHeight}px`);
+}
+
 async function renderCurrent() {
   const emptyEl = document.getElementById("empty");
   const cardEl = document.getElementById("queue-card");
-  if (!emptyEl || !cardEl) {
+  const navEl = document.getElementById("queue-nav");
+  if (!emptyEl || !cardEl || !navEl) {
     return;
   }
   if (queueIds.length === 0) {
     emptyEl.classList.remove("hidden");
     cardEl.classList.add("hidden");
-    setStatus("No games available in current source/filter.");
+    navEl.classList.add("hidden");
+    setStatus("No games found for selected collection/state.");
     return;
   }
+
   const appId = queueIds[queueIndex];
   const item = state?.items?.[appId] || {};
   const intent = getIntent(appId);
   emptyEl.classList.add("hidden");
   cardEl.classList.remove("hidden");
+  navEl.classList.remove("hidden");
 
   const titleEl = document.getElementById("game-link");
   const appIdEl = document.getElementById("game-appid");
@@ -447,6 +498,7 @@ async function renderCurrent() {
     }
   }
 
+  fitLayoutToViewport();
   setStatus("Loading media...");
   const seq = ++mediaSeq;
   const media = await fetchMedia(appId);
@@ -460,6 +512,7 @@ async function renderCurrent() {
     images: media.images
   };
   renderMedia();
+  fitLayoutToViewport();
   setStatus(media.videos.length + media.images.length > 0 ? "Ready." : "No media for this game.");
 }
 
@@ -478,24 +531,31 @@ async function setIntent(appId, patch) {
   }
 }
 
-async function refreshQueueAndRender() {
+async function refreshStateOnly() {
   await loadState();
-  await loadWishlistOrder();
-  buildQueueIds();
+  populateCollectionSelect();
+}
+
+async function startQueue() {
+  await refreshStateOnly();
+  const collection = getCollectionSelection();
+  const stateFilter = getStateSelection();
+  queueIndex = 0;
+  buildQueueIds(collection, stateFilter);
+  await renderCurrent();
+}
+
+async function rerenderAfterAction() {
+  await loadState();
+  buildQueueIds(currentQueueConfig.collection, currentQueueConfig.state);
   await renderCurrent();
 }
 
 function bindEvents() {
-  document.getElementById("source-select")?.addEventListener("change", async () => {
-    queueIndex = 0;
-    persistUiState();
-    await refreshQueueAndRender();
+  document.getElementById("go-btn")?.addEventListener("click", async () => {
+    await startQueue();
   });
-  document.getElementById("search-input")?.addEventListener("input", async () => {
-    queueIndex = 0;
-    persistUiState();
-    await refreshQueueAndRender();
-  });
+
   document.getElementById("prev-btn")?.addEventListener("click", async () => {
     if (queueIds.length === 0) {
       return;
@@ -512,6 +572,7 @@ function bindEvents() {
     persistUiState();
     await renderCurrent();
   });
+
   document.getElementById("mode-video-btn")?.addEventListener("click", () => {
     if ((mediaState.videos || []).length === 0) {
       return;
@@ -559,7 +620,7 @@ function bindEvents() {
     }
     const intent = getIntent(appId);
     await setIntent(appId, { buy: intent.buy === 2 ? 0 : 2 });
-    await refreshQueueAndRender();
+    await rerenderAfterAction();
   });
   document.getElementById("action-maybe-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
@@ -568,7 +629,7 @@ function bindEvents() {
     }
     const intent = getIntent(appId);
     await setIntent(appId, { buy: intent.buy === 1 ? 0 : 1 });
-    await refreshQueueAndRender();
+    await rerenderAfterAction();
   });
   document.getElementById("action-track-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
@@ -577,7 +638,7 @@ function bindEvents() {
     }
     const intent = getIntent(appId);
     await setIntent(appId, { track: intent.track > 0 ? 0 : 1 });
-    await refreshQueueAndRender();
+    await rerenderAfterAction();
   });
   document.getElementById("action-archive-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
@@ -585,7 +646,7 @@ function bindEvents() {
       return;
     }
     await setIntent(appId, { track: 0, buy: 0, owned: true });
-    await refreshQueueAndRender();
+    await rerenderAfterAction();
   });
   document.getElementById("target-input")?.addEventListener("keydown", async (event) => {
     if (event.key !== "Enter") {
@@ -601,7 +662,7 @@ function bindEvents() {
     if (!raw) {
       await setIntent(appId, { targetPriceCents: null });
       setStatus("Target price cleared.");
-      await refreshQueueAndRender();
+      await rerenderAfterAction();
       return;
     }
     const amount = Number(raw);
@@ -611,14 +672,22 @@ function bindEvents() {
     }
     await setIntent(appId, { targetPriceCents: Math.round(amount * 100) });
     setStatus("Target price saved.");
-    await refreshQueueAndRender();
+    await rerenderAfterAction();
   });
+
+  window.addEventListener("resize", () => fitLayoutToViewport());
 }
 
 async function init() {
+  await loadState();
+  await loadWishlistOrder();
+  populateCollectionSelect();
   hydrateUiState();
   bindEvents();
-  await refreshQueueAndRender();
+  if (currentQueueConfig.collection) {
+    buildQueueIds(currentQueueConfig.collection, currentQueueConfig.state);
+    await renderCurrent();
+  }
 }
 
 init().catch((error) => {
