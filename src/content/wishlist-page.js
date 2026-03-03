@@ -1597,6 +1597,23 @@ function positionWishlistMediaTooltip(tooltip, anchorEl) {
   tooltip.style.top = `${Math.round(top)}px`;
 }
 
+function openWishlistSteamVideoPopup(appId) {
+  const id = String(appId || "").trim();
+  if (!id) {
+    return;
+  }
+  const url = `https://store.steampowered.com/video/${encodeURIComponent(id)}/?l=english`;
+  const width = 980;
+  const height = 640;
+  const left = Math.max(0, Math.floor((window.screen.width - width) / 2));
+  const top = Math.max(0, Math.floor((window.screen.height - height) / 2));
+  const features = `popup=yes,width=${width},height=${height},left=${left},top=${top},noopener,noreferrer`;
+  const popup = window.open(url, `swm-steam-video-${id}`, features);
+  if (!popup) {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
 function renderWishlistMediaTooltipState(tooltip) {
   if (!tooltip) {
     return;
@@ -1627,14 +1644,6 @@ function renderWishlistMediaTooltipState(tooltip) {
       iframe.style.height = "100%";
       iframe.style.border = "0";
       stage.appendChild(iframe);
-      const openLink = document.createElement("a");
-      openLink.href = `https://store.steampowered.com/video/${encodeURIComponent(String(state.appId))}/?l=english`;
-      openLink.target = "_blank";
-      openLink.rel = "noopener noreferrer";
-      openLink.textContent = "Open Steam video in new window";
-      openLink.style.display = "inline-block";
-      openLink.style.marginTop = "6px";
-      stage.appendChild(openLink);
     }
     if (status) {
       status.textContent = "Steam player preview (use link if embed is blocked).";
