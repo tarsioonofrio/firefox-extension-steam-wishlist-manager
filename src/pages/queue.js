@@ -93,20 +93,29 @@ function applyQueueLeftWidth(widthPx) {
   const queueBody = document.querySelector(".queue-body");
   const leftCol = document.querySelector(".queue-left");
   if (!queueBody || !leftCol) {
-    return;
+    return false;
   }
   const bodyWidth = queueBody.getBoundingClientRect().width || 0;
+  if (!(bodyWidth > 0)) {
+    return false;
+  }
   const minLeft = 260;
   const maxLeft = Math.max(minLeft, Math.floor(bodyWidth - 360));
   const next = Math.max(minLeft, Math.min(maxLeft, Math.floor(Number(widthPx) || 0)));
   queueBody.style.setProperty("--queue-left-width", `${next}px`);
+  return true;
 }
 
 function hydrateQueueLeftWidth() {
   try {
     const raw = Number(localStorage.getItem(QUEUE_LEFT_WIDTH_KEY) || 0);
     if (Number.isFinite(raw) && raw > 0) {
-      applyQueueLeftWidth(raw);
+      const applied = applyQueueLeftWidth(raw);
+      if (!applied) {
+        requestAnimationFrame(() => {
+          applyQueueLeftWidth(raw);
+        });
+      }
     }
   } catch {
     // noop
@@ -196,6 +205,14 @@ function resolveBaseIdsByCollection(collection) {
 }
 
 function buildQueueIds(collection, stateFilter) {
+  const deduped = getFilteredIds(collection, stateFilter);
+  queueIds = shuffleIds(deduped);
+  queueIndex = queueIds.length > 0 ? Math.min(queueIndex, queueIds.length - 1) : 0;
+  currentQueueConfig = { collection, state: stateFilter };
+  persistUiState();
+}
+
+function getFilteredIds(collection, stateFilter) {
   const base = resolveBaseIdsByCollection(collection);
   const deduped = [];
   const seen = new Set();
@@ -210,10 +227,24 @@ function buildQueueIds(collection, stateFilter) {
     deduped.push(appId);
     seen.add(appId);
   }
-  queueIds = shuffleIds(deduped);
-  queueIndex = queueIds.length > 0 ? Math.min(queueIndex, queueIds.length - 1) : 0;
-  currentQueueConfig = { collection, state: stateFilter };
-  persistUiState();
+  return deduped;
+}
+
+function reconcileQueueIds(collection, stateFilter, currentAppId = "") {
+  const allowedIds = getFilteredIds(collection, stateFilter);
+  const allowedSet = new Set(allowedIds);
+  const orderedExisting = queueIds.filter((appId) => allowedSet.has(appId));
+  const existingSet = new Set(orderedExisting);
+  const missing = allowedIds.filter((appId) => !existingSet.has(appId));
+  const nextQueueIds = orderedExisting.concat(shuffleIds(missing));
+  queueIds = nextQueueIds;
+  if (queueIds.length === 0) {
+    queueIndex = 0;
+  } else if (currentAppId && queueIds.includes(currentAppId)) {
+    queueIndex = queueIds.indexOf(currentAppId);
+  } else {
+    queueIndex = Math.max(0, Math.min(queueIndex, queueIds.length - 1));
+  }
 }
 
 async function fetchMeta(appId) {
@@ -565,6 +596,7 @@ async function renderCurrent() {
   cardEl.classList.remove("hidden");
   headerBarEl.classList.remove("hidden");
   navEl.classList.remove("hidden");
+  hydrateQueueLeftWidth();
 
   const titleEl = document.getElementById("game-link");
   const appIdEl = document.getElementById("game-appid");
@@ -693,11 +725,13 @@ async function startQueue() {
     headerBarEl.classList.remove("hidden");
   }
   await renderCurrent();
+  hydrateQueueLeftWidth();
+  fitLayoutToViewport();
 }
 
-async function rerenderAfterAction() {
+async function rerenderAfterAction(currentAppId = "") {
   await loadState();
-  buildQueueIds(currentQueueConfig.collection, currentQueueConfig.state);
+  reconcileQueueIds(currentQueueConfig.collection, currentQueueConfig.state, currentAppId);
   await renderCurrent();
 }
 
@@ -755,7 +789,7 @@ function bindEvents() {
     }
     const intent = getIntent(appId);
     await setIntent(appId, { buy: intent.buy === 2 ? 0 : 2 });
-    await rerenderAfterAction();
+    await rerenderAfterAction(appId);
   });
   document.getElementById("action-maybe-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
@@ -764,7 +798,7 @@ function bindEvents() {
     }
     const intent = getIntent(appId);
     await setIntent(appId, { buy: intent.buy === 1 ? 0 : 1 });
-    await rerenderAfterAction();
+    await rerenderAfterAction(appId);
   });
   document.getElementById("action-track-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
@@ -773,7 +807,7 @@ function bindEvents() {
     }
     const intent = getIntent(appId);
     await setIntent(appId, { track: intent.track > 0 ? 0 : 1 });
-    await rerenderAfterAction();
+    await rerenderAfterAction(appId);
   });
   document.getElementById("action-archive-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
@@ -781,7 +815,7 @@ function bindEvents() {
       return;
     }
     await setIntent(appId, { track: 0, buy: 0, owned: true });
-    await rerenderAfterAction();
+    await rerenderAfterAction(appId);
   });
   document.getElementById("target-input")?.addEventListener("keydown", async (event) => {
     if (event.key !== "Enter") {
@@ -797,7 +831,7 @@ function bindEvents() {
     if (!raw) {
       await setIntent(appId, { targetPriceCents: null });
       setStatus("Target price cleared.");
-      await rerenderAfterAction();
+      await rerenderAfterAction(appId);
       return;
     }
     const amount = Number(raw);
@@ -807,7 +841,7 @@ function bindEvents() {
     }
     await setIntent(appId, { targetPriceCents: Math.round(amount * 100) });
     setStatus("Target price saved.");
-    await rerenderAfterAction();
+    await rerenderAfterAction(appId);
   });
 
   const resizeHandle = document.getElementById("queue-column-resize-handle");

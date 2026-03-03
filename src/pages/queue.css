@@ -134,7 +134,7 @@ button.active {
 
 .queue-body {
   display: grid;
-  grid-template-columns: minmax(260px, var(--queue-left-width, 58vw)) 10px minmax(320px, 1fr);
+  grid-template-columns: minmax(260px, var(--queue-left-width, 75%)) 10px minmax(320px, 1fr);
   gap: 10px;
   min-height: 0;
 }
