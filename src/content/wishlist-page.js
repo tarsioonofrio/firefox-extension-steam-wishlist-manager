@@ -1177,7 +1177,7 @@ function ensureWishlistStateFilterControl(stateItems) {
     const options = [
       ["all", "All states"],
       ["inbox", "Inbox"],
-      ["buy", "Buy"],
+      ["buy", "Confirm"],
       ["maybe", "Maybe"],
       ["follow", "Follow"],
       ["archive", "Archive"]
@@ -2615,7 +2615,7 @@ function ensureWishlistRightFiltersPanel(stateItems) {
         <select id="swm-sidebar-state-select" class="swm-state-filter">
           <option value="all">All states</option>
           <option value="inbox">Inbox</option>
-          <option value="buy">Buy</option>
+          <option value="buy">Confirm</option>
           <option value="maybe">Maybe</option>
           <option value="follow">Follow</option>
           <option value="archive">Archive</option>
@@ -2885,7 +2885,7 @@ function setWishlistActionButtonsVisualState(container, intentState) {
 
   if (buyBtn) {
     buyBtn.classList.toggle("is-active", intentState.buy === 2);
-    buyBtn.textContent = "Buy";
+    buyBtn.textContent = "Confirm";
   }
   if (maybeBtn) {
     maybeBtn.classList.toggle("is-active", intentState.buy === 1);
@@ -2897,7 +2897,7 @@ function setWishlistActionButtonsVisualState(container, intentState) {
   }
   if (followBtn) {
     followBtn.classList.toggle("is-active", Boolean(intentState.track));
-    followBtn.textContent = intentState.track ? "Unfollow" : "Follow";
+    followBtn.textContent = "Follow";
   }
 }
 
