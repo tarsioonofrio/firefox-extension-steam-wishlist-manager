@@ -87,12 +87,42 @@ This section is the user-facing map of current screens and capabilities.
 
 ## States / Buckets Semantics
 
-- `Inbox`: default triage state (no strong decision yet).
-- `Maybe`: medium buy intent (`buy=1`, bucket `MAYBE`).
-- `Confirmed`: strong buy intent (`buy=2`, bucket `BUY`).
-- `Follow`: tracking intent (`track=1`) independent from buy intent.
-- `Archive`: considered done/owned (`owned=true`, `track=0`, `buy=0`, bucket `ARCHIVE`).
-- `Mute`: local visibility control only (not a bucket; does not change `buy`, `track`, or `owned`).
+- `Inbox`:
+  - Default triage state (no strong decision yet).
+  - If you do nothing, it stays in Inbox and remains available for later triage.
+- `Maybe` (`buy=1`, bucket `MAYBE`):
+  - Marks a possible purchase candidate.
+  - If you do nothing, it stays in Maybe; no automatic promotion or archive happens.
+- `Confirmed` (`buy=2`, bucket `BUY`):
+  - Marks confirmed purchase intent and keeps the game in active buy radar.
+  - In practice, this confirms the game should remain in your Steam wishlist until you intentionally change state (for example to Archive/owned).
+- `Follow` (`track=1`):
+  - Enables tracking/news intent independently from buy intent.
+  - If you do nothing, tracking stays enabled; it does not clear `Maybe`/`Confirmed`.
+- `Archive` (`owned=true`, `track=0`, `buy=0`, bucket `ARCHIVE`):
+  - Moves the game out of active triage/radar as done/owned.
+  - If you do nothing, it stays archived.
+- `Mute`:
+  - Local visibility control only (not a bucket); used to hide noise in feed/list views.
+  - It does not change `buy`, `track`, or `owned`.
+
+## Queue Automation (Time-Based Rules)
+
+Queue Automation is configured in **Configurations**:
+- `Save Queue Timeouts`: saves timeout policy in days (`Inbox`, `Maybe`, `Archive`).
+- `Run Queue Automation Now`: executes the sweep immediately (manual run with force).
+
+Current automated transitions:
+- `Inbox` (Steam-only signal: wishlisted, not followed, bucket `INBOX`, `buy=0`):
+  - when due, removes wishlist and enables follow (`TRACK`).
+- `Maybe`:
+  - when due, clears to `INBOX` and removes both wishlist and follow.
+- `Archive`:
+  - when due *and* without recent activity/promotion signal, clears to `INBOX` and removes wishlist/follow.
+
+Notes:
+- These are Queue Automation rules, not baseline bucket behavior.
+- Without a queue run (manual or scheduled), states remain as-is.
 
 ## Core Behavior
 
