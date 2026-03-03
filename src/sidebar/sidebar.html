@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wishlist Filters</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <main class="layout">
+    <header class="titlebar">
+      <h1>STEAM WM</h1>
+      <button id="close-sidebar" type="button" class="icon-btn" aria-label="Close sidebar">×</button>
+    </header>
+    <div class="section-divider"></div>
+
+    <h2>Filters</h2>
+
+    <details class="filter-group" open>
+      <summary>State</summary>
+      <div class="filter-content">
+        <div class="field">
+          <select id="state-filter">
+            <option value="all">All states</option>
+            <option value="inbox">Inbox</option>
+            <option value="buy">Buy</option>
+            <option value="maybe">Maybe</option>
+            <option value="follow">Follow</option>
+            <option value="archive">Archive</option>
+          </select>
+        </div>
+      </div>
+    </details>
+
+    <details class="filter-group" open>
+      <summary>Tags</summary>
+      <div class="filter-content">
+        <div class="field">
+          <input id="tags-search" type="search" placeholder="Search tags...">
+          <div id="tags-options" class="tag-options"></div>
+          <button id="tags-show-more" type="button" class="small-btn">Show more</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="filter-group" open>
+      <summary>Rating %</summary>
+      <div class="filter-content">
+        <div class="field">
+          <div class="grid2">
+            <input id="rating-min" type="number" min="0" max="100" step="1" value="0">
+            <input id="rating-max" type="number" min="0" max="100" step="1" value="100">
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="filter-group" open>
+      <summary>Reviews</summary>
+      <div class="filter-content">
+        <div class="field">
+          <div class="grid2">
+            <input id="reviews-min" type="number" min="0" step="1" value="0">
+            <input id="reviews-max" type="number" min="0" step="1" placeholder="max">
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="filter-group" open>
+      <summary>Price</summary>
+      <div class="filter-content">
+        <div class="field">
+          <div class="grid2">
+            <input id="price-min" type="number" min="0" step="0.01" value="0">
+            <input id="price-max" type="number" min="0" step="0.01" placeholder="max">
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="filter-group" open>
+      <summary>Discount %</summary>
+      <div class="filter-content">
+        <div class="field">
+          <div class="grid2">
+            <input id="discount-min" type="number" min="0" max="100" step="1" value="0">
+            <input id="discount-max" type="number" min="0" max="100" step="1" value="100">
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="filter-group" open>
+      <summary>Release Year</summary>
+      <div class="filter-content">
+        <label class="inline-toggle">
+          <input id="release-text-enabled" type="checkbox" checked>
+          <span>TBA/Soon</span>
+        </label>
+        <label class="inline-toggle">
+          <input id="release-year-range-enabled" type="checkbox" checked>
+          <span>Year range</span>
+        </label>
+        <div class="field">
+          <div class="grid2">
+            <input id="release-year-min" type="number" min="1970" step="1" value="1970">
+            <input id="release-year-max" type="number" min="1970" step="1" value="2027">
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="filter-group" open>
+      <summary>More Filters</summary>
+      <div class="filter-content">
+        <div id="extra-filters-root"></div>
+      </div>
+    </details>
+
+    <p id="status" class="status"></p>
+  </main>
+  <script src="sidebar.js"></script>
+</body>
+</html>

@@ -139,3 +139,8 @@ When MCP transport issues occur, prefer runbook flow over ad-hoc retries.
 - Default launcher script: `scripts/dev/start-firefox-with-extension.sh`
 - Under the hood this uses `scripts/dev/run-web-ext-steam-dev.sh` (profile `steam-dev`).
 - Do not launch plain `firefox` as the default workflow, because it starts without the temporary add-on.
+
+## README User Docs Rule
+- Keep the user-facing section `User Screens and Features` in `README.md` always updated.
+- Any change in page layout, screen names, entry points, or user-visible behavior must update this section in the same workstream/PR.
+- Do not ship user-facing UI/flow changes without reflecting them in that README section.

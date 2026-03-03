@@ -1,19 +1,51 @@
 const WISHLIST_ADDED_CACHE_KEY = "steamWishlistAddedMapV3";
+const WISHLIST_META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const ORDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const FOLLOW_UI_STYLE_ID = "swm-wishlist-follow-ui-style";
 const WISHLIST_ROW_SELECTOR = ".wishlist_row, [id^='game_'], [data-app-id], .c-Pw-ER6JnA-.Panel";
 const APP_LINK_SELECTOR = "a[href*='/app/']";
 const WISHLIST_STATE_FILTER_KEY = "swmWishlistStateFilter";
+const WISHLIST_TAG_SHOW_STEP = 12;
+const WISHLIST_MEDIA_TOOLTIP_ID = "swm-wishlist-media-tooltip";
+const WISHLIST_MEDIA_TOOLTIP_SIZE_KEY = "swm-media-tooltip-size-v1";
+const WISHLIST_MEDIA_FETCH_TIMEOUT_MS = 12000;
+const WISHLIST_MULTI_FILTER_KEYS = [
+  "types",
+  "players",
+  "features",
+  "hardware",
+  "accessibility",
+  "platforms",
+  "languages",
+  "fullAudioLanguages",
+  "subtitleLanguages",
+  "technologies",
+  "developers",
+  "publishers"
+];
+const WISHLIST_FILTERS_SIDEBAR_MODE = false;
+const WISHLIST_NATIVE_BROWSER_SIDEBAR_FILTERS = true;
 let domOrderSyncInFlight = false;
 let wishlistFollowUiScheduled = false;
 let wishlistFollowUiObserver = null;
 let wishlistFollowUiWindowHooksAdded = false;
+let wishlistDevRuntimeInfoLogged = false;
+let wishlistMediaDelegationBound = false;
+let wishlistMediaTooltipHoverSeq = 0;
+let wishlistMediaTooltipHideTimer = null;
+let wishlistSidebarShellEl = null;
+let wishlistSuppressDomSync = false;
 let wishlistStateCache = { items: {} };
 let wishlistStateLoadedAt = 0;
 let wishlistStateLoadPromise = null;
+let wishlistMetaCache = {};
+let wishlistMetaLoadedAt = 0;
+let wishlistMetaLoadPromise = null;
 let wishlistCurrentStateFilter = "all";
+let wishlistSelectedTags = new Set();
+let wishlistTagSearchQuery = "";
+let wishlistTagShowLimit = WISHLIST_TAG_SHOW_STEP;
 let wishlistAdvancedFilters = {
-  tagsQuery: "",
   ratingMin: 0,
   ratingMax: 100,
   reviewsMin: 0,
@@ -21,8 +53,15 @@ let wishlistAdvancedFilters = {
   priceMin: 0,
   priceMax: Number.MAX_SAFE_INTEGER,
   discountMin: 0,
-  discountMax: 100
+  discountMax: 100,
+  releaseTextEnabled: true,
+  releaseYearRangeEnabled: true,
+  releaseYearMin: 1970,
+  releaseYearMax: new Date().getUTCFullYear() + 1
 };
+let wishlistMultiFilters = Object.fromEntries(
+  WISHLIST_MULTI_FILTER_KEYS.map((key) => [key, new Set()])
+);
 const NON_FATAL_LOG_WINDOW_MS = 15000;
 const nonFatalLogAt = new Map();
 
@@ -695,6 +734,31 @@ function updateWishlistStateItemCache(appId, nextItem) {
   wishlistStateLoadedAt = Date.now();
 }
 
+async function loadWishlistMetaCache(force = false) {
+  const now = Date.now();
+  if (!force && wishlistMetaLoadPromise) {
+    return wishlistMetaLoadPromise;
+  }
+  if (!force && (now - wishlistMetaLoadedAt) < 30000) {
+    return wishlistMetaCache;
+  }
+  wishlistMetaLoadPromise = browser.storage.local.get(WISHLIST_META_CACHE_KEY)
+    .then((stored) => {
+      const cache = stored?.[WISHLIST_META_CACHE_KEY];
+      wishlistMetaCache = cache && typeof cache === "object" ? cache : {};
+      wishlistMetaLoadedAt = Date.now();
+      return wishlistMetaCache;
+    })
+    .catch((error) => {
+      reportNonFatal("wishlist-follow.load-meta-cache", error);
+      return wishlistMetaCache;
+    })
+    .finally(() => {
+      wishlistMetaLoadPromise = null;
+    });
+  return wishlistMetaLoadPromise;
+}
+
 function ensureWishlistFollowUiStyle() {
   if (document.getElementById(FOLLOW_UI_STYLE_ID)) {
     return;
@@ -705,31 +769,45 @@ function ensureWishlistFollowUiStyle() {
     .swm-row-with-follow {
       position: relative !important;
       margin-left: 0 !important;
-      margin-right: 210px !important;
-      width: calc(100% - 210px) !important;
+      margin-right: 0 !important;
+      width: auto !important;
       box-sizing: border-box !important;
       overflow: visible !important;
-      padding-left: 150px !important;
+      padding-left: 228px !important;
       min-height: 88px !important;
     }
     .swm-wishlist-actions {
       position: absolute;
       left: 8px;
       top: 8px;
-      width: 132px;
-      min-width: 132px;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-start;
+      width: 210px;
+      min-width: 210px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-areas:
+        "buy maybe archive"
+        "follow follow follow";
       align-items: stretch;
       gap: 4px;
       margin: 0;
       padding: 0;
       z-index: 50;
     }
+    .swm-wishlist-actions .swm-action-btn[data-action="buy"] {
+      grid-area: buy;
+    }
+    .swm-wishlist-actions .swm-action-btn[data-action="maybe"] {
+      grid-area: maybe;
+    }
+    .swm-wishlist-actions .swm-action-btn[data-action="archive"] {
+      grid-area: archive;
+    }
+    .swm-wishlist-actions .swm-action-btn[data-action="follow"] {
+      grid-area: follow;
+    }
     .swm-action-btn {
-      width: 100%;
-      min-width: 132px;
+      width: auto;
+      min-width: 0;
       border: 1px solid rgba(255, 255, 255, 0.25);
       border-radius: 2px;
       background: #4b5a67;
@@ -738,7 +816,7 @@ function ensureWishlistFollowUiStyle() {
       font-weight: 700;
       line-height: 22px;
       height: 22px;
-      padding: 0 10px;
+      padding: 0 4px;
       cursor: pointer;
       text-transform: uppercase;
       text-align: center;
@@ -756,13 +834,76 @@ function ensureWishlistFollowUiStyle() {
       opacity: 0.65;
       cursor: wait;
     }
+    .swm-wishlist-media-tooltip {
+      position: fixed;
+      z-index: 2147483002;
+      width: 360px;
+      max-width: 92vw;
+      background: rgba(11, 20, 31, 0.98);
+      border: 1px solid #3d556e;
+      border-radius: 8px;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+      padding: 8px;
+    }
+    .swm-wishlist-media-tooltip.hidden {
+      display: none !important;
+    }
+    .swm-wishlist-media-tooltip-stage {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #000;
+    }
+    .swm-wishlist-media-tooltip-video,
+    .swm-wishlist-media-tooltip-image {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+      background: #000;
+    }
+    .swm-wishlist-media-tooltip-status {
+      margin: 6px 0 0;
+      color: #9fb7cc;
+      font-size: 11px;
+    }
+    .swm-wishlist-media-tooltip-controls {
+      margin-top: 6px;
+      display: grid;
+      grid-template-columns: auto auto 1fr auto auto;
+      gap: 6px;
+      align-items: center;
+    }
+    .swm-wishlist-media-tooltip-controls button {
+      height: 24px;
+      min-width: 56px;
+      font-size: 11px;
+      padding: 0 8px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+      background: #2b3b4a;
+      color: #c7d5e0;
+      cursor: pointer;
+    }
+    .swm-wishlist-media-tooltip-controls button.active {
+      border-color: #6ca6ca;
+      background: #447196;
+    }
+    .swm-wishlist-media-tooltip-count {
+      text-align: center;
+      color: #9fb7cc;
+      font-size: 11px;
+    }
     .swm-state-filter-bar {
       display: flex !important;
       align-items: center !important;
       justify-content: flex-start !important;
+      gap: 8px !important;
+      flex-wrap: wrap !important;
       width: 100% !important;
       box-sizing: border-box !important;
-      margin: 6px 210px 10px 0 !important;
+      margin: 6px 0 10px 0 !important;
     }
     .swm-state-filter {
       position: static !important;
@@ -780,20 +921,97 @@ function ensureWishlistFollowUiStyle() {
       outline: 1px solid rgba(102, 192, 244, 0.65);
       outline-offset: 0;
     }
+    .swm-state-filter-bar .swm-tags-wrap {
+      position: relative;
+      display: inline-block;
+    }
+    .swm-state-filter-bar #swm-tags-search {
+      min-width: 180px;
+      height: 34px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 2px;
+      background: #1b2838;
+      color: #c7d5e0;
+      font-size: 12px;
+      padding: 0 8px;
+      box-sizing: border-box;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      z-index: 2147483001;
+      display: grid;
+      gap: 6px;
+      min-width: 320px;
+      max-height: 280px;
+      overflow: auto;
+      padding: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 4px;
+      background: rgba(18, 28, 42, 0.98);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+    }
+    .swm-state-filter-bar .swm-inline-tags-field.swm-tags-dropdown-hidden {
+      display: none !important;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .tag-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .tag-option {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      color: #c7d5e0;
+      font-size: 11px;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .tag-option input[type="checkbox"] {
+      width: 12px;
+      height: 12px;
+      margin: 0;
+      padding: 0;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .tag-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 120px;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .tag-count {
+      color: #8fa8bd;
+      min-width: 1.4em;
+      text-align: right;
+    }
+    .swm-state-filter-bar .swm-inline-tags-field .small-btn {
+      height: 34px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 2px;
+      background: #2b3b4a;
+      color: #c7d5e0;
+      font-size: 11px;
+      cursor: pointer;
+      padding: 0 10px;
+    }
     .swm-list-with-filters {
       position: relative !important;
       box-sizing: border-box !important;
     }
     .swm-right-filters {
       position: fixed !important;
-      top: 8px;
-      width: 196px;
+      top: 88px;
+      right: 8px;
+      width: 228px;
+      max-height: calc(100vh - 96px);
+      overflow: auto;
       box-sizing: border-box;
       padding: 10px;
       background: rgba(13, 29, 46, 0.85);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 2px;
-      z-index: 25;
+      z-index: 2147483000;
     }
     .swm-right-filters h4 {
       margin: 0 0 8px;
@@ -803,6 +1021,48 @@ function ensureWishlistFollowUiStyle() {
     }
     .swm-right-filters .swm-field {
       margin: 0 0 8px;
+    }
+    .swm-right-filters .tag-options {
+      max-height: 156px;
+      overflow: auto;
+      padding-right: 2px;
+      margin-top: 6px;
+    }
+    .swm-right-filters .tag-option {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      margin: 0 0 4px;
+      color: #c7d5e0;
+      font-size: 11px;
+    }
+    .swm-right-filters .tag-option input[type="checkbox"] {
+      width: 12px;
+      height: 12px;
+      margin: 0;
+      padding: 0;
+    }
+    .swm-right-filters .tag-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .swm-right-filters .tag-count {
+      color: #8fa8bd;
+      min-width: 1.4em;
+      text-align: right;
+    }
+    .swm-right-filters .small-btn {
+      width: 100%;
+      height: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 2px;
+      background: #2b3b4a;
+      color: #c7d5e0;
+      font-size: 11px;
+      cursor: pointer;
+      margin-top: 4px;
     }
     .swm-right-filters label {
       display: block;
@@ -827,30 +1087,16 @@ function ensureWishlistFollowUiStyle() {
       gap: 6px;
     }
     .swm-wishlist-actions.is-compact {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       grid-template-areas:
-        "buy buy"
-        "maybe archive"
-        "follow follow";
+        "buy maybe archive"
+        "follow follow follow";
     }
     .swm-wishlist-actions.is-compact .swm-action-btn {
       min-width: 0;
       width: auto;
       font-size: 10px;
-      padding: 0 4px;
-    }
-    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="buy"] {
-      grid-area: buy;
-    }
-    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="maybe"] {
-      grid-area: maybe;
-    }
-    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="archive"] {
-      grid-area: archive;
-    }
-    .swm-wishlist-actions.is-compact .swm-action-btn[data-action="follow"] {
-      grid-area: follow;
+      padding: 0 3px;
     }
   `;
   document.head.appendChild(style);
@@ -939,6 +1185,9 @@ function applyWishlistStateFilterToRows(rows, stateItems) {
 }
 
 function ensureWishlistStateFilterControl(stateItems) {
+  if (WISHLIST_FILTERS_SIDEBAR_MODE) {
+    return;
+  }
   const rows = getWishlistRows();
   const firstRow = rows?.[0];
   const listParent = firstRow?.parentElement;
@@ -965,7 +1214,7 @@ function ensureWishlistStateFilterControl(stateItems) {
     const options = [
       ["all", "All states"],
       ["inbox", "Inbox"],
-      ["buy", "Buy"],
+      ["buy", "Confirm"],
       ["maybe", "Maybe"],
       ["follow", "Follow"],
       ["archive", "Archive"]
@@ -989,10 +1238,846 @@ function ensureWishlistStateFilterControl(stateItems) {
     bar.appendChild(select);
   }
 
+  let tagsWrap = document.getElementById("swm-tags-wrap");
+  if (!tagsWrap) {
+    tagsWrap = document.createElement("div");
+    tagsWrap.id = "swm-tags-wrap";
+    tagsWrap.className = "swm-tags-wrap";
+  }
+  if (tagsWrap.parentElement !== bar) {
+    bar.appendChild(tagsWrap);
+  }
+
+  let tagSearchInput = document.getElementById("swm-tags-search");
+  if (!tagSearchInput) {
+    tagSearchInput = document.createElement("input");
+    tagSearchInput.id = "swm-tags-search";
+    tagSearchInput.type = "search";
+    tagSearchInput.placeholder = "Search tags...";
+  }
+  if (tagSearchInput.parentElement !== tagsWrap) {
+    tagsWrap.appendChild(tagSearchInput);
+  }
+
+  let tagsField = document.getElementById("swm-inline-tags-field");
+  if (!tagsField) {
+    tagsField = document.createElement("div");
+    tagsField.id = "swm-inline-tags-field";
+    tagsField.className = "swm-inline-tags-field swm-tags-dropdown-hidden";
+    tagsField.innerHTML = `
+      <div id="swm-tags-options" class="tag-options"></div>
+      <button id="swm-tags-show-more" type="button" class="small-btn">Show more</button>
+    `;
+  }
+  if (tagsField.parentElement !== tagsWrap) {
+    tagsWrap.appendChild(tagsField);
+  }
+
+  const syncTagsDropdownVisibility = () => {
+    const show = String(tagSearchInput?.value || "").trim().length > 0;
+    tagsField.classList.toggle("swm-tags-dropdown-hidden", !show);
+    if (show) {
+      renderWishlistTagOptions(bar, stateItems);
+    }
+  };
+
+  if (tagSearchInput && !tagSearchInput.dataset.swmBound) {
+    tagSearchInput.dataset.swmBound = "1";
+    tagSearchInput.addEventListener("input", () => {
+      wishlistTagSearchQuery = String(tagSearchInput.value || "").slice(0, 60);
+      wishlistTagShowLimit = WISHLIST_TAG_SHOW_STEP;
+      syncTagsDropdownVisibility();
+    });
+    tagSearchInput.addEventListener("focus", () => {
+      syncTagsDropdownVisibility();
+    });
+  }
+  const tagShowMoreBtn = bar.querySelector("#swm-tags-show-more");
+  if (tagShowMoreBtn && !tagShowMoreBtn.dataset.swmBound) {
+    tagShowMoreBtn.dataset.swmBound = "1";
+    tagShowMoreBtn.addEventListener("click", () => {
+      wishlistTagShowLimit += WISHLIST_TAG_SHOW_STEP;
+      renderWishlistTagOptions(bar, stateItems);
+    });
+  }
+  if (tagsWrap && !tagsWrap.dataset.swmBound) {
+    tagsWrap.dataset.swmBound = "1";
+    document.addEventListener("click", (event) => {
+      if (!tagsWrap.contains(event.target)) {
+        tagsField.classList.add("swm-tags-dropdown-hidden");
+      }
+    }, true);
+  }
+  syncTagsDropdownVisibility();
+
   if (!wishlistCurrentStateFilter) {
     wishlistCurrentStateFilter = "all";
   }
   select.value = wishlistCurrentStateFilter;
+}
+
+function clearWishlistMediaTooltipHideTimer() {
+  if (wishlistMediaTooltipHideTimer) {
+    clearTimeout(wishlistMediaTooltipHideTimer);
+    wishlistMediaTooltipHideTimer = null;
+  }
+}
+
+function scheduleWishlistMediaTooltipHide(delayMs = 120) {
+  clearWishlistMediaTooltipHideTimer();
+  wishlistMediaTooltipHideTimer = setTimeout(() => {
+    const tooltip = document.getElementById(WISHLIST_MEDIA_TOOLTIP_ID);
+    if (tooltip) {
+      tooltip.classList.add("hidden");
+    }
+  }, Math.max(0, Number(delayMs || 0)));
+}
+
+function readWishlistTooltipSize() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WISHLIST_MEDIA_TOOLTIP_SIZE_KEY) || "{}");
+    const width = Number(parsed?.width || 0);
+    return {
+      width: Number.isFinite(width) ? Math.max(280, Math.min(900, Math.round(width))) : 0
+    };
+  } catch {
+    return { width: 0 };
+  }
+}
+
+function saveWishlistTooltipSize(tooltip) {
+  if (!(tooltip instanceof HTMLElement)) {
+    return;
+  }
+  const width = Math.max(280, Math.min(900, Math.round(Number(tooltip.offsetWidth || 0))));
+  try {
+    localStorage.setItem(WISHLIST_MEDIA_TOOLTIP_SIZE_KEY, JSON.stringify({ width }));
+  } catch {
+    // noop
+  }
+}
+
+function getWishlistTooltipChromeHeight(tooltip) {
+  if (!(tooltip instanceof HTMLElement)) {
+    return 96;
+  }
+  const px = (value) => {
+    const n = Number.parseFloat(String(value || "0"));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const computed = getComputedStyle(tooltip);
+  const status = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+  const controls = tooltip.querySelector(".swm-wishlist-media-tooltip-controls");
+  const statusStyle = status ? getComputedStyle(status) : null;
+  const controlsStyle = controls ? getComputedStyle(controls) : null;
+  const chrome = (
+    px(computed.paddingTop)
+    + px(computed.paddingBottom)
+    + px(computed.borderTopWidth)
+    + px(computed.borderBottomWidth)
+    + (status ? status.getBoundingClientRect().height : 0)
+    + (controls ? controls.getBoundingClientRect().height : 0)
+    + (statusStyle ? px(statusStyle.marginTop) + px(statusStyle.marginBottom) : 0)
+    + (controlsStyle ? px(controlsStyle.marginTop) + px(controlsStyle.marginBottom) : 0)
+  );
+  return Math.max(72, Math.min(220, Math.round(chrome || 96)));
+}
+
+function applyWishlistTooltipProportionalSize(tooltip, preferredWidth = 0) {
+  if (!(tooltip instanceof HTMLElement)) {
+    return;
+  }
+  const fallbackWidth = Number(tooltip.offsetWidth || 360) || 360;
+  const width = Math.max(280, Math.min(900, Math.round(Number(preferredWidth || fallbackWidth))));
+  const chromeHeight = getWishlistTooltipChromeHeight(tooltip);
+  const stageHeight = Math.round(width * 9 / 16);
+  const height = Math.max(210, Math.min(760, stageHeight + chromeHeight));
+  tooltip.style.width = `${width}px`;
+  tooltip.style.height = `${height}px`;
+}
+
+function enableWishlistTooltipResizePersistence(tooltip) {
+  if (!(tooltip instanceof HTMLElement) || tooltip.dataset.swmResizeBound === "1") {
+    return;
+  }
+  tooltip.dataset.swmResizeBound = "1";
+  tooltip.style.resize = "both";
+  tooltip.style.overflow = "hidden";
+  let debounce = null;
+  let applyingSize = false;
+  const observer = new ResizeObserver(() => {
+    if (tooltip.classList.contains("hidden") || applyingSize) {
+      return;
+    }
+    const expectedWidth = Math.max(280, Math.min(900, Math.round(Number(tooltip.offsetWidth || 0))));
+    const chromeHeight = getWishlistTooltipChromeHeight(tooltip);
+    const expectedHeight = Math.max(210, Math.min(760, Math.round((expectedWidth * 9 / 16) + chromeHeight)));
+    if (Math.abs(expectedHeight - Number(tooltip.offsetHeight || 0)) > 1) {
+      applyingSize = true;
+      tooltip.style.height = `${expectedHeight}px`;
+      requestAnimationFrame(() => {
+        applyingSize = false;
+      });
+    }
+    clearTimeout(debounce);
+    debounce = setTimeout(() => saveWishlistTooltipSize(tooltip), 180);
+  });
+  observer.observe(tooltip);
+}
+
+function normalizeWishlistMediaUrl(rawUrl) {
+  const url = String(rawUrl || "")
+    .trim()
+    .replace(/\\u0026/gi, "&")
+    .replace(/\\x26/gi, "&")
+    .replace(/\\u002f/gi, "/")
+    .replace(/&amp;/gi, "&")
+    .replace(/\\\//g, "/");
+  if (!url) {
+    return "";
+  }
+  if (url.startsWith("//")) {
+    return `https:${url}`;
+  }
+  return url;
+}
+
+function deriveWishlistManifestVideoCandidates(rawManifestUrl) {
+  const manifestUrl = normalizeWishlistMediaUrl(rawManifestUrl);
+  if (!manifestUrl) {
+    return [];
+  }
+  const queryIndex = manifestUrl.indexOf("?");
+  const query = queryIndex >= 0 ? manifestUrl.slice(queryIndex) : "";
+  const base = queryIndex >= 0 ? manifestUrl.slice(0, queryIndex) : manifestUrl;
+  const slashIndex = base.lastIndexOf("/");
+  if (slashIndex < 0) {
+    return [manifestUrl];
+  }
+  const dir = base.slice(0, slashIndex + 1);
+  return [
+    `${dir}movie_max.mp4${query}`,
+    `${dir}movie480.mp4${query}`,
+    `${dir}movie_max.webm${query}`,
+    `${dir}movie480.webm${query}`,
+    `${dir}trailer.mp4${query}`,
+    `${dir}trailer_480p.mp4${query}`
+  ];
+}
+
+function deriveWishlistStaticMovieCandidates(movie) {
+  const out = [];
+  const movieId = String(movie?.id || "").trim();
+  const thumbUrl = normalizeWishlistMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
+  const thumbQueryIndex = thumbUrl.indexOf("?");
+  const thumbQuery = thumbQueryIndex >= 0 ? thumbUrl.slice(thumbQueryIndex) : "";
+  if (movieId) {
+    out.push(
+      `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie_max.mp4${thumbQuery}`,
+      `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie480.mp4${thumbQuery}`,
+      `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie_max.webm${thumbQuery}`,
+      `https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/${movieId}/movie480.webm${thumbQuery}`
+    );
+  }
+  if (thumbUrl) {
+    const queryIndex = thumbUrl.indexOf("?");
+    const query = queryIndex >= 0 ? thumbUrl.slice(queryIndex) : "";
+    const base = queryIndex >= 0 ? thumbUrl.slice(0, queryIndex) : thumbUrl;
+    const slashIndex = base.lastIndexOf("/");
+    if (slashIndex > 0) {
+      const dir = base.slice(0, slashIndex + 1);
+      out.push(
+        `${dir}movie_max.mp4${query}`,
+        `${dir}movie480.mp4${query}`,
+        `${dir}movie_max.webm${query}`,
+        `${dir}movie480.webm${query}`
+      );
+    }
+  }
+  return out;
+}
+
+function parseWishlistStoreMedia(htmlText) {
+  const rawHtml = String(htmlText || "");
+  const doc = new DOMParser().parseFromString(rawHtml, "text/html");
+  const videos = [];
+  const images = [];
+  const seenVideos = new Set();
+  const seenImages = new Set();
+
+  const movieNodes = doc.querySelectorAll(".highlight_movie, [id^='highlight_movie_']");
+  for (const movie of movieNodes) {
+    const sourceNodes = movie.querySelectorAll("video source, source");
+    const sourceCandidates = [
+      movie.getAttribute("data-mp4-source"),
+      movie.getAttribute("data-webm-source"),
+      ...Array.from(sourceNodes).map((node) => node.getAttribute("src"))
+    ];
+    let videoUrl = "";
+    for (const candidate of sourceCandidates) {
+      const normalized = normalizeWishlistMediaUrl(candidate);
+      if (!normalized) {
+        continue;
+      }
+      videoUrl = normalized;
+      break;
+    }
+    if (!videoUrl || seenVideos.has(videoUrl)) {
+      continue;
+    }
+    seenVideos.add(videoUrl);
+    const posterEl = movie.querySelector("img");
+    const posterUrl = normalizeWishlistMediaUrl(
+      movie.getAttribute("data-poster")
+      || posterEl?.getAttribute("src")
+      || posterEl?.getAttribute("data-src")
+    );
+    videos.push({ url: videoUrl, posterUrl });
+  }
+
+  // Fallback: parse direct mp4/webm links embedded in script blobs/escaped strings.
+  const directVideoMatches = Array.from(
+    rawHtml.matchAll(/https?:\\?\/\\?\/[^"'\\\s<>()]+?\.(?:mp4|webm)(?:\?[^"'\\\s<>()]*)?/gi)
+  );
+  for (const match of directVideoMatches) {
+    const raw = String(match?.[0] || "").replace(/\\\//g, "/");
+    const videoUrl = normalizeWishlistMediaUrl(raw);
+    if (!videoUrl || seenVideos.has(videoUrl)) {
+      continue;
+    }
+    seenVideos.add(videoUrl);
+    videos.push({ url: videoUrl, posterUrl: "" });
+  }
+
+  const imageNodes = doc.querySelectorAll(
+    ".highlight_strip_screenshot img, .highlight_screenshot_link img, [id^='thumb_screenshot_'] img"
+  );
+  for (const img of imageNodes) {
+    const imageUrl = normalizeWishlistMediaUrl(img.getAttribute("src") || img.getAttribute("data-src"));
+    if (!imageUrl || seenImages.has(imageUrl)) {
+      continue;
+    }
+    seenImages.add(imageUrl);
+    images.push(imageUrl);
+  }
+
+  return { videos, images };
+}
+
+async function fetchWishlistAppDetailsMedia(appId) {
+  const id = String(appId || "").trim();
+  if (!id) {
+    return { videos: [], images: [] };
+  }
+  const videos = [];
+  const images = [];
+  const seenVideos = new Set();
+  const seenImages = new Set();
+  const addFromData = (data) => {
+    for (const movie of Array.isArray(data?.movies) ? data.movies : []) {
+      const candidates = [
+        movie?.mp4?.max,
+        movie?.mp4?.["480"],
+        movie?.webm?.max,
+        movie?.webm?.["480"],
+        ...deriveWishlistStaticMovieCandidates(movie),
+        ...deriveWishlistManifestVideoCandidates(movie?.dash_h264),
+        ...deriveWishlistManifestVideoCandidates(movie?.hls_h264),
+        ...deriveWishlistManifestVideoCandidates(movie?.dash_av1)
+      ];
+      let picked = "";
+      for (const candidate of candidates) {
+        const normalized = normalizeWishlistMediaUrl(candidate);
+        if (!normalized || seenVideos.has(normalized)) {
+          continue;
+        }
+        picked = normalized;
+        break;
+      }
+      if (!picked) {
+        continue;
+      }
+      seenVideos.add(picked);
+      const posterUrl = normalizeWishlistMediaUrl(movie?.thumbnail || movie?.highlight_thumbnail);
+      videos.push({ url: picked, posterUrl });
+    }
+
+    for (const screenshot of Array.isArray(data?.screenshots) ? data.screenshots : []) {
+      const imageUrl = normalizeWishlistMediaUrl(screenshot?.path_full || screenshot?.path_thumbnail);
+      if (!imageUrl || seenImages.has(imageUrl)) {
+        continue;
+      }
+      seenImages.add(imageUrl);
+      images.push(imageUrl);
+    }
+  };
+
+  const ccCandidates = ["us", "br", ""];
+  for (const cc of ccCandidates) {
+    const ccParam = cc ? `&cc=${encodeURIComponent(cc)}` : "";
+    const url = `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(id)}&l=english${ccParam}&filters=movies,screenshots`;
+    try {
+      const json = await fetch(url, { cache: "no-store", credentials: "include" }).then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json();
+      });
+      const entry = json?.[id];
+      const data = entry?.success ? (entry.data || {}) : {};
+      addFromData(data);
+    } catch {
+      continue;
+    }
+    if (videos.length > 0 && images.length > 0) {
+      break;
+    }
+  }
+
+  if (videos.length === 0) {
+    const microTrailerCandidates = [
+      `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}/microtrailer.mp4`,
+      `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${id}/microtrailer.webm`
+    ];
+    for (const candidate of microTrailerCandidates) {
+      const normalized = normalizeWishlistMediaUrl(candidate);
+      if (!normalized || seenVideos.has(normalized)) {
+        continue;
+      }
+      seenVideos.add(normalized);
+      videos.push({ url: normalized, posterUrl: "" });
+    }
+  }
+
+  return { videos, images };
+}
+
+function ensureWishlistMediaTooltip() {
+  let tooltip = document.getElementById(WISHLIST_MEDIA_TOOLTIP_ID);
+  if (tooltip) {
+    return tooltip;
+  }
+  tooltip = document.createElement("div");
+  tooltip.id = WISHLIST_MEDIA_TOOLTIP_ID;
+  tooltip.className = "swm-wishlist-media-tooltip hidden";
+  tooltip.innerHTML = `
+    <div class="swm-wishlist-media-tooltip-stage"></div>
+    <p class="swm-wishlist-media-tooltip-status">Hover a capsule to preview media.</p>
+    <div class="swm-wishlist-media-tooltip-controls">
+      <button type="button" data-mode="video">Videos</button>
+      <button type="button" data-mode="image">Images</button>
+      <button type="button" data-nav="prev" aria-label="Previous">‹</button>
+      <span class="swm-wishlist-media-tooltip-count">0/0</span>
+      <button type="button" data-nav="next" aria-label="Next">›</button>
+    </div>
+  `;
+  tooltip._state = { mode: "video", index: 0, videos: [], images: [] };
+  enableWishlistTooltipResizePersistence(tooltip);
+  tooltip.addEventListener("mouseenter", () => clearWishlistMediaTooltipHideTimer());
+  tooltip.addEventListener("mouseleave", () => scheduleWishlistMediaTooltipHide(120));
+  tooltip.addEventListener("click", (event) => {
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    if (!target) {
+      return;
+    }
+    const state = tooltip._state || {};
+    const mode = target.getAttribute("data-mode");
+    if (mode === "video" && Array.isArray(state.videos) && state.videos.length > 0) {
+      state.mode = "video";
+      state.index = 0;
+      renderWishlistMediaTooltipState(tooltip);
+      return;
+    }
+    if (mode === "image" && Array.isArray(state.images) && state.images.length > 0) {
+      state.mode = "image";
+      state.index = 0;
+      renderWishlistMediaTooltipState(tooltip);
+      return;
+    }
+    const nav = target.getAttribute("data-nav");
+    const activeList = state.mode === "image" ? state.images : state.videos;
+    if (!nav || !Array.isArray(activeList) || activeList.length === 0) {
+      return;
+    }
+    state.index = nav === "prev"
+      ? (state.index - 1 + activeList.length) % activeList.length
+      : (state.index + 1) % activeList.length;
+    renderWishlistMediaTooltipState(tooltip);
+  });
+  document.body.appendChild(tooltip);
+  return tooltip;
+}
+
+function positionWishlistMediaTooltip(tooltip, anchorEl) {
+  if (!tooltip || !anchorEl) {
+    return;
+  }
+  const saved = readWishlistTooltipSize();
+  if (saved.width > 0) {
+    applyWishlistTooltipProportionalSize(tooltip, saved.width);
+  } else {
+    applyWishlistTooltipProportionalSize(tooltip, Number(tooltip.offsetWidth || 360));
+  }
+  const rect = anchorEl.getBoundingClientRect();
+  const width = Math.max(340, Number(tooltip.offsetWidth || 0));
+  const height = Math.max(220, Number(tooltip.offsetHeight || 0));
+  const margin = 10;
+  const left = Math.max(
+    margin,
+    Math.min(window.innerWidth - width - margin, rect.right + margin)
+  );
+  const top = Math.max(
+    margin,
+    Math.min(window.innerHeight - height - margin, rect.top + ((rect.height - height) / 2))
+  );
+  tooltip.style.left = `${Math.round(left)}px`;
+  tooltip.style.top = `${Math.round(top)}px`;
+}
+
+function openWishlistSteamVideoPopup(appId) {
+  const id = String(appId || "").trim();
+  if (!id) {
+    return;
+  }
+  const url = `https://store.steampowered.com/video/${encodeURIComponent(id)}/?l=english`;
+  const width = 980;
+  const height = 640;
+  const left = Math.max(0, Math.floor((window.screen.width - width) / 2));
+  const top = Math.max(0, Math.floor((window.screen.height - height) / 2));
+  const features = `popup=yes,width=${width},height=${height},left=${left},top=${top},noopener,noreferrer`;
+  const popup = window.open(url, `swm-steam-video-${id}`, features);
+  if (!popup) {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
+function renderWishlistMediaTooltipState(tooltip) {
+  if (!tooltip) {
+    return;
+  }
+  const state = tooltip._state || {};
+  const stage = tooltip.querySelector(".swm-wishlist-media-tooltip-stage");
+  const status = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+  const count = tooltip.querySelector(".swm-wishlist-media-tooltip-count");
+  const videoBtn = tooltip.querySelector("[data-mode='video']");
+  const imageBtn = tooltip.querySelector("[data-mode='image']");
+  const prevBtn = tooltip.querySelector("[data-nav='prev']");
+  const nextBtn = tooltip.querySelector("[data-nav='next']");
+  const videos = Array.isArray(state.videos) ? state.videos : [];
+  const images = Array.isArray(state.images) ? state.images : [];
+  const mode = state.mode === "image" ? "image" : "video";
+  const active = mode === "video" ? videos : images;
+  const showSteamPlayerFallback = Boolean(state.steamPlayerFallback && state.appId);
+
+  if (showSteamPlayerFallback) {
+    if (stage) {
+      stage.innerHTML = "";
+      const iframe = document.createElement("iframe");
+      iframe.className = "swm-wishlist-media-tooltip-video";
+      iframe.src = `https://store.steampowered.com/video/${encodeURIComponent(String(state.appId))}/?l=english`;
+      iframe.setAttribute("allow", "autoplay; fullscreen");
+      iframe.setAttribute("referrerpolicy", "no-referrer-when-downgrade");
+      iframe.style.width = "100%";
+      iframe.style.height = "100%";
+      iframe.style.border = "0";
+      stage.appendChild(iframe);
+    }
+    if (status) {
+      status.textContent = "Steam player preview (use link if embed is blocked).";
+    }
+    if (count) {
+      count.textContent = "—";
+    }
+    if (videoBtn) {
+      videoBtn.disabled = false;
+      videoBtn.classList.add("active");
+    }
+    if (imageBtn) {
+      imageBtn.disabled = images.length === 0;
+      imageBtn.classList.remove("active");
+    }
+    if (prevBtn) {
+      prevBtn.disabled = true;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = true;
+    }
+    return;
+  }
+
+  if (!Array.isArray(active) || active.length === 0) {
+    if (stage) {
+      stage.innerHTML = "";
+    }
+    if (status) {
+      status.textContent = "No media available for this game.";
+    }
+    if (count) {
+      count.textContent = "0/0";
+    }
+    if (videoBtn) {
+      videoBtn.disabled = videos.length === 0;
+      videoBtn.classList.toggle("active", mode === "video");
+    }
+    if (imageBtn) {
+      imageBtn.disabled = images.length === 0;
+      imageBtn.classList.toggle("active", mode === "image");
+    }
+    if (prevBtn) {
+      prevBtn.disabled = true;
+    }
+    if (nextBtn) {
+      nextBtn.disabled = true;
+    }
+    return;
+  }
+
+  state.index = Math.max(0, Math.min(active.length - 1, Number(state.index || 0)));
+  const current = active[state.index];
+  if (stage) {
+    stage.innerHTML = "";
+    if (mode === "video") {
+      const video = document.createElement("video");
+      video.className = "swm-wishlist-media-tooltip-video";
+      video.src = String(current?.url || "");
+      if (current?.posterUrl) {
+        video.poster = String(current.posterUrl);
+      }
+      video.controls = true;
+      video.autoplay = true;
+      video.muted = true;
+      video.loop = videos.length <= 1;
+      video.playsInline = true;
+      video.preload = "none";
+      video.addEventListener("ended", () => {
+        const nextState = tooltip._state && typeof tooltip._state === "object" ? tooltip._state : null;
+        if (!nextState || nextState.mode !== "video") {
+          return;
+        }
+        const nextVideos = Array.isArray(nextState.videos) ? nextState.videos : [];
+        if (nextVideos.length === 0) {
+          return;
+        }
+        nextState.index = (Number(nextState.index || 0) + 1) % nextVideos.length;
+        renderWishlistMediaTooltipState(tooltip);
+      });
+      video.addEventListener("error", () => {
+        const nextState = tooltip._state && typeof tooltip._state === "object" ? tooltip._state : {};
+        if (nextState.appId && !nextState.steamPlayerFallback) {
+          nextState.steamPlayerFallback = true;
+          renderWishlistMediaTooltipState(tooltip);
+          const nextStatus = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+          if (nextStatus) {
+            nextStatus.textContent = "Direct video failed; opening Steam player preview.";
+          }
+          return;
+        }
+        const fallbackImages = Array.isArray(nextState.images) ? nextState.images : [];
+        if (fallbackImages.length > 0 && nextState.mode === "video" && !nextState.videoFallbackUsed) {
+          nextState.videoFallbackUsed = true;
+          nextState.mode = "image";
+          nextState.index = Math.max(0, Math.min(fallbackImages.length - 1, nextState.index || 0));
+          renderWishlistMediaTooltipState(tooltip);
+          const nextStatus = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+          if (nextStatus) {
+            nextStatus.textContent = "Video unavailable for this game; showing screenshots.";
+          }
+          return;
+        }
+        const nextStatus = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+        if (nextStatus) {
+          nextStatus.textContent = "Video unavailable for this game.";
+        }
+      });
+      stage.appendChild(video);
+    } else {
+      const image = document.createElement("img");
+      image.className = "swm-wishlist-media-tooltip-image";
+      image.src = String(current || "");
+      image.alt = `Screenshot ${state.index + 1}`;
+      stage.appendChild(image);
+    }
+  }
+  if (status) {
+    status.textContent = mode === "video" ? "Video preview" : "Screenshot preview";
+  }
+  if (count) {
+    count.textContent = `${state.index + 1}/${active.length}`;
+  }
+  if (videoBtn) {
+    videoBtn.disabled = videos.length === 0;
+    videoBtn.classList.toggle("active", mode === "video");
+  }
+  if (imageBtn) {
+    imageBtn.disabled = images.length === 0;
+    imageBtn.classList.toggle("active", mode === "image");
+  }
+  if (prevBtn) {
+    prevBtn.disabled = active.length < 2;
+  }
+  if (nextBtn) {
+    nextBtn.disabled = active.length < 2;
+  }
+}
+
+async function openWishlistMediaTooltip(anchorEl, appId) {
+  const tooltip = ensureWishlistMediaTooltip();
+  const normalizedAppId = String(appId || "").trim();
+  const currentState = tooltip._state && typeof tooltip._state === "object" ? tooltip._state : {};
+  if (currentState.loading && String(currentState.appId || "") === normalizedAppId) {
+    positionWishlistMediaTooltip(tooltip, anchorEl);
+    return;
+  }
+  clearWishlistMediaTooltipHideTimer();
+  tooltip.classList.remove("hidden");
+  positionWishlistMediaTooltip(tooltip, anchorEl);
+  tooltip._state = { appId: normalizedAppId, mode: "video", index: 0, videos: [], images: [], loading: true };
+  renderWishlistMediaTooltipState(tooltip);
+  const status = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+  if (status) {
+    status.textContent = "Loading media from Steam page...";
+  }
+  const seq = ++wishlistMediaTooltipHoverSeq;
+  const url = `https://store.steampowered.com/app/${encodeURIComponent(normalizedAppId)}/?l=english`;
+  try {
+    const htmlText = await Promise.race([
+      fetch(url, { cache: "no-store", credentials: "include" }).then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.text();
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("media fetch timeout")), WISHLIST_MEDIA_FETCH_TIMEOUT_MS))
+    ]);
+    if (seq !== wishlistMediaTooltipHoverSeq) {
+      return;
+    }
+    const media = parseWishlistStoreMedia(htmlText);
+    let resolvedMedia = media;
+    if ((media.videos.length + media.images.length) === 0) {
+      try {
+        resolvedMedia = await Promise.race([
+          fetchWishlistAppDetailsMedia(normalizedAppId),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("appdetails media timeout")), WISHLIST_MEDIA_FETCH_TIMEOUT_MS))
+        ]);
+      } catch (fallbackError) {
+        reportNonFatal("wishlist-media.appdetails-fallback", fallbackError);
+      }
+    }
+    tooltip._state = {
+      appId: normalizedAppId,
+      mode: resolvedMedia.videos.length > 0 ? "video" : "image",
+      index: 0,
+      videos: resolvedMedia.videos,
+      images: resolvedMedia.images,
+      steamPlayerFallback: false,
+      loading: false
+    };
+    renderWishlistMediaTooltipState(tooltip);
+    positionWishlistMediaTooltip(tooltip, anchorEl);
+  } catch (error) {
+    if (seq !== wishlistMediaTooltipHoverSeq) {
+      return;
+    }
+    if (status) {
+      status.textContent = `Failed to load media: ${String(error?.message || "unknown error")}`;
+    }
+    tooltip._state = {
+      appId: normalizedAppId,
+      mode: "video",
+      index: 0,
+      videos: [],
+      images: [],
+      steamPlayerFallback: true,
+      loading: false
+    };
+  }
+}
+
+function bindWishlistRowMediaPreview(row, appId) {
+  if (!(row instanceof HTMLElement) || !appId) {
+    return;
+  }
+  if (row.dataset.swmMediaHoverBound === "1") {
+    return;
+  }
+  row.dataset.swmMediaHoverBound = "1";
+  const anchor = row.querySelector("a[href*='/app/'], .capsule, img, a");
+  const hoverTarget = anchor instanceof HTMLElement ? anchor : row;
+  hoverTarget.addEventListener("mouseenter", () => {
+    openWishlistMediaTooltip(hoverTarget, appId).catch((error) => reportNonFatal("wishlist-media.open", error));
+  });
+  hoverTarget.addEventListener("mouseleave", () => {
+    scheduleWishlistMediaTooltipHide(150);
+  });
+}
+
+function bindWishlistMediaTooltipDelegation() {
+  if (wishlistMediaDelegationBound) {
+    return;
+  }
+  wishlistMediaDelegationBound = true;
+  let lastHoverAppId = "";
+  let lastHoverAt = 0;
+
+  const resolveRowFromEventTarget = (target) => {
+    if (!(target instanceof Element)) {
+      return null;
+    }
+    const direct = target.closest(".wishlist_row, [id^='game_']");
+    if (direct instanceof HTMLElement) {
+      return direct;
+    }
+    const fallbackLink = target.closest(APP_LINK_SELECTOR);
+    return fallbackLink instanceof HTMLElement ? findWishlistRowFromAppLink(fallbackLink) : null;
+  };
+
+  document.addEventListener("pointerover", (event) => {
+    const row = resolveRowFromEventTarget(event.target);
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+    const appId = getAppIdFromWishlistRow(row);
+    const now = Date.now();
+    if (!appId) {
+      return;
+    }
+    if (appId === lastHoverAppId && (now - lastHoverAt) < 1000) {
+      return;
+    }
+    lastHoverAppId = appId;
+    lastHoverAt = now;
+    const anchor = row.querySelector("a[href*='/app/'], .capsule, img, a");
+    const hoverTarget = anchor instanceof HTMLElement ? anchor : row;
+    openWishlistMediaTooltip(hoverTarget, appId).catch((error) => reportNonFatal("wishlist-media.delegate-open", error));
+  }, true);
+
+  document.addEventListener("pointerout", (event) => {
+    const row = resolveRowFromEventTarget(event.target);
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+    const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+    if (related && row.contains(related)) {
+      return;
+    }
+    lastHoverAppId = "";
+    scheduleWishlistMediaTooltipHide(150);
+  }, true);
+
+  document.addEventListener("click", (event) => {
+    const row = resolveRowFromEventTarget(event.target);
+    if (!(row instanceof HTMLElement)) {
+      return;
+    }
+    const appId = getAppIdFromWishlistRow(row);
+    if (!appId) {
+      return;
+    }
+    const anchor = row.querySelector("a[href*='/app/'], .capsule, img, a");
+    const hoverTarget = anchor instanceof HTMLElement ? anchor : row;
+    openWishlistMediaTooltip(hoverTarget, appId).catch((error) => reportNonFatal("wishlist-media.delegate-click", error));
+  }, true);
 }
 
 function parseNumberLoose(value, fallback = 0) {
@@ -1010,15 +2095,134 @@ function parsePriceLoose(text) {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizeArrayFilterValue(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeWishlistMetaType(rawValue) {
+  const raw = normalizeArrayFilterValue(rawValue);
+  const lowered = raw.toLowerCase();
+  if (!raw) {
+    return "Unknown";
+  }
+  const known = {
+    game: "Game",
+    dlc: "DLC",
+    music: "Music",
+    demo: "Demo",
+    application: "Application",
+    video: "Video",
+    movie: "Video",
+    series: "Series",
+    tool: "Tool",
+    beta: "Beta"
+  };
+  return known[lowered] || raw;
+}
+
+function normalizeReleaseTextFilterValue(releaseText) {
+  const raw = normalizeArrayFilterValue(releaseText);
+  if (!raw || raw === "-") {
+    return "";
+  }
+  const lower = raw.toLowerCase();
+  if (lower.includes("coming soon") || lower === "soon") {
+    return "Soon";
+  }
+  if (lower.includes("tba") || lower.includes("to be announced")) {
+    return "TBA";
+  }
+  return "";
+}
+
+function extractYearFromReleaseText(releaseText) {
+  const match = String(releaseText || "").match(/\b(19\d{2}|20\d{2}|21\d{2})\b/);
+  if (!match?.[1]) {
+    return 0;
+  }
+  const n = Number(match[1]);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function getWishlistMetaArray(appId, key) {
+  const values = Array.isArray(wishlistMetaCache?.[appId]?.[key]) ? wishlistMetaCache[appId][key] : [];
+  return Array.from(
+    new Set(
+      values
+        .map(normalizeArrayFilterValue)
+        .filter(Boolean)
+    )
+  );
+}
+
+function getWishlistReleaseInfo(appId, rowText = "") {
+  const meta = appId ? (wishlistMetaCache?.[appId] || {}) : {};
+  const releaseText = String(meta?.releaseText || "").trim();
+  const textLabel = normalizeReleaseTextFilterValue(releaseText);
+  let year = 0;
+  const unix = Number(meta?.releaseUnix || 0);
+  if (Number.isFinite(unix) && unix > 0) {
+    year = new Date(unix * 1000).getUTCFullYear();
+  } else {
+    year = extractYearFromReleaseText(releaseText) || extractYearFromReleaseText(rowText);
+  }
+  return { textLabel, year };
+}
+
+function getRowTagNames(row) {
+  if (!(row instanceof HTMLElement)) {
+    return [];
+  }
+  const appId = getAppIdFromWishlistRow(row);
+  if (appId) {
+    const metaTags = Array.isArray(wishlistMetaCache?.[appId]?.tags)
+      ? wishlistMetaCache[appId].tags
+      : [];
+    if (metaTags.length > 0) {
+      return Array.from(
+        new Set(
+          metaTags
+            .map((v) => String(v || "").replace(/\s+/g, " ").trim())
+            .filter((v) => v && v.length <= 40)
+        )
+      ).slice(0, 20);
+    }
+  }
+  const names = [];
+  const seen = new Set();
+  const nodes = row.querySelectorAll(".app_tag, .match_tag, .tag, a[href*='/tags/'], [class*='app_tag']");
+  for (const node of nodes) {
+    const value = String(node?.textContent || "").replace(/\s+/g, " ").trim();
+    if (!value || value.length > 40 || value.length < 2) {
+      continue;
+    }
+    const key = value.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    names.push(value);
+  }
+  return names;
+}
+
 function extractRowMetrics(row, stateItems) {
   const appId = getAppIdFromWishlistRow(row);
   const item = appId ? (stateItems?.[appId] || {}) : {};
   const intent = getWishlistIntentState(item);
   const bucket = getWishlistBucket(intent);
+  const metaType = normalizeWishlistMetaType(
+    wishlistMetaCache?.[appId]?.appType
+    || wishlistMetaCache?.[appId]?.appTypeRaw
+    || ""
+  );
 
   const text = String(row?.textContent || "");
   const lower = text.toLowerCase();
   const title = getItemTitleFromWishlistRow(row).toLowerCase();
+  const tags = getRowTagNames(row);
+  const tagSetLower = new Set(tags.map((tag) => String(tag || "").toLowerCase()));
+  const releaseInfo = getWishlistReleaseInfo(appId, text);
 
   const ratingMatch = text.match(/(\d{1,3})\s?%/);
   const rating = ratingMatch ? Math.max(0, Math.min(100, parseNumberLoose(ratingMatch[1], -1))) : -1;
@@ -1052,9 +2256,28 @@ function extractRowMetrics(row, stateItems) {
   }
 
   return {
+    appId,
     bucket,
     title,
     lower,
+    tags,
+    tagSetLower,
+    type: metaType,
+    arrays: {
+      players: getWishlistMetaArray(appId, "players"),
+      features: getWishlistMetaArray(appId, "features"),
+      hardware: getWishlistMetaArray(appId, "hardware"),
+      accessibility: getWishlistMetaArray(appId, "accessibility"),
+      platforms: getWishlistMetaArray(appId, "platforms"),
+      languages: getWishlistMetaArray(appId, "languages"),
+      fullAudioLanguages: getWishlistMetaArray(appId, "fullAudioLanguages"),
+      subtitleLanguages: getWishlistMetaArray(appId, "subtitleLanguages"),
+      technologies: getWishlistMetaArray(appId, "technologies"),
+      developers: getWishlistMetaArray(appId, "developers"),
+      publishers: getWishlistMetaArray(appId, "publishers")
+    },
+    releaseTextLabel: releaseInfo.textLabel,
+    releaseYear: Number(releaseInfo.year || 0),
     rating,
     reviews,
     discount,
@@ -1062,11 +2285,40 @@ function extractRowMetrics(row, stateItems) {
   };
 }
 
+function matchesArraySet(selectedSet, values, requireAll = false) {
+  if (!(selectedSet instanceof Set) || selectedSet.size === 0) {
+    return true;
+  }
+  const valueSet = new Set(Array.isArray(values) ? values : []);
+  if (requireAll) {
+    for (const entry of selectedSet) {
+      if (!valueSet.has(entry)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  for (const entry of selectedSet) {
+    if (valueSet.has(entry)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function passesAdvancedFilters(metrics) {
   const f = wishlistAdvancedFilters || {};
-  const tagsQuery = String(f.tagsQuery || "").trim().toLowerCase();
-  if (tagsQuery && !(metrics.title.includes(tagsQuery) || metrics.lower.includes(tagsQuery))) {
-    return false;
+  if (wishlistSelectedTags.size > 0) {
+    let matched = false;
+    for (const tag of wishlistSelectedTags) {
+      if (metrics.tagSetLower?.has?.(tag)) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      return false;
+    }
   }
   if (metrics.rating >= 0) {
     if (metrics.rating < Number(f.ratingMin || 0) || metrics.rating > Number(f.ratingMax || 100)) {
@@ -1088,7 +2340,213 @@ function passesAdvancedFilters(metrics) {
       return false;
     }
   }
+  if (wishlistMultiFilters.types?.size > 0 && !wishlistMultiFilters.types.has(String(metrics.type || "Unknown"))) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.players, metrics.arrays?.players)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.features, metrics.arrays?.features)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.hardware, metrics.arrays?.hardware)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.accessibility, metrics.arrays?.accessibility)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.platforms, metrics.arrays?.platforms)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.languages, metrics.arrays?.languages)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.fullAudioLanguages, metrics.arrays?.fullAudioLanguages, true)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.subtitleLanguages, metrics.arrays?.subtitleLanguages, true)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.technologies, metrics.arrays?.technologies)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.developers, metrics.arrays?.developers)) {
+    return false;
+  }
+  if (!matchesArraySet(wishlistMultiFilters.publishers, metrics.arrays?.publishers)) {
+    return false;
+  }
+  const releaseTextEnabled = Boolean(f.releaseTextEnabled);
+  const releaseYearRangeEnabled = Boolean(f.releaseYearRangeEnabled);
+  if (releaseTextEnabled || releaseYearRangeEnabled) {
+    const textMatch = releaseTextEnabled ? Boolean(metrics.releaseTextLabel) : false;
+    const year = Number(metrics.releaseYear || 0);
+    const minYear = Number(f.releaseYearMin || 1970);
+    const maxYear = Number(f.releaseYearMax || (new Date().getUTCFullYear() + 1));
+    const rangeMatch = releaseYearRangeEnabled
+      ? (Number.isFinite(year) && year >= minYear && year <= maxYear)
+      : false;
+    if (releaseTextEnabled && releaseYearRangeEnabled) {
+      if (!textMatch && !rangeMatch) {
+        return false;
+      }
+    } else if (releaseTextEnabled && !textMatch) {
+      return false;
+    } else if (releaseYearRangeEnabled && !rangeMatch) {
+      return false;
+    }
+  }
   return true;
+}
+
+function buildWishlistTagCounts(rows) {
+  const counts = new Map();
+  for (const row of rows || []) {
+    for (const tag of getRowTagNames(row)) {
+      const key = String(tag || "").toLowerCase();
+      if (!key) {
+        continue;
+      }
+      const entry = counts.get(key) || { name: tag, count: 0 };
+      entry.count += 1;
+      counts.set(key, entry);
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) => {
+    const diff = Number(b.count || 0) - Number(a.count || 0);
+    if (diff !== 0) {
+      return diff;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+}
+
+function buildWishlistTagCountsFromCache() {
+  const counts = new Map();
+  const items = wishlistStateCache?.items && typeof wishlistStateCache.items === "object"
+    ? wishlistStateCache.items
+    : {};
+  for (const appId of Object.keys(items)) {
+    const tags = Array.isArray(wishlistMetaCache?.[appId]?.tags)
+      ? wishlistMetaCache[appId].tags
+      : [];
+    for (const rawTag of tags) {
+      const name = String(rawTag || "").replace(/\s+/g, " ").trim();
+      if (!name || name.length > 40) {
+        continue;
+      }
+      const key = name.toLowerCase();
+      const entry = counts.get(key) || { name, count: 0 };
+      entry.count += 1;
+      counts.set(key, entry);
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) => {
+    const diff = Number(b.count || 0) - Number(a.count || 0);
+    if (diff !== 0) {
+      return diff;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+}
+
+function buildWishlistCountsFromCache(key) {
+  const counts = new Map();
+  const items = wishlistStateCache?.items && typeof wishlistStateCache.items === "object"
+    ? wishlistStateCache.items
+    : {};
+  for (const appId of Object.keys(items)) {
+    let values = [];
+    if (key === "types") {
+      values = [
+        normalizeWishlistMetaType(
+          wishlistMetaCache?.[appId]?.appType
+          || wishlistMetaCache?.[appId]?.appTypeRaw
+          || ""
+        )
+      ];
+    } else {
+      values = getWishlistMetaArray(appId, key);
+    }
+    for (const rawValue of values) {
+      const name = normalizeArrayFilterValue(rawValue);
+      if (!name) {
+        continue;
+      }
+      const lookup = String(name).toLowerCase();
+      const entry = counts.get(lookup) || { name, count: 0 };
+      entry.count += 1;
+      counts.set(lookup, entry);
+    }
+  }
+  return Array.from(counts.values()).sort((a, b) => {
+    const diff = Number(b.count || 0) - Number(a.count || 0);
+    if (diff !== 0) {
+      return diff;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+}
+
+function renderWishlistTagOptions(panel, stateItems) {
+  const optionsEl = panel.querySelector("#swm-tags-options");
+  const showMoreBtn = panel.querySelector("#swm-tags-show-more");
+  const searchEl = panel.querySelector("#swm-tags-search");
+  if (!optionsEl || !showMoreBtn || !searchEl) {
+    return;
+  }
+  if (searchEl.value !== wishlistTagSearchQuery) {
+    searchEl.value = wishlistTagSearchQuery;
+  }
+
+  const tagCounts = buildWishlistTagCounts(getWishlistRows());
+  const query = String(wishlistTagSearchQuery || "").trim().toLowerCase();
+  const selectedEntries = [];
+  const selectedKeys = new Set();
+  for (const key of wishlistSelectedTags) {
+    const found = tagCounts.find((item) => String(item.name || "").toLowerCase() === key);
+    selectedEntries.push(found || { name: key, count: 0 });
+    selectedKeys.add(key);
+  }
+  const filtered = tagCounts.filter((item) => !query || String(item.name || "").toLowerCase().includes(query));
+  const remaining = filtered.filter((item) => !selectedKeys.has(String(item.name || "").toLowerCase()));
+  const ordered = [...selectedEntries, ...remaining];
+  const visible = ordered.slice(0, wishlistTagShowLimit);
+
+  optionsEl.innerHTML = "";
+  for (const item of visible) {
+    const row = document.createElement("label");
+    row.className = "tag-option";
+
+    const key = String(item.name || "").toLowerCase();
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = wishlistSelectedTags.has(key);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        wishlistSelectedTags.add(key);
+      } else {
+        wishlistSelectedTags.delete(key);
+      }
+      renderWishlistTagOptions(panel, stateItems);
+      applyWishlistFiltersToRows(getWishlistRows(), stateItems);
+    });
+
+    const name = document.createElement("span");
+    name.className = "tag-name";
+    name.textContent = String(item.name || "");
+
+    const count = document.createElement("span");
+    count.className = "tag-count";
+    count.textContent = Number(item.count || 0) > 0 ? String(item.count) : "";
+
+    row.appendChild(checkbox);
+    row.appendChild(name);
+    row.appendChild(count);
+    optionsEl.appendChild(row);
+  }
+
+  showMoreBtn.style.display = ordered.length > wishlistTagShowLimit ? "" : "none";
 }
 
 function applyWishlistFiltersToRows(rows, stateItems) {
@@ -1101,17 +2559,98 @@ function applyWishlistFiltersToRows(rows, stateItems) {
   }
 }
 
+function hasActiveWishlistFilters() {
+  if (String(wishlistCurrentStateFilter || "all") !== "all") {
+    return true;
+  }
+  if (wishlistSelectedTags.size > 0) {
+    return true;
+  }
+  const f = wishlistAdvancedFilters || {};
+  if (Number(f.ratingMin || 0) > 0 || Number(f.ratingMax || 100) < 100) {
+    return true;
+  }
+  if (Number(f.reviewsMin || 0) > 0 || Number(f.reviewsMax || Number.MAX_SAFE_INTEGER) < Number.MAX_SAFE_INTEGER) {
+    return true;
+  }
+  if (Number(f.priceMin || 0) > 0 || Number(f.priceMax || Number.MAX_SAFE_INTEGER) < Number.MAX_SAFE_INTEGER) {
+    return true;
+  }
+  if (Number(f.discountMin || 0) > 0 || Number(f.discountMax || 100) < 100) {
+    return true;
+  }
+  if (!Boolean(f.releaseTextEnabled)) {
+    return true;
+  }
+  const maxDefault = new Date().getUTCFullYear() + 1;
+  if (!Boolean(f.releaseYearRangeEnabled)
+    || Number(f.releaseYearMin || 1970) !== 1970
+    || Number(f.releaseYearMax || maxDefault) !== maxDefault) {
+    return true;
+  }
+  for (const key of WISHLIST_MULTI_FILTER_KEYS) {
+    if (wishlistMultiFilters[key]?.size > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function ensureWishlistRightFiltersPanel(stateItems) {
+  const existingPanel = document.getElementById("swm-right-filters");
+  if (existingPanel) {
+    existingPanel.remove();
+  }
+  if (wishlistSidebarShellEl) {
+    wishlistSidebarShellEl.style.paddingRight = "";
+  }
+  return;
   const rows = getWishlistRows();
   const firstRow = rows?.[0];
-  const listParent = firstRow?.parentElement;
-  if (!listParent || !firstRow) {
+  if (!firstRow) {
     return;
   }
-  listParent.classList.add("swm-list-with-filters");
-  listParent.style.position = "relative";
-  listParent.style.paddingRight = "";
-  listParent.style.boxSizing = "border-box";
+  const listParent = firstRow.parentElement;
+  if (listParent) {
+    listParent.classList.add("swm-list-with-filters");
+    listParent.style.position = "relative";
+    listParent.style.paddingRight = WISHLIST_FILTERS_SIDEBAR_MODE ? "0" : "";
+    listParent.style.boxSizing = "border-box";
+  }
+
+  let bestShell = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let node = firstRow;
+  for (let i = 0; i < 10 && node && node !== document.body; i += 1) {
+    if (node instanceof HTMLElement) {
+      const count = node.querySelectorAll(".wishlist_row, [id^='game_']").length;
+      if (count >= 2) {
+        const width = Number(node.getBoundingClientRect()?.width || node.offsetWidth || 0);
+        const score = count * 10000 + width;
+        if (score > bestScore) {
+          bestScore = score;
+          bestShell = node;
+        }
+      }
+    }
+    node = node.parentElement;
+  }
+  const fallbackShell = document.getElementById("wishlist_ctn")
+    || firstRow.closest?.("#wishlist_ctn")
+    || listParent?.closest?.("#wishlist_ctn")
+    || listParent?.parentElement
+    || null;
+  const wishlistShell = bestShell || fallbackShell;
+
+  if (wishlistSidebarShellEl && wishlistSidebarShellEl !== wishlistShell) {
+    wishlistSidebarShellEl.style.paddingRight = "";
+  }
+  wishlistSidebarShellEl = wishlistShell instanceof HTMLElement ? wishlistShell : null;
+
+  if (wishlistSidebarShellEl) {
+    wishlistSidebarShellEl.style.boxSizing = "border-box";
+    wishlistSidebarShellEl.style.paddingRight = WISHLIST_FILTERS_SIDEBAR_MODE ? "250px" : "";
+  }
 
   let panel = document.getElementById("swm-right-filters");
   if (!panel) {
@@ -1121,8 +2660,21 @@ function ensureWishlistRightFiltersPanel(stateItems) {
     panel.innerHTML = `
       <h4>Filters</h4>
       <div class="swm-field">
-        <label for="swm-tags-filter">Tags</label>
-        <input id="swm-tags-filter" type="text" placeholder="tag text">
+        <label for="swm-sidebar-state-select">State</label>
+        <select id="swm-sidebar-state-select" class="swm-state-filter">
+          <option value="all">All states</option>
+          <option value="inbox">Inbox</option>
+          <option value="buy">Confirm</option>
+          <option value="maybe">Maybe</option>
+          <option value="follow">Follow</option>
+          <option value="archive">Archive</option>
+        </select>
+      </div>
+      <div class="swm-field">
+        <label for="swm-tags-search">Tags</label>
+        <input id="swm-tags-search" type="search" placeholder="Search tags...">
+        <div id="swm-tags-options" class="tag-options"></div>
+        <button id="swm-tags-show-more" type="button" class="small-btn">Show more</button>
       </div>
       <div class="swm-field">
         <label>Rating %</label>
@@ -1158,16 +2710,23 @@ function ensureWishlistRightFiltersPanel(stateItems) {
     document.body.appendChild(panel);
   }
   panel.style.position = "fixed";
-  panel.style.width = "196px";
+  panel.style.top = "88px";
+  panel.style.right = "8px";
+  panel.style.left = "auto";
+  panel.style.width = "228px";
   panel.style.boxSizing = "border-box";
-  panel.style.zIndex = "25";
+  panel.style.maxHeight = "calc(100vh - 96px)";
+  panel.style.overflow = "auto";
+  panel.style.zIndex = "2147483000";
   panel.style.marginLeft = "0";
-
-  const rowRect = firstRow.getBoundingClientRect();
-  panel.style.top = `${Math.max(8, Math.round(rowRect.top))}px`;
-  const maxLeft = Math.max(8, window.innerWidth - 196 - 8);
-  const left = Math.min(maxLeft, Math.max(8, Math.round(rowRect.right + 8)));
-  panel.style.left = `${left}px`;
+  if (!WISHLIST_FILTERS_SIDEBAR_MODE && firstRow) {
+    const rowRect = firstRow.getBoundingClientRect();
+    panel.style.top = `${Math.max(8, Math.round(rowRect.top))}px`;
+    const maxLeft = Math.max(8, window.innerWidth - 228 - 8);
+    const left = Math.min(maxLeft, Math.max(8, Math.round(rowRect.right + 8)));
+    panel.style.left = `${left}px`;
+    panel.style.right = "auto";
+  }
 
   const bind = (id, key, parser) => {
     const el = panel.querySelector(`#${id}`);
@@ -1181,7 +2740,38 @@ function ensureWishlistRightFiltersPanel(stateItems) {
     });
   };
 
-  bind("swm-tags-filter", "tagsQuery", (v) => String(v || "").slice(0, 60));
+  const sidebarStateSelect = panel.querySelector("#swm-sidebar-state-select");
+  if (sidebarStateSelect && !sidebarStateSelect.dataset.swmBound) {
+    sidebarStateSelect.dataset.swmBound = "1";
+    sidebarStateSelect.addEventListener("change", () => {
+      wishlistCurrentStateFilter = String(sidebarStateSelect.value || "all");
+      try {
+        window.sessionStorage.setItem(WISHLIST_STATE_FILTER_KEY, wishlistCurrentStateFilter);
+      } catch {}
+      applyWishlistFiltersToRows(getWishlistRows(), stateItems);
+    });
+  }
+  if (sidebarStateSelect) {
+    sidebarStateSelect.value = String(wishlistCurrentStateFilter || "all");
+  }
+
+  const tagSearchInput = panel.querySelector("#swm-tags-search");
+  if (tagSearchInput && !tagSearchInput.dataset.swmBound) {
+    tagSearchInput.dataset.swmBound = "1";
+    tagSearchInput.addEventListener("input", () => {
+      wishlistTagSearchQuery = String(tagSearchInput.value || "").slice(0, 60);
+      wishlistTagShowLimit = WISHLIST_TAG_SHOW_STEP;
+      renderWishlistTagOptions(panel, stateItems);
+    });
+  }
+  const tagShowMoreBtn = panel.querySelector("#swm-tags-show-more");
+  if (tagShowMoreBtn && !tagShowMoreBtn.dataset.swmBound) {
+    tagShowMoreBtn.dataset.swmBound = "1";
+    tagShowMoreBtn.addEventListener("click", () => {
+      wishlistTagShowLimit += WISHLIST_TAG_SHOW_STEP;
+      renderWishlistTagOptions(panel, stateItems);
+    });
+  }
   bind("swm-rating-min", "ratingMin", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 0))));
   bind("swm-rating-max", "ratingMax", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 100))));
   bind("swm-reviews-min", "reviewsMin", (v) => Math.max(0, parseNumberLoose(v, 0)));
@@ -1197,6 +2787,140 @@ function ensureWishlistRightFiltersPanel(stateItems) {
   });
   bind("swm-discount-min", "discountMin", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 0))));
   bind("swm-discount-max", "discountMax", (v) => Math.max(0, Math.min(100, parseNumberLoose(v, 100))));
+  renderWishlistTagOptions(panel, stateItems);
+}
+
+async function getWishlistFiltersSnapshot() {
+  await loadWishlistState(false);
+  await loadWishlistMetaCache(false);
+  const rows = getWishlistRows();
+  const cacheCounts = buildWishlistTagCountsFromCache();
+  const tagCounts = cacheCounts.length > 0 ? cacheCounts : buildWishlistTagCounts(rows);
+  return {
+    ok: true,
+    stateFilter: String(wishlistCurrentStateFilter || "all"),
+    selectedTags: Array.from(wishlistSelectedTags),
+    tagSearchQuery: String(wishlistTagSearchQuery || ""),
+    tagShowLimit: Number(wishlistTagShowLimit || WISHLIST_TAG_SHOW_STEP),
+    tagCounts,
+    multiFilters: {
+      selected: Object.fromEntries(
+        WISHLIST_MULTI_FILTER_KEYS.map((key) => [key, Array.from(wishlistMultiFilters?.[key] || [])])
+      ),
+      counts: Object.fromEntries(
+        WISHLIST_MULTI_FILTER_KEYS.map((key) => [key, buildWishlistCountsFromCache(key)])
+      )
+    },
+    advanced: {
+      ratingMin: Number(wishlistAdvancedFilters?.ratingMin || 0),
+      ratingMax: Number(wishlistAdvancedFilters?.ratingMax || 100),
+      reviewsMin: Number(wishlistAdvancedFilters?.reviewsMin || 0),
+      reviewsMax: Number(wishlistAdvancedFilters?.reviewsMax || Number.MAX_SAFE_INTEGER),
+      priceMin: Number(wishlistAdvancedFilters?.priceMin || 0),
+      priceMax: Number(wishlistAdvancedFilters?.priceMax || Number.MAX_SAFE_INTEGER),
+      discountMin: Number(wishlistAdvancedFilters?.discountMin || 0),
+      discountMax: Number(wishlistAdvancedFilters?.discountMax || 100),
+      releaseTextEnabled: Boolean(wishlistAdvancedFilters?.releaseTextEnabled),
+      releaseYearRangeEnabled: Boolean(wishlistAdvancedFilters?.releaseYearRangeEnabled),
+      releaseYearMin: Number(wishlistAdvancedFilters?.releaseYearMin || 1970),
+      releaseYearMax: Number(wishlistAdvancedFilters?.releaseYearMax || (new Date().getUTCFullYear() + 1))
+    }
+  };
+}
+
+async function applyWishlistFiltersPayload(payload) {
+  await loadWishlistState(false);
+  await loadWishlistMetaCache(false);
+  wishlistSuppressDomSync = true;
+  if (!payload || typeof payload !== "object") {
+    return getWishlistFiltersSnapshot();
+  }
+  if (payload.stateFilter !== undefined) {
+    wishlistCurrentStateFilter = String(payload.stateFilter || "all").toLowerCase();
+    try {
+      window.sessionStorage.setItem(WISHLIST_STATE_FILTER_KEY, wishlistCurrentStateFilter);
+    } catch {}
+  }
+  if (Array.isArray(payload.selectedTags)) {
+    const next = new Set();
+    for (const tag of payload.selectedTags) {
+      const key = String(tag || "").toLowerCase().trim();
+      if (key) {
+        next.add(key);
+      }
+    }
+    wishlistSelectedTags = next;
+  }
+  if (payload.tagSearchQuery !== undefined) {
+    wishlistTagSearchQuery = String(payload.tagSearchQuery || "").slice(0, 60);
+  }
+  if (payload.tagShowLimit !== undefined) {
+    const n = Number(payload.tagShowLimit || WISHLIST_TAG_SHOW_STEP);
+    wishlistTagShowLimit = Number.isFinite(n) && n > 0 ? Math.floor(n) : WISHLIST_TAG_SHOW_STEP;
+  }
+  if (payload.multiFilters && typeof payload.multiFilters === "object") {
+    const selected = payload.multiFilters.selected && typeof payload.multiFilters.selected === "object"
+      ? payload.multiFilters.selected
+      : {};
+    for (const key of WISHLIST_MULTI_FILTER_KEYS) {
+      const rawList = Array.isArray(selected[key]) ? selected[key] : [];
+      wishlistMultiFilters[key] = new Set(
+        rawList
+          .map(normalizeArrayFilterValue)
+          .filter(Boolean)
+      );
+    }
+  }
+
+  const advanced = payload.advanced && typeof payload.advanced === "object" ? payload.advanced : {};
+  if (advanced.ratingMin !== undefined) {
+    wishlistAdvancedFilters.ratingMin = Math.max(0, Math.min(100, parseNumberLoose(advanced.ratingMin, 0)));
+  }
+  if (advanced.ratingMax !== undefined) {
+    wishlistAdvancedFilters.ratingMax = Math.max(0, Math.min(100, parseNumberLoose(advanced.ratingMax, 100)));
+  }
+  if (advanced.reviewsMin !== undefined) {
+    wishlistAdvancedFilters.reviewsMin = Math.max(0, parseNumberLoose(advanced.reviewsMin, 0));
+  }
+  if (advanced.reviewsMax !== undefined) {
+    const raw = String(advanced.reviewsMax ?? "").trim();
+    wishlistAdvancedFilters.reviewsMax = raw
+      ? Math.max(0, parseNumberLoose(raw, Number.MAX_SAFE_INTEGER))
+      : Number.MAX_SAFE_INTEGER;
+  }
+  if (advanced.priceMin !== undefined) {
+    wishlistAdvancedFilters.priceMin = Math.max(0, Number(advanced.priceMin || 0));
+  }
+  if (advanced.priceMax !== undefined) {
+    const raw = String(advanced.priceMax ?? "").trim();
+    const n = Number(raw || 0);
+    wishlistAdvancedFilters.priceMax = raw && Number.isFinite(n) && n >= 0 ? n : Number.MAX_SAFE_INTEGER;
+  }
+  if (advanced.discountMin !== undefined) {
+    wishlistAdvancedFilters.discountMin = Math.max(0, Math.min(100, parseNumberLoose(advanced.discountMin, 0)));
+  }
+  if (advanced.discountMax !== undefined) {
+    wishlistAdvancedFilters.discountMax = Math.max(0, Math.min(100, parseNumberLoose(advanced.discountMax, 100)));
+  }
+  if (advanced.releaseTextEnabled !== undefined) {
+    wishlistAdvancedFilters.releaseTextEnabled = Boolean(advanced.releaseTextEnabled);
+  }
+  if (advanced.releaseYearRangeEnabled !== undefined) {
+    wishlistAdvancedFilters.releaseYearRangeEnabled = Boolean(advanced.releaseYearRangeEnabled);
+  }
+  if (advanced.releaseYearMin !== undefined) {
+    wishlistAdvancedFilters.releaseYearMin = Math.max(1970, parseNumberLoose(advanced.releaseYearMin, 1970));
+  }
+  if (advanced.releaseYearMax !== undefined) {
+    const maxDefault = new Date().getUTCFullYear() + 1;
+    wishlistAdvancedFilters.releaseYearMax = Math.max(1970, parseNumberLoose(advanced.releaseYearMax, maxDefault));
+  }
+  if (Number(wishlistAdvancedFilters.releaseYearMin || 1970) > Number(wishlistAdvancedFilters.releaseYearMax || 1970)) {
+    wishlistAdvancedFilters.releaseYearMin = wishlistAdvancedFilters.releaseYearMax;
+  }
+
+  applyWishlistFiltersToRows(getWishlistRows(), wishlistStateCache?.items || {});
+  return getWishlistFiltersSnapshot();
 }
 
 function setWishlistActionButtonsVisualState(container, intentState) {
@@ -1210,7 +2934,7 @@ function setWishlistActionButtonsVisualState(container, intentState) {
 
   if (buyBtn) {
     buyBtn.classList.toggle("is-active", intentState.buy === 2);
-    buyBtn.textContent = "Buy";
+    buyBtn.textContent = "Confirm";
   }
   if (maybeBtn) {
     maybeBtn.classList.toggle("is-active", intentState.buy === 1);
@@ -1222,7 +2946,7 @@ function setWishlistActionButtonsVisualState(container, intentState) {
   }
   if (followBtn) {
     followBtn.classList.toggle("is-active", Boolean(intentState.track));
-    followBtn.textContent = intentState.track ? "Unfollow" : "Follow";
+    followBtn.textContent = "Follow";
   }
 }
 
@@ -1351,6 +3075,7 @@ async function decorateWishlistFollowUi() {
     }
   }
   const state = await loadWishlistState(false);
+  await loadWishlistMetaCache(false);
   const stateItems = state?.items && typeof state.items === "object" ? state.items : {};
   const rows = getWishlistRows();
   for (const row of rows) {
@@ -1372,10 +3097,33 @@ function scheduleWishlistFollowUiDecorate() {
   }, 120);
 }
 
+function logWishlistDevRuntimeInfoOnce() {
+  if (wishlistDevRuntimeInfoLogged) {
+    return;
+  }
+  wishlistDevRuntimeInfoLogged = true;
+  browser.runtime.sendMessage({ type: "get-dev-runtime-info" })
+    .then((info) => {
+      const bootId = String(info?.bootId || "unknown");
+      const bootAt = String(info?.bootAt || "unknown");
+      const version = String(info?.manifestVersion || "unknown");
+      console.info(`[SWM][wishlist] runtime boot=${bootId} at=${bootAt} version=${version}`);
+    })
+    .catch((error) => reportNonFatal("wishlist-follow.runtime-info", error));
+}
+
+function requestSidebarCloseForWishlist() {
+  browser.runtime.sendMessage({ type: "close-sidebar-action" })
+    .catch((error) => reportNonFatal("wishlist-follow.close-sidebar", error));
+}
+
 function initWishlistFollowUi() {
   if (!window.location.pathname.startsWith("/wishlist")) {
     return;
   }
+  logWishlistDevRuntimeInfoOnce();
+  requestSidebarCloseForWishlist();
+  bindWishlistMediaTooltipDelegation();
   scheduleWishlistFollowUiDecorate();
   if (!wishlistFollowUiWindowHooksAdded) {
     window.addEventListener("resize", scheduleWishlistFollowUiDecorate, { passive: true });
@@ -1454,114 +3202,11 @@ function clickWishlistLoadMoreIfVisible() {
 }
 
 async function syncWishlistOrderFromDom(steamIdHint = "") {
-  if (!window.location.pathname.startsWith("/wishlist")) {
-    return { ok: false, error: "Not on wishlist page." };
-  }
-  if (domOrderSyncInFlight) {
-    return { ok: false, error: "DOM wishlist sync already running." };
-  }
-
-  domOrderSyncInFlight = true;
-  try {
-    const stored = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
-    const cached = stored[WISHLIST_ADDED_CACHE_KEY] || {};
-    await browser.storage.local.set({
-      [WISHLIST_ADDED_CACHE_KEY]: {
-        ...cached,
-        priorityLastError: "content-dom-sync-started"
-      }
-    });
-
-    for (let i = 0; i < 80; i += 1) {
-      if (getWishlistRows().length > 0) {
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-
-    window.scrollTo({ top: 0, behavior: "auto" });
-    let lastCount = 0;
-    let stableRounds = 0;
-    let rounds = 0;
-    let sameHeightRounds = 0;
-    let lastHeight = 0;
-    while (rounds < 600) {
-      rounds += 1;
-      clickWishlistLoadMoreIfVisible();
-      const scroller = document.scrollingElement || document.documentElement || document.body;
-      const step = Math.max(500, Math.floor(window.innerHeight * 0.8));
-      const nextTop = Math.min(scroller.scrollTop + step, scroller.scrollHeight);
-      window.scrollTo({ top: nextTop, behavior: "auto" });
-      await withTimeout(new Promise((resolve) => setTimeout(resolve, 450)), 2000, "dom sync wait timeout");
-
-      const currentIds = extractWishlistRowsOrderFromDom();
-      if (currentIds.length === lastCount) {
-        stableRounds += 1;
-      } else {
-        stableRounds = 0;
-        lastCount = currentIds.length;
-      }
-
-      const currentHeight = Math.max(
-        Number(document.body?.scrollHeight || 0),
-        Number(document.documentElement?.scrollHeight || 0)
-      );
-      if (currentHeight === lastHeight) {
-        sameHeightRounds += 1;
-      } else {
-        sameHeightRounds = 0;
-        lastHeight = currentHeight;
-      }
-
-      const nearBottom = (scroller.scrollTop + window.innerHeight) >= (scroller.scrollHeight - 200);
-      if (stableRounds >= 24 && sameHeightRounds >= 16 && nearBottom) {
-        break;
-      }
-    }
-
-    const pathSteamIdMatch = window.location.pathname.match(/\/wishlist\/profiles\/(\d{10,20})/);
-    const steamId = String(steamIdHint || pathSteamIdMatch?.[1] || cached.steamId || "").trim();
-    let orderedAppIds = extractWishlistRowsOrderFromDom();
-    if (!Array.isArray(orderedAppIds) || orderedAppIds.length === 0) {
-      orderedAppIds = await fetchWishlistIdsInPublicOrder(steamId);
-    }
-    if (!Array.isArray(orderedAppIds) || orderedAppIds.length === 0) {
-      throw new Error("Could not read wishlist rows from DOM.");
-    }
-
-    const priorityMap = {};
-    for (let i = 0; i < orderedAppIds.length; i += 1) {
-      priorityMap[orderedAppIds[i]] = i;
-    }
-
-    const now = Date.now();
-    const storedLatest = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
-    const cachedLatest = storedLatest[WISHLIST_ADDED_CACHE_KEY] || {};
-    await browser.storage.local.set({
-      [WISHLIST_ADDED_CACHE_KEY]: {
-        ...cachedLatest,
-        orderedAppIds,
-        priorityMap,
-        priorityCachedAt: now,
-        priorityLastError: "",
-        steamId
-      }
-    });
-
-    return { ok: true, updated: orderedAppIds.length, cachedAt: now };
-  } catch (error) {
-    const storedOnError = await browser.storage.local.get(WISHLIST_ADDED_CACHE_KEY);
-    const cachedOnError = storedOnError[WISHLIST_ADDED_CACHE_KEY] || {};
-    await browser.storage.local.set({
-      [WISHLIST_ADDED_CACHE_KEY]: {
-        ...cachedOnError,
-        priorityLastError: String(error?.message || error || "wishlist dom sync failed")
-      }
-    });
-    return { ok: false, error: String(error?.message || error || "wishlist dom sync failed") };
-  } finally {
-    domOrderSyncInFlight = false;
-  }
+  return {
+    ok: false,
+    skipped: true,
+    reason: "dom-sync-disabled-no-auto-scroll"
+  };
 }
 
 async function getStoreSessionIdFromPage() {
@@ -1728,6 +3373,12 @@ browser.runtime.onMessage.addListener((message) => {
   }
   if (message.type === "steam-proxy-write-action") {
     return proxyWriteSteamAction(String(message.action || ""), String(message.appId || ""));
+  }
+  if (message.type === "wishlist-filters-get") {
+    return getWishlistFiltersSnapshot();
+  }
+  if (message.type === "wishlist-filters-set") {
+    return applyWishlistFiltersPayload(message.payload || {});
   }
   return undefined;
 });

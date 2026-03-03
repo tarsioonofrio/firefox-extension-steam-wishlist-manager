@@ -5,16 +5,6 @@
     const activeCollection = String(options?.activeCollection || "__all__");
     const wishlistCount = Number(options?.wishlistCount || 0);
     const wishlistSelectValue = String(options?.wishlistSelectValue || "__wishlist__");
-    const inboxSelectValue = String(options?.inboxSelectValue || "__inbox__");
-    const trackSelectValue = String(options?.trackSelectValue || "__track__");
-    const buySelectValue = String(options?.buySelectValue || "__buy__");
-    const archiveSelectValue = String(options?.archiveSelectValue || "__archive__");
-    const ownedSelectValue = String(options?.ownedSelectValue || "__owned__");
-    const inboxCount = Number(options?.inboxCount || 0);
-    const trackCount = Number(options?.trackCount || 0);
-    const buyCount = Number(options?.buyCount || 0);
-    const archiveCount = Number(options?.archiveCount || 0);
-    const ownedCount = Number(options?.ownedCount || 0);
     const collectionSizes = options?.collectionSizes || {};
     const dynamicNames = new Set(Array.isArray(options?.dynamicNames) ? options.dynamicNames : []);
 
@@ -30,38 +20,8 @@
 
     const wishlistOption = document.createElement("option");
     wishlistOption.value = wishlistSelectValue;
-    wishlistOption.textContent = `Steam wishlist (${wishlistCount})`;
+    wishlistOption.textContent = `Wishlist (${wishlistCount})`;
     select.appendChild(wishlistOption);
-
-    const inboxOption = document.createElement("option");
-    inboxOption.value = inboxSelectValue;
-    inboxOption.textContent = `Inbox (${inboxCount})`;
-    select.appendChild(inboxOption);
-
-    const trackOption = document.createElement("option");
-    trackOption.value = trackSelectValue;
-    trackOption.textContent = `Followed (${trackCount})`;
-    select.appendChild(trackOption);
-
-    const buyOption = document.createElement("option");
-    buyOption.value = buySelectValue;
-    buyOption.textContent = `Buy radar (${buyCount})`;
-    select.appendChild(buyOption);
-
-    const archiveOption = document.createElement("option");
-    archiveOption.value = archiveSelectValue;
-    archiveOption.textContent = `Archive (${archiveCount})`;
-    select.appendChild(archiveOption);
-
-    const ownedOption = document.createElement("option");
-    ownedOption.value = ownedSelectValue;
-    ownedOption.textContent = `Owned (${ownedCount})`;
-    select.appendChild(ownedOption);
-
-    const allOption = document.createElement("option");
-    allOption.value = "__all__";
-    allOption.textContent = "All collections";
-    select.appendChild(allOption);
 
     for (const name of state.collectionOrder || []) {
       const option = document.createElement("option");
@@ -72,13 +32,26 @@
       select.appendChild(option);
     }
 
+    if (select.options.length === 0) {
+      const emptyOption = document.createElement("option");
+      emptyOption.value = "__none__";
+      emptyOption.textContent = "No collections";
+      emptyOption.disabled = true;
+      select.appendChild(emptyOption);
+    }
+
     const validValues = Array.from(select.options).map((o) => o.value);
     let nextActiveCollection = activeCollection;
     if (!validValues.includes(nextActiveCollection)) {
-      nextActiveCollection = validValues.includes(state.activeCollection) ? state.activeCollection : "__all__";
+      nextActiveCollection = validValues.includes(state.activeCollection)
+        ? state.activeCollection
+        : (validValues[0] || "__all__");
     }
 
-    select.value = sourceMode === "wishlist" ? wishlistSelectValue : nextActiveCollection;
+    const selectedValue = sourceMode === "wishlist"
+      ? wishlistSelectValue
+      : (validValues.includes(nextActiveCollection) ? nextActiveCollection : validValues[0]);
+    select.value = selectedValue;
     if (selectBtn) {
       const selectedOption = select.options[select.selectedIndex];
       selectBtn.textContent = `Collection: ${selectedOption?.textContent || "Select"}`;
@@ -111,7 +84,7 @@
       }
     }
 
-    return { activeCollection: nextActiveCollection };
+    return { activeCollection: sourceMode === "wishlist" ? "__all__" : nextActiveCollection };
   }
 
   function renderSortMenu(options) {
