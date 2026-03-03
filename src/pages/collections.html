@@ -277,27 +277,33 @@
       <div class="batch-col">
         <input class="card-batch-checkbox" type="checkbox" aria-label="Select card for batch action">
       </div>
-      <div class="order-col">
-        <div class="order-card-actions">
-          <button class="refresh-item-btn" type="button">Refresh</button>
-          <button class="collections-toggle-btn" type="button">Collections</button>
+      <div class="media-col">
+        <a class="cover-link" target="_blank" rel="noopener noreferrer">
+          <img class="cover" alt="">
+        </a>
+        <div class="order-col">
+          <div class="triage-actions triage-primary-actions">
+            <button class="triage-buy-btn" type="button">Buy</button>
+            <button class="triage-maybe-btn" type="button">Maybe</button>
+            <button class="triage-archive-btn" type="button">Archive</button>
+          </div>
+          <div class="order-manual-row">
+            <button class="order-up-btn" type="button" aria-label="Move up">▲</button>
+            <button class="order-down-btn" type="button" aria-label="Move down">▼</button>
+            <div class="order-position-row">
+              <input class="order-position-input" type="number" min="1" step="1" aria-label="Move to position">
+            </div>
+            <button class="triage-track-btn" type="button">Track</button>
+          </div>
+          <div class="collections-dropdown hidden"></div>
         </div>
-        <div class="order-manual-row">
-        <button class="order-up-btn" type="button" aria-label="Move up">▲</button>
-        <button class="order-down-btn" type="button" aria-label="Move down">▼</button>
-        <div class="order-position-row">
-          <input class="order-position-input" type="number" min="1" step="1" aria-label="Move to position">
-        </div>
-        </div>
-        <div class="collections-dropdown hidden"></div>
       </div>
-      <a class="cover-link" target="_blank" rel="noopener noreferrer">
-        <img class="cover" alt="">
-      </a>
       <div class="info">
         <div class="title-row">
           <a class="title" target="_blank" rel="noopener noreferrer"></a>
           <p class="meta appid"></p>
+          <button class="refresh-item-btn" type="button">Refresh</button>
+          <button class="collections-toggle-btn" type="button">Collections</button>
         </div>
         <div class="left-col">
           <div class="tags-row"></div>
@@ -305,26 +311,12 @@
           <p class="meta release">Release: -</p>
         </div>
         <div class="right-col">
-          <p class="meta triage-bucket">Bucket: INBOX</p>
-          <div class="triage-actions">
-            <button class="triage-buy-btn" type="button">Buy</button>
-            <button class="triage-maybe-btn" type="button">Maybe</button>
-            <button class="triage-track-btn" type="button">Track</button>
-            <button class="triage-archive-btn" type="button">Archive</button>
-          </div>
           <p class="meta wishlist-added">Wishlisted: -</p>
           <p class="meta pricing">Price: -</p>
           <p class="meta discount">Discount: -</p>
-          <p class="meta target-status">Target: -</p>
           <div class="target-price-row">
-            <input class="target-price-input" type="number" min="0" step="0.01" placeholder="Target">
-            <button class="target-save-btn" type="button">Save</button>
-            <button class="target-clear-btn" type="button">Clear</button>
-          </div>
-          <div class="note-row">
-            <input class="note-input" type="text" maxlength="600" placeholder="Note">
-            <button class="note-save-btn" type="button">Save</button>
-            <button class="note-clear-btn" type="button">Clear</button>
+            <span class="meta target-price-label">Target</span>
+            <input class="target-price-input" type="number" min="0" step="0.01" placeholder="">
           </div>
           <button class="remove-btn" type="button">Remove</button>
         </div>

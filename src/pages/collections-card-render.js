@@ -810,22 +810,15 @@
       appidEl: fragment.querySelector(".appid"),
       pricingEl: fragment.querySelector(".pricing"),
       discountEl: fragment.querySelector(".discount"),
-      targetStatusEl: fragment.querySelector(".target-status"),
       tagsRowEl: fragment.querySelector(".tags-row"),
       reviewEl: fragment.querySelector(".review"),
       releaseEl: fragment.querySelector(".release"),
       wishlistAddedEl: fragment.querySelector(".wishlist-added"),
-      triageBucketEl: fragment.querySelector(".triage-bucket"),
       triageBuyBtn: fragment.querySelector(".triage-buy-btn"),
       triageMaybeBtn: fragment.querySelector(".triage-maybe-btn"),
       triageTrackBtn: fragment.querySelector(".triage-track-btn"),
       triageArchiveBtn: fragment.querySelector(".triage-archive-btn"),
       targetPriceInput: fragment.querySelector(".target-price-input"),
-      targetSaveBtn: fragment.querySelector(".target-save-btn"),
-      targetClearBtn: fragment.querySelector(".target-clear-btn"),
-      noteInput: fragment.querySelector(".note-input"),
-      noteSaveBtn: fragment.querySelector(".note-save-btn"),
-      noteClearBtn: fragment.querySelector(".note-clear-btn"),
       refreshItemBtn: fragment.querySelector(".refresh-item-btn"),
       collectionsToggleBtn: fragment.querySelector(".collections-toggle-btn"),
       collectionsDropdown: fragment.querySelector(".collections-dropdown"),
@@ -861,10 +854,7 @@
       card.appidEl.textContent = `AppID: ${appId}`;
     }
     if (card.wishlistAddedEl) {
-      const buyIntent = String(itemIntent.buyIntent || "UNSET").toUpperCase();
-      const trackIntent = String(itemIntent.trackIntent || "UNSET").toUpperCase();
-      const steamWishlistHint = itemIntent.steamWishlisted ? "Steam" : "-";
-      card.wishlistAddedEl.textContent = `Wishlisted: ${wishlistDate} | Steam: ${steamWishlistHint} | BuyIntent: ${buyIntent} | TrackIntent: ${trackIntent}`;
+      card.wishlistAddedEl.textContent = `Wishlisted: ${wishlistDate}`;
     }
   }
 
@@ -879,11 +869,9 @@
     const setStatus = options?.setStatus || (() => {});
     const confirmFn = options?.confirmFn || ((message) => window.confirm(message));
     const itemIntent = options?.itemIntent && typeof options.itemIntent === "object" ? options.itemIntent : {};
-    const currentBucket = String(itemIntent.bucket || "INBOX").toUpperCase();
     const targetPriceCents = Number.isFinite(Number(itemIntent.targetPriceCents))
       ? Math.max(0, Math.floor(Number(itemIntent.targetPriceCents)))
       : null;
-    const noteText = String(itemIntent.note || "");
     if (!card) {
       return;
     }
@@ -892,10 +880,6 @@
       card.refreshItemBtn.addEventListener("click", () => {
         onRefreshItem(appId).catch(() => setStatus("Failed to refresh item.", true));
       });
-    }
-
-    if (card.triageBucketEl) {
-      card.triageBucketEl.textContent = `Bucket: ${currentBucket}`;
     }
 
     const triageActions = [
@@ -953,12 +937,6 @@
         }
       });
     }
-    if (card.targetStatusEl) {
-      card.targetStatusEl.textContent = targetPriceCents > 0
-        ? `Target: ${(targetPriceCents / 100).toFixed(2)}`
-        : "Target: -";
-    }
-
     const parseTargetValueToCents = (raw) => {
       const normalized = String(raw || "").trim().replace(",", ".");
       if (!normalized) {
@@ -979,77 +957,22 @@
           return;
         }
         event.preventDefault();
-        const nextTarget = parseTargetValueToCents(card.targetPriceInput.value);
-        if (nextTarget === null) {
-          setStatus("Enter a valid target price (for example: 59.90).", true);
-          return;
-        }
         try {
+          const rawTarget = String(card.targetPriceInput.value || "").trim();
+          if (!rawTarget) {
+            await onSetIntent(appId, { targetPriceCents: null });
+            setStatus("Target price cleared.");
+            return;
+          }
+          const nextTarget = parseTargetValueToCents(rawTarget);
+          if (nextTarget === null) {
+            setStatus("Enter a valid target price (for example: 59.90).", true);
+            return;
+          }
           await onSetIntent(appId, { targetPriceCents: nextTarget });
           setStatus("Target price saved.");
         } catch (error) {
           setStatus(String(error?.message || "Failed to save target price."), true);
-        }
-      });
-    }
-    if (card.targetSaveBtn) {
-      card.targetSaveBtn.addEventListener("click", async () => {
-        const nextTarget = parseTargetValueToCents(card.targetPriceInput?.value || "");
-        if (nextTarget === null) {
-          setStatus("Enter a valid target price (for example: 59.90).", true);
-          return;
-        }
-        try {
-          await onSetIntent(appId, { targetPriceCents: nextTarget });
-          setStatus("Target price saved.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to save target price."), true);
-        }
-      });
-    }
-    if (card.targetClearBtn) {
-      card.targetClearBtn.addEventListener("click", async () => {
-        try {
-          await onSetIntent(appId, { targetPriceCents: null });
-          setStatus("Target price cleared.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to clear target price."), true);
-        }
-      });
-    }
-
-    if (card.noteInput) {
-      card.noteInput.value = noteText;
-      card.noteInput.addEventListener("keydown", async (event) => {
-        if (event.key !== "Enter") {
-          return;
-        }
-        event.preventDefault();
-        try {
-          await onSetIntent(appId, { note: String(card.noteInput?.value || "").slice(0, 600) });
-          setStatus("Note saved.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to save note."), true);
-        }
-      });
-    }
-    if (card.noteSaveBtn) {
-      card.noteSaveBtn.addEventListener("click", async () => {
-        try {
-          await onSetIntent(appId, { note: String(card.noteInput?.value || "").slice(0, 600) });
-          setStatus("Note saved.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to save note."), true);
-        }
-      });
-    }
-    if (card.noteClearBtn) {
-      card.noteClearBtn.addEventListener("click", async () => {
-        try {
-          await onSetIntent(appId, { note: "" });
-          setStatus("Note cleared.");
-        } catch (error) {
-          setStatus(String(error?.message || "Failed to clear note."), true);
         }
       });
     }
@@ -1213,23 +1136,13 @@
       if (card.discountEl) {
         card.discountEl.textContent = `Discount: ${meta.discountText || "-"}`;
       }
-      if (card.targetStatusEl) {
-        const priceLabel = String(meta?.priceText || "").trim().toLowerCase();
-        const priceKnown = priceLabel && priceLabel !== "-" && priceLabel !== "not announced";
-        const priceCents = Number(meta?.priceFinal || 0);
-        const hasTarget = Number.isFinite(targetPriceCents) && targetPriceCents > 0;
-        const hit = hasTarget && priceKnown && Number.isFinite(priceCents) && priceCents <= targetPriceCents;
-        if (hasTarget) {
-          card.targetStatusEl.textContent = hit
-            ? `Target: ${(targetPriceCents / 100).toFixed(2)} (hit)`
-            : `Target: ${(targetPriceCents / 100).toFixed(2)}`;
-        } else {
-          card.targetStatusEl.textContent = "Target: -";
-        }
-        card.targetStatusEl.classList.toggle("target-hit", hit);
-        if (card.cardEl) {
-          card.cardEl.classList.toggle("target-hit", hit);
-        }
+      const priceLabel = String(meta?.priceText || "").trim().toLowerCase();
+      const priceKnown = priceLabel && priceLabel !== "-" && priceLabel !== "not announced";
+      const priceCents = Number(meta?.priceFinal || 0);
+      const hasTarget = Number.isFinite(targetPriceCents) && targetPriceCents > 0;
+      const hit = hasTarget && priceKnown && Number.isFinite(priceCents) && priceCents <= targetPriceCents;
+      if (card.cardEl) {
+        card.cardEl.classList.toggle("target-hit", hit);
       }
       if (card.reviewEl) {
         card.reviewEl.textContent = `Reviews: ${meta.reviewText || "-"}`;
