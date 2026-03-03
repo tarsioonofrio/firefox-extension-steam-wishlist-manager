@@ -81,18 +81,9 @@ This section is the user-facing map of current screens and capabilities.
 
 ## What It Does Not Do
 
-- It does not rewrite Steam server-side wishlist order.
+- It does not run unattended or bulk account automation.
 - It does not send your custom collections to Steam.
-- It does not run unattended account automation.
-
-## Core Behavior
-
-- Collection data is local-only (`browser.storage.local`).
-- The extension does **not** modify Steam server-side wishlist ordering.
-- Primary rank source ("Your rank"):
-  - `https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid={steamId}`
-  - Uses `appid`, `priority`, `date_added`.
-- `date_added` is used in card line `Wishlist: ...`.
+- It does not force server-side writes without user-triggered actions.
 
 ## States / Buckets Semantics
 
@@ -102,6 +93,15 @@ This section is the user-facing map of current screens and capabilities.
 - `Follow`: tracking intent (`track=1`) independent from buy intent.
 - `Archive`: considered done/owned (`owned=true`, `track=0`, `buy=0`, bucket `ARCHIVE`).
 - `Mute`: local visibility control only (not a bucket; does not change `buy`, `track`, or `owned`).
+
+## Core Behavior
+
+- Collection data is local-only (`browser.storage.local`).
+- The extension can apply user-triggered Steam writes (for example wishlist/follow add or remove) on a best-effort basis.
+- Primary rank source ("Your rank"):
+  - `https://api.steampowered.com/IWishlistService/GetWishlist/v1/?steamid={steamId}`
+  - Uses `appid`, `priority`, `date_added`.
+- `date_added` is used in card line `Wishlist: ...`.
 
 ## Data Sources
 
