@@ -59,17 +59,16 @@
         </div>
         <div id="queue-column-resize-handle" class="queue-column-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize queue columns"></div>
         <div class="info">
-          <img id="capsule-image" class="capsule-image" alt="">
+          <a id="capsule-link" class="capsule-link" target="_blank" rel="noopener noreferrer">
+            <img id="capsule-image" class="capsule-image" alt="">
+          </a>
           <div class="actions">
             <button id="action-confirm-btn" type="button">Confirm</button>
             <button id="action-maybe-btn" type="button">Maybe</button>
             <button id="action-track-btn" type="button">Follow</button>
             <button id="action-archive-btn" type="button">Archive</button>
-            <label class="target">
-              <span>Target</span>
-              <input id="target-input" type="number" min="0" step="0.01" placeholder="">
-            </label>
           </div>
+          <p id="short-description" class="short-description">-</p>
           <div class="meta-grid">
             <p id="price-text" class="meta">Price: -</p>
             <p id="discount-text" class="meta">Discount: -</p>
@@ -77,6 +76,10 @@
             <p id="release-text" class="meta">Release: -</p>
           </div>
           <div id="tags-row" class="tags-row"></div>
+          <label class="target">
+            <span>Target</span>
+            <input id="target-input" type="number" min="0" step="0.01" placeholder="">
+          </label>
         </div>
       </div>
     </article>

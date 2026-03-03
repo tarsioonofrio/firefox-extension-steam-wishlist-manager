@@ -3,6 +3,9 @@ const QUEUE_COLLECTION_KEY = "swmQueueCollectionV2";
 const QUEUE_STATE_KEY = "swmQueueStateV2";
 const QUEUE_INDEX_KEY = "swmQueueIndexV2";
 const QUEUE_LEFT_WIDTH_KEY = "swmQueueLeftWidthV1";
+const QUEUE_META_CACHE_KEY = "steamWishlistQueueMetaCacheV1";
+const QUEUE_MEDIA_CACHE_KEY = "steamWishlistQueueMediaCacheV1";
+const QUEUE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const steamFetchUtils = window.SWMSteamFetch || {};
 
@@ -14,6 +17,66 @@ let currentQueueConfig = { collection: "__wishlist__", state: "all" };
 let mediaState = { index: 0, items: [] };
 let mediaSeq = 0;
 const metaCache = new Map();
+const mediaCache = new Map();
+
+function mapToObject(map) {
+  const out = {};
+  for (const [key, value] of map.entries()) {
+    out[key] = value;
+  }
+  return out;
+}
+
+function isFreshCache(cachedAt) {
+  const n = Number(cachedAt || 0);
+  return Number.isFinite(n) && n > 0 && (Date.now() - n) < QUEUE_CACHE_TTL_MS;
+}
+
+async function loadQueueCaches() {
+  try {
+    const stored = await browser.storage.local.get([QUEUE_META_CACHE_KEY, QUEUE_MEDIA_CACHE_KEY]);
+    const metaObject = stored?.[QUEUE_META_CACHE_KEY];
+    const mediaObject = stored?.[QUEUE_MEDIA_CACHE_KEY];
+    if (metaObject && typeof metaObject === "object") {
+      for (const [appId, value] of Object.entries(metaObject)) {
+        if (!appId || !value || typeof value !== "object") {
+          continue;
+        }
+        metaCache.set(appId, value);
+      }
+    }
+    if (mediaObject && typeof mediaObject === "object") {
+      for (const [appId, value] of Object.entries(mediaObject)) {
+        if (!appId || !value || typeof value !== "object") {
+          continue;
+        }
+        mediaCache.set(appId, value);
+      }
+    }
+  } catch {
+    // noop
+  }
+}
+
+async function persistMetaCache() {
+  try {
+    await browser.storage.local.set({
+      [QUEUE_META_CACHE_KEY]: mapToObject(metaCache)
+    });
+  } catch {
+    // noop
+  }
+}
+
+async function persistMediaCache() {
+  try {
+    await browser.storage.local.set({
+      [QUEUE_MEDIA_CACHE_KEY]: mapToObject(mediaCache)
+    });
+  } catch {
+    // noop
+  }
+}
 
 function setStatus(message, isError = false) {
   const el = document.getElementById("status");
@@ -248,12 +311,16 @@ function reconcileQueueIds(collection, stateFilter, currentAppId = "") {
 }
 
 async function fetchMeta(appId) {
-  if (metaCache.has(appId)) {
-    return metaCache.get(appId);
+  const cachedMeta = metaCache.get(appId);
+  if (cachedMeta && isFreshCache(cachedMeta.cachedAt)) {
+    return cachedMeta;
   }
+  const now = Date.now();
   const fallback = {
+    cachedAt: now,
     titleText: "",
     capsuleImage: "",
+    shortDescription: "",
     releaseText: "-",
     reviewText: "No user reviews",
     priceText: "-",
@@ -268,7 +335,11 @@ async function fetchMeta(appId) {
     );
     const appData = payload?.[appId]?.data || null;
     if (!appData) {
+      if (cachedMeta) {
+        return cachedMeta;
+      }
       metaCache.set(appId, fallback);
+      await persistMetaCache();
       return fallback;
     }
     const reviewPayload = await fetchJson(
@@ -283,8 +354,10 @@ async function fetchMeta(appId) {
     const genres = Array.isArray(appData?.genres) ? appData.genres.map((x) => String(x?.description || "").trim()).filter(Boolean) : [];
     const categories = Array.isArray(appData?.categories) ? appData.categories.map((x) => String(x?.description || "").trim()).filter(Boolean) : [];
     const meta = {
+      cachedAt: now,
       titleText: String(appData?.name || "").trim(),
       capsuleImage: String(appData?.capsule_imagev5 || appData?.capsule_image || appData?.header_image || "").trim(),
+      shortDescription: String(appData?.short_description || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(),
       releaseText: String(appData?.release_date?.date || (appData?.release_date?.coming_soon ? "Coming soon" : "-")),
       reviewText: totalVotes > 0 ? `${positivePct}% positive (${totalVotes} reviews)` : "No user reviews",
       priceText: appData?.is_free === true
@@ -296,14 +369,27 @@ async function fetchMeta(appId) {
       tags: Array.from(new Set([...genres, ...categories])).slice(0, 12)
     };
     metaCache.set(appId, meta);
+    await persistMetaCache();
     return meta;
   } catch {
+    if (cachedMeta) {
+      return cachedMeta;
+    }
     metaCache.set(appId, fallback);
+    await persistMetaCache();
     return fallback;
   }
 }
 
 async function fetchMedia(appId) {
+  const cachedMedia = mediaCache.get(appId);
+  if (cachedMedia && isFreshCache(cachedMedia.cachedAt)) {
+    return {
+      videos: Array.isArray(cachedMedia.videos) ? cachedMedia.videos : [],
+      images: Array.isArray(cachedMedia.images) ? cachedMedia.images : []
+    };
+  }
+  const now = Date.now();
   const fetchJson = steamFetchUtils.fetchJson || ((url, options = {}) => fetch(url, options).then((r) => r.json()));
   const fetchText = steamFetchUtils.fetchText || ((url, options = {}) => fetch(url, options).then((r) => r.text()));
   const normalizeMediaUrl = (rawUrl) => {
@@ -420,28 +506,49 @@ async function fetchMedia(appId) {
         );
         const parsed = parseStoreMediaFromHtml(html);
         if (parsed.videos.length > 0) {
-          return {
+          const media = {
             videos: parsed.videos,
             images: images.length > 0 ? images : parsed.images
           };
+          mediaCache.set(appId, { ...media, cachedAt: now });
+          await persistMediaCache();
+          return media;
         }
         if (images.length === 0 && parsed.images.length > 0) {
-          return { videos: [], images: parsed.images };
+          const media = { videos: [], images: parsed.images };
+          mediaCache.set(appId, { ...media, cachedAt: now });
+          await persistMediaCache();
+          return media;
         }
       } catch {
         // keep appdetails result
       }
     }
-    return { videos, images };
+    const media = { videos, images };
+    mediaCache.set(appId, { ...media, cachedAt: now });
+    await persistMediaCache();
+    return media;
   } catch {
     try {
       const html = await fetchText(
         `https://store.steampowered.com/app/${encodeURIComponent(appId)}/?l=english`,
         { cache: "no-store", credentials: "include" }
       );
-      return parseStoreMediaFromHtml(html);
+      const media = parseStoreMediaFromHtml(html);
+      mediaCache.set(appId, { ...media, cachedAt: now });
+      await persistMediaCache();
+      return media;
     } catch {
-      return { videos: [], images: [] };
+      if (cachedMedia) {
+        return {
+          videos: Array.isArray(cachedMedia.videos) ? cachedMedia.videos : [],
+          images: Array.isArray(cachedMedia.images) ? cachedMedia.images : []
+        };
+      }
+      const media = { videos: [], images: [] };
+      mediaCache.set(appId, { ...media, cachedAt: now });
+      await persistMediaCache();
+      return media;
     }
   }
 }
@@ -599,13 +706,18 @@ async function renderCurrent() {
   hydrateQueueLeftWidth();
 
   const titleEl = document.getElementById("game-link");
+  const capsuleLinkEl = document.getElementById("capsule-link");
   const appIdEl = document.getElementById("game-appid");
   const posEl = document.getElementById("queue-pos");
   const targetInput = document.getElementById("target-input");
+  const steamUrl = `https://store.steampowered.com/app/${encodeURIComponent(appId)}/`;
   const fallbackTitle = String(item.title || "").trim() || `App ${appId}`;
   if (titleEl) {
     titleEl.textContent = fallbackTitle;
-    titleEl.href = `https://store.steampowered.com/app/${encodeURIComponent(appId)}/`;
+    titleEl.href = steamUrl;
+  }
+  if (capsuleLinkEl) {
+    capsuleLinkEl.href = steamUrl;
   }
   if (appIdEl) {
     appIdEl.textContent = `AppID: ${appId}`;
@@ -629,6 +741,7 @@ async function renderCurrent() {
   const reviewText = document.getElementById("review-text");
   const releaseText = document.getElementById("release-text");
   const capsuleImage = document.getElementById("capsule-image");
+  const shortDescriptionEl = document.getElementById("short-description");
   if (priceText) {
     priceText.textContent = `Price: ${meta.priceText || "-"}`;
   }
@@ -640,6 +753,9 @@ async function renderCurrent() {
   }
   if (releaseText) {
     releaseText.textContent = `Release: ${meta.releaseText || "-"}`;
+  }
+  if (shortDescriptionEl) {
+    shortDescriptionEl.textContent = String(meta?.shortDescription || "").trim() || "-";
   }
   if (capsuleImage) {
     const capsuleUrl = String(meta?.capsuleImage || "").trim();
@@ -887,6 +1003,7 @@ function bindEvents() {
 async function init() {
   await loadState();
   await loadWishlistOrder();
+  await loadQueueCaches();
   populateCollectionSelect();
   hydrateUiState();
   hydrateQueueLeftWidth();

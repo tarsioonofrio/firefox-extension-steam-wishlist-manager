@@ -275,6 +275,10 @@ button.active {
   background: #111;
 }
 
+.capsule-link {
+  display: block;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -283,10 +287,18 @@ button.active {
   min-height: 34px;
 }
 
+.short-description {
+  margin: 0;
+  color: #c7d5e0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
 .target {
   display: inline-flex;
   gap: 8px;
   align-items: center;
+  margin-top: 2px;
 }
 
 .target input {
