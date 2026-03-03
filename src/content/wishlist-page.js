@@ -1809,9 +1809,21 @@ function renderWishlistMediaTooltipState(tooltip) {
       video.controls = true;
       video.autoplay = true;
       video.muted = true;
-      video.loop = true;
+      video.loop = videos.length <= 1;
       video.playsInline = true;
       video.preload = "none";
+      video.addEventListener("ended", () => {
+        const nextState = tooltip._state && typeof tooltip._state === "object" ? tooltip._state : null;
+        if (!nextState || nextState.mode !== "video") {
+          return;
+        }
+        const nextVideos = Array.isArray(nextState.videos) ? nextState.videos : [];
+        if (nextVideos.length === 0) {
+          return;
+        }
+        nextState.index = (Number(nextState.index || 0) + 1) % nextVideos.length;
+        renderWishlistMediaTooltipState(tooltip);
+      });
       video.addEventListener("error", () => {
         const nextState = tooltip._state && typeof tooltip._state === "object" ? tooltip._state : {};
         if (nextState.appId && !nextState.steamPlayerFallback) {

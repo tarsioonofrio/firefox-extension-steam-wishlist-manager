@@ -11,7 +11,7 @@ This extension helps you turn one huge wishlist into manageable views:
 - Dynamic collections: saved views generated from current sort + filters.
 - Fast filtering and sorting on a dedicated collections page.
 
-Main goal: make prioritization practical without changing your Steam account data.
+Main goal: make prioritization practical while keeping local intent as the source of truth.
 
 ## What It Does (User View)
 
@@ -20,19 +20,21 @@ Main goal: make prioritization practical without changing your Steam account dat
 - Reads your wishlist rank from Steam API (`Your rank`), and enriches game metadata locally.
 - Lets you add/remove a game to/from static collections from card and line views.
 - Supports batch add/remove for multiple visible games.
-- Supports batch triage actions (`Buy`, `Maybe`, `Track`, `Mute`, `Unmute`).
+- Supports batch triage actions (`Confirmed`, `Maybe`, `Follow`, `Mute`, `Unmute`).
 - Keyboard shortcuts:
   - Navigation: `j` / `k`
-  - Triage focused item: `1` Track toggle, `2` Maybe, `3` Buy, `4` Archive
-  - Batch triage on selected items: `Shift+1` Buy, `Shift+2` Maybe, `Shift+3` Track, `Shift+4` Mute, `Shift+5` Unmute
+  - Triage focused item: `1` Follow toggle, `2` Maybe, `3` Confirmed, `4` Archive
+  - Batch triage on selected items: `Shift+1` Confirmed, `Shift+2` Maybe, `Shift+3` Follow, `Shift+4` Mute, `Shift+5` Unmute
 - When Batch mode is active, a top hint shows available batch shortcuts and selected count.
 - Supports saved dynamic collections based on current filters/sort.
-- Includes independent intent workflow (`Buy`, `Maybe`, `Track`, `Archive`) with local mute/unmute.
-- Adds virtual views (`Inbox`, `Track`, `Buy radar`, `Archive`, `Owned`) in Collections.
+- Includes independent intent workflow (`Confirmed`, `Maybe`, `Follow`, `Archive`) with local mute/unmute.
+- Collections top selectors now separate concerns:
+  - Collection selector shows `Wishlist (all games)` plus user collections.
+  - State selector shows state counts in parentheses.
 - Track feed is available in a dedicated page (`Feed / Acompanhar`) focused on tracked games.
 - Supports per-game target price and filter for games at/under target.
 - Highlights cards/rows when current price hits target.
-- Supports local per-game notes (saved in browser storage); search matches title, appid, and notes.
+- Media tooltips (Wishlist + Collections) auto-play videos sequentially and loop.
 - Keeps all collection data local in your browser profile.
 
 ## User Screens and Features
@@ -41,16 +43,17 @@ This section is the user-facing map of current screens and capabilities.
 
 ### Extension Popup
 
-- Opens key pages quickly: `Collections`, `Feed / Acompanhar`, and settings-related flows.
+- Opens key pages quickly: `Collections`, `Feed / Acompanhar`, and `Configurations`.
 - Acts as the main entry point while browsing Steam pages.
 
 ### Collections Page
 
 - Main workspace for triage and organization of large wishlists.
 - Supports static collections (manual) and dynamic collections (saved filters + sort).
-- Supports independent intent actions per game: `Buy`, `Maybe`, `Track`, `Archive`.
-- Supports mute/unmute, target price, notes, and batch actions.
+- Supports independent intent actions per game: `Confirmed`, `Maybe`, `Follow`, `Archive`.
+- Supports mute/unmute, target price, and batch actions.
 - Includes sorting, rich filters, pagination, and card/line style workflows.
+- Right filters column is resizable and can be fully hidden/shown.
 
 ### Feed / Acompanhar Page
 
@@ -61,6 +64,7 @@ This section is the user-facing map of current screens and capabilities.
 
 - Adds extension controls to wishlist cards for faster actions.
 - Adds filter UX through extension sidebar and wishlist integration points.
+- Media tooltip previews now auto-advance to the next video and loop continuously across all available videos.
 - Uses URL-based filters when possible (`tagids`, `sort`, etc.) and internal Steam
   service integration for advanced option filters where applicable.
 
@@ -72,14 +76,14 @@ This section is the user-facing map of current screens and capabilities.
 ### Data and Safety Behavior
 
 - Local state is stored in browser local storage.
-- Steam-side actions are best-effort and degrade gracefully when endpoints are unstable.
+- Steam-side actions (for example wishlist/follow intents) are user-triggered and best-effort; they degrade gracefully when endpoints are unstable.
 - Existing local intent state remains consistent even when Steam write operations fail.
 
 ## What It Does Not Do
 
 - It does not rewrite Steam server-side wishlist order.
 - It does not send your custom collections to Steam.
-- It does not perform automated account actions.
+- It does not run unattended account automation.
 
 ## Core Behavior
 
@@ -328,9 +332,10 @@ Script load order is declared at the bottom of `src/pages/collections.html`.
 ## Usage
 
 1. Click extension icon -> `Open Collections Page`.
-2. Select `Steam wishlist` or a custom collection.
-3. Use search, sort, filters, and pagination.
-4. Add/remove collection items from Steam app pages (where enabled).
+2. In **Collection**, choose `Wishlist (all games)` or a custom collection.
+3. In **State**, choose the intent slice (`All states`, `Inbox`, `Follow`, `Maybe`, `Confirmed`, `Archive`) with live counts.
+4. Use search, sort, filters, and pagination.
+5. Add/remove collection items from Steam app pages (where enabled).
 
 ## MCP Server (Initial)
 
@@ -408,11 +413,13 @@ Expected output:
 ## Smoke Checklist (Post-Refactor)
 
 1. Open collections page from extension popup.
-2. Switch source between `Steam wishlist` and a custom collection.
+2. Switch source between `Wishlist (all games)` and a custom collection.
 3. Validate sort menu for `Your rank`, `Title`, `Price`, `Discount`.
-4. Exercise filters: tags, rating/reviews, price/discount, release year.
-5. Create, rename, and delete a collection from menu actions.
-6. Refresh one card and refresh page data.
+4. Validate State selector counts and labels (`Follow`, `Confirmed`).
+5. Exercise filters: tags, rating/reviews, price/discount, release year.
+6. Resize and hide/show the right filters sidebar.
+7. Create, rename, and delete a collection from menu actions.
+8. Refresh one card and refresh page data.
 
 Automated smoke coverage:
 - `test:logic`: rank/sort/filter/actions + fetch telemetry sanity.
