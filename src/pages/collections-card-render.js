@@ -1,6 +1,7 @@
 (() => {
   const MEDIA_TOOLTIP_ID = "swm-media-tooltip";
   const MEDIA_TOOLTIP_STYLE_ID = "swm-media-tooltip-style";
+  const MEDIA_TOOLTIP_SIZE_KEY = "swm-media-tooltip-size-v1";
   const MEDIA_TOOLTIP_FETCH_LABEL = "media tooltip fetch timeout";
   const MEDIA_TOOLTIP_FETCH_TIMEOUT_MS = 12000;
   let mediaTooltipHoverSeq = 0;
@@ -21,6 +22,98 @@
         tooltip.classList.add("hidden");
       }
     }, Math.max(0, Number(delay || 0)));
+  }
+
+  function readTooltipSize() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(MEDIA_TOOLTIP_SIZE_KEY) || "{}");
+      const width = Number(parsed?.width || 0);
+      return {
+        width: Number.isFinite(width) ? Math.max(280, Math.min(900, Math.round(width))) : 0
+      };
+    } catch {
+      return { width: 0 };
+    }
+  }
+
+  function saveTooltipSize(tooltip) {
+    if (!(tooltip instanceof HTMLElement)) {
+      return;
+    }
+    const width = Math.max(280, Math.min(900, Math.round(Number(tooltip.offsetWidth || 0))));
+    try {
+      localStorage.setItem(MEDIA_TOOLTIP_SIZE_KEY, JSON.stringify({ width }));
+    } catch {
+      // noop
+    }
+  }
+
+  function getTooltipChromeHeight(tooltip) {
+    if (!(tooltip instanceof HTMLElement)) {
+      return 96;
+    }
+    const px = (value) => {
+      const n = Number.parseFloat(String(value || "0"));
+      return Number.isFinite(n) ? n : 0;
+    };
+    const computed = getComputedStyle(tooltip);
+    const status = tooltip.querySelector(".swm-media-tooltip-status");
+    const controls = tooltip.querySelector(".swm-media-tooltip-controls");
+    const statusStyle = status ? getComputedStyle(status) : null;
+    const controlsStyle = controls ? getComputedStyle(controls) : null;
+    const chrome = (
+      px(computed.paddingTop)
+      + px(computed.paddingBottom)
+      + px(computed.borderTopWidth)
+      + px(computed.borderBottomWidth)
+      + (status ? status.getBoundingClientRect().height : 0)
+      + (controls ? controls.getBoundingClientRect().height : 0)
+      + (statusStyle ? px(statusStyle.marginTop) + px(statusStyle.marginBottom) : 0)
+      + (controlsStyle ? px(controlsStyle.marginTop) + px(controlsStyle.marginBottom) : 0)
+    );
+    return Math.max(72, Math.min(220, Math.round(chrome || 96)));
+  }
+
+  function applyTooltipProportionalSize(tooltip, preferredWidth = 0) {
+    if (!(tooltip instanceof HTMLElement)) {
+      return;
+    }
+    const fallbackWidth = Number(tooltip.offsetWidth || 420) || 420;
+    const width = Math.max(280, Math.min(900, Math.round(Number(preferredWidth || fallbackWidth))));
+    const chromeHeight = getTooltipChromeHeight(tooltip);
+    const stageHeight = Math.round(width * 9 / 16);
+    const height = Math.max(210, Math.min(760, stageHeight + chromeHeight));
+    tooltip.style.width = `${width}px`;
+    tooltip.style.height = `${height}px`;
+  }
+
+  function enableTooltipResizePersistence(tooltip) {
+    if (!(tooltip instanceof HTMLElement) || tooltip.dataset.swmResizeBound === "1") {
+      return;
+    }
+    tooltip.dataset.swmResizeBound = "1";
+    tooltip.style.resize = "both";
+    tooltip.style.overflow = "hidden";
+    let debounce = null;
+    let applyingSize = false;
+    const observer = new ResizeObserver(() => {
+      if (tooltip.classList.contains("hidden") || applyingSize) {
+        return;
+      }
+      const expectedWidth = Math.max(280, Math.min(900, Math.round(Number(tooltip.offsetWidth || 0))));
+      const chromeHeight = getTooltipChromeHeight(tooltip);
+      const expectedHeight = Math.max(210, Math.min(760, Math.round((expectedWidth * 9 / 16) + chromeHeight)));
+      if (Math.abs(expectedHeight - Number(tooltip.offsetHeight || 0)) > 1) {
+        applyingSize = true;
+        tooltip.style.height = `${expectedHeight}px`;
+        requestAnimationFrame(() => {
+          applyingSize = false;
+        });
+      }
+      clearTimeout(debounce);
+      debounce = setTimeout(() => saveTooltipSize(tooltip), 180);
+    });
+    observer.observe(tooltip);
   }
 
   function normalizeMediaUrl(rawUrl) {
@@ -226,6 +319,7 @@
         position: fixed;
         z-index: 2147483647;
         width: min(420px, calc(100vw - 20px));
+        max-width: calc(100vw - 20px);
         min-height: 210px;
         background: rgba(20, 27, 35, 0.97);
         border: 1px solid rgba(108, 166, 202, 0.55);
@@ -315,6 +409,7 @@
       videos: [],
       images: []
     };
+    enableTooltipResizePersistence(tooltip);
 
     tooltip.addEventListener("mouseenter", () => clearMediaTooltipHideTimer());
     tooltip.addEventListener("mouseleave", () => scheduleMediaTooltipHide(120));
@@ -360,6 +455,12 @@
   function positionMediaTooltip(tooltip, anchorEl) {
     if (!tooltip || !anchorEl) {
       return;
+    }
+    const saved = readTooltipSize();
+    if (saved.width > 0) {
+      applyTooltipProportionalSize(tooltip, saved.width);
+    } else {
+      applyTooltipProportionalSize(tooltip, Number(tooltip.offsetWidth || 420));
     }
     const rect = anchorEl.getBoundingClientRect();
     const width = Math.max(360, Number(tooltip.offsetWidth || 0));

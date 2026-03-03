@@ -7,6 +7,7 @@ const APP_LINK_SELECTOR = "a[href*='/app/']";
 const WISHLIST_STATE_FILTER_KEY = "swmWishlistStateFilter";
 const WISHLIST_TAG_SHOW_STEP = 12;
 const WISHLIST_MEDIA_TOOLTIP_ID = "swm-wishlist-media-tooltip";
+const WISHLIST_MEDIA_TOOLTIP_SIZE_KEY = "swm-media-tooltip-size-v1";
 const WISHLIST_MEDIA_FETCH_TIMEOUT_MS = 12000;
 const WISHLIST_MULTI_FILTER_KEYS = [
   "types",
@@ -800,7 +801,7 @@ function ensureWishlistFollowUiStyle() {
       position: fixed;
       z-index: 2147483002;
       width: 360px;
-      max-width: min(92vw, 360px);
+      max-width: 92vw;
       background: rgba(11, 20, 31, 0.98);
       border: 1px solid #3d556e;
       border-radius: 8px;
@@ -1295,6 +1296,98 @@ function scheduleWishlistMediaTooltipHide(delayMs = 120) {
   }, Math.max(0, Number(delayMs || 0)));
 }
 
+function readWishlistTooltipSize() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WISHLIST_MEDIA_TOOLTIP_SIZE_KEY) || "{}");
+    const width = Number(parsed?.width || 0);
+    return {
+      width: Number.isFinite(width) ? Math.max(280, Math.min(900, Math.round(width))) : 0
+    };
+  } catch {
+    return { width: 0 };
+  }
+}
+
+function saveWishlistTooltipSize(tooltip) {
+  if (!(tooltip instanceof HTMLElement)) {
+    return;
+  }
+  const width = Math.max(280, Math.min(900, Math.round(Number(tooltip.offsetWidth || 0))));
+  try {
+    localStorage.setItem(WISHLIST_MEDIA_TOOLTIP_SIZE_KEY, JSON.stringify({ width }));
+  } catch {
+    // noop
+  }
+}
+
+function getWishlistTooltipChromeHeight(tooltip) {
+  if (!(tooltip instanceof HTMLElement)) {
+    return 96;
+  }
+  const px = (value) => {
+    const n = Number.parseFloat(String(value || "0"));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const computed = getComputedStyle(tooltip);
+  const status = tooltip.querySelector(".swm-wishlist-media-tooltip-status");
+  const controls = tooltip.querySelector(".swm-wishlist-media-tooltip-controls");
+  const statusStyle = status ? getComputedStyle(status) : null;
+  const controlsStyle = controls ? getComputedStyle(controls) : null;
+  const chrome = (
+    px(computed.paddingTop)
+    + px(computed.paddingBottom)
+    + px(computed.borderTopWidth)
+    + px(computed.borderBottomWidth)
+    + (status ? status.getBoundingClientRect().height : 0)
+    + (controls ? controls.getBoundingClientRect().height : 0)
+    + (statusStyle ? px(statusStyle.marginTop) + px(statusStyle.marginBottom) : 0)
+    + (controlsStyle ? px(controlsStyle.marginTop) + px(controlsStyle.marginBottom) : 0)
+  );
+  return Math.max(72, Math.min(220, Math.round(chrome || 96)));
+}
+
+function applyWishlistTooltipProportionalSize(tooltip, preferredWidth = 0) {
+  if (!(tooltip instanceof HTMLElement)) {
+    return;
+  }
+  const fallbackWidth = Number(tooltip.offsetWidth || 360) || 360;
+  const width = Math.max(280, Math.min(900, Math.round(Number(preferredWidth || fallbackWidth))));
+  const chromeHeight = getWishlistTooltipChromeHeight(tooltip);
+  const stageHeight = Math.round(width * 9 / 16);
+  const height = Math.max(210, Math.min(760, stageHeight + chromeHeight));
+  tooltip.style.width = `${width}px`;
+  tooltip.style.height = `${height}px`;
+}
+
+function enableWishlistTooltipResizePersistence(tooltip) {
+  if (!(tooltip instanceof HTMLElement) || tooltip.dataset.swmResizeBound === "1") {
+    return;
+  }
+  tooltip.dataset.swmResizeBound = "1";
+  tooltip.style.resize = "both";
+  tooltip.style.overflow = "hidden";
+  let debounce = null;
+  let applyingSize = false;
+  const observer = new ResizeObserver(() => {
+    if (tooltip.classList.contains("hidden") || applyingSize) {
+      return;
+    }
+    const expectedWidth = Math.max(280, Math.min(900, Math.round(Number(tooltip.offsetWidth || 0))));
+    const chromeHeight = getWishlistTooltipChromeHeight(tooltip);
+    const expectedHeight = Math.max(210, Math.min(760, Math.round((expectedWidth * 9 / 16) + chromeHeight)));
+    if (Math.abs(expectedHeight - Number(tooltip.offsetHeight || 0)) > 1) {
+      applyingSize = true;
+      tooltip.style.height = `${expectedHeight}px`;
+      requestAnimationFrame(() => {
+        applyingSize = false;
+      });
+    }
+    clearTimeout(debounce);
+    debounce = setTimeout(() => saveWishlistTooltipSize(tooltip), 180);
+  });
+  observer.observe(tooltip);
+}
+
 function normalizeWishlistMediaUrl(rawUrl) {
   const url = String(rawUrl || "")
     .trim()
@@ -1542,6 +1635,7 @@ function ensureWishlistMediaTooltip() {
     </div>
   `;
   tooltip._state = { mode: "video", index: 0, videos: [], images: [] };
+  enableWishlistTooltipResizePersistence(tooltip);
   tooltip.addEventListener("mouseenter", () => clearWishlistMediaTooltipHideTimer());
   tooltip.addEventListener("mouseleave", () => scheduleWishlistMediaTooltipHide(120));
   tooltip.addEventListener("click", (event) => {
@@ -1580,6 +1674,12 @@ function ensureWishlistMediaTooltip() {
 function positionWishlistMediaTooltip(tooltip, anchorEl) {
   if (!tooltip || !anchorEl) {
     return;
+  }
+  const saved = readWishlistTooltipSize();
+  if (saved.width > 0) {
+    applyWishlistTooltipProportionalSize(tooltip, saved.width);
+  } else {
+    applyWishlistTooltipProportionalSize(tooltip, Number(tooltip.offsetWidth || 360));
   }
   const rect = anchorEl.getBoundingClientRect();
   const width = Math.max(340, Number(tooltip.offsetWidth || 0));
