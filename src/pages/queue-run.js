@@ -32,6 +32,7 @@ const EXTRA_SHOW_STEP = 12;
 const OPEN_ENDED_MAX_VALUE = 999999999;
 const ACTION_VISUAL_FEEDBACK_MS = 220;
 const collectionsFiltersUtils = window.SWMCollectionsFilters || null;
+const sharedRangeControls = window.SWMSharedRangeControls || null;
 const EXTRA_FILTER_CONFIGS = [
   { key: "types", label: "Type", placeholder: "Search types..." },
   { key: "players", label: "Number of Players", placeholder: "Search players..." },
@@ -1832,60 +1833,13 @@ async function rerenderAfterAction(currentAppId = "") {
 }
 
 function bindEvents() {
-  const bindDualRangePriority = (minId, maxId) => {
-    const minEl = document.getElementById(minId);
-    const maxEl = document.getElementById(maxId);
-    if (!minEl || !maxEl) {
-      return;
-    }
-    const host = minEl.closest(".dual-range");
-    const bringMinFront = () => {
-      minEl.style.zIndex = "6";
-      maxEl.style.zIndex = "5";
-    };
-    const bringMaxFront = () => {
-      maxEl.style.zIndex = "6";
-      minEl.style.zIndex = "5";
-    };
-    const chooseClosestHandle = (clientX) => {
-      if (!host) {
-        return;
-      }
-      const rect = host.getBoundingClientRect();
-      if (!(rect.width > 0)) {
-        return;
-      }
-      const minV = Number(minEl.value || 0);
-      const maxV = Number(maxEl.value || 0);
-      const lo = Number(minEl.min || 0);
-      const hi = Number(minEl.max || 100);
-      const span = Math.max(1, hi - lo);
-      const minX = rect.left + ((minV - lo) / span) * rect.width;
-      const maxX = rect.left + ((maxV - lo) / span) * rect.width;
-      if (Math.abs(clientX - minX) <= Math.abs(clientX - maxX)) {
-        bringMinFront();
-      } else {
-        bringMaxFront();
-      }
-    };
-    bringMinFront();
-    minEl.addEventListener("pointerdown", bringMinFront);
-    minEl.addEventListener("mousedown", bringMinFront);
-    minEl.addEventListener("focus", bringMinFront);
-    minEl.addEventListener("input", bringMinFront);
-    maxEl.addEventListener("pointerdown", bringMaxFront);
-    maxEl.addEventListener("mousedown", bringMaxFront);
-    maxEl.addEventListener("focus", bringMaxFront);
-    maxEl.addEventListener("input", bringMaxFront);
-    if (host) {
-      host.addEventListener("mousemove", (event) => chooseClosestHandle(event.clientX));
-      host.addEventListener("pointerdown", (event) => chooseClosestHandle(event.clientX));
-    }
-  };
-
-  bindDualRangePriority("queue-rating-min-range", "queue-rating-max-range");
-  bindDualRangePriority("queue-discount-min-range", "queue-discount-max-range");
-  bindDualRangePriority("queue-release-year-min-range", "queue-release-year-max-range");
+  if (sharedRangeControls?.bindDualRangePairs) {
+    sharedRangeControls.bindDualRangePairs([
+      ["queue-rating-min-range", "queue-rating-max-range"],
+      ["queue-discount-min-range", "queue-discount-max-range"],
+      ["queue-release-year-min-range", "queue-release-year-max-range"]
+    ]);
+  }
 
   document.getElementById("list-select")?.addEventListener("change", () => {
     populateCollectionSelect(getListSelection());

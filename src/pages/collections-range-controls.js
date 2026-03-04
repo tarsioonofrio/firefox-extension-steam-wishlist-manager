@@ -1,5 +1,6 @@
 (() => {
   const OPEN_ENDED_MAX_VALUE = Number.MAX_SAFE_INTEGER;
+  const sharedRangeControls = window.SWMSharedRangeControls || null;
 
   function renderRangeControls(values) {
     const ratingMin = Number(values?.ratingMin ?? 0);
@@ -76,57 +77,13 @@
 
   function bindRangeControls(handlers) {
     const h = handlers || {};
-    const bindDualRangePriority = (minId, maxId) => {
-      const minEl = document.getElementById(minId);
-      const maxEl = document.getElementById(maxId);
-      if (!minEl || !maxEl) {
-        return;
-      }
-      const host = minEl.closest(".dual-range");
-      const bringMinFront = () => {
-        minEl.style.zIndex = "6";
-        maxEl.style.zIndex = "5";
-      };
-      const bringMaxFront = () => {
-        maxEl.style.zIndex = "6";
-        minEl.style.zIndex = "5";
-      };
-      const chooseClosestHandle = (clientX) => {
-        if (!host) {
-          return;
-        }
-        const rect = host.getBoundingClientRect();
-        if (!(rect.width > 0)) {
-          return;
-        }
-        const minV = Number(minEl.value || 0);
-        const maxV = Number(maxEl.value || 0);
-        const lo = Number(minEl.min || 0);
-        const hi = Number(minEl.max || 100);
-        const span = Math.max(1, hi - lo);
-        const minX = rect.left + ((minV - lo) / span) * rect.width;
-        const maxX = rect.left + ((maxV - lo) / span) * rect.width;
-        if (Math.abs(clientX - minX) <= Math.abs(clientX - maxX)) {
-          bringMinFront();
-        } else {
-          bringMaxFront();
-        }
-      };
-
-      bringMinFront();
-      for (const eventName of ["pointerdown", "mousedown", "touchstart", "focus", "input"]) {
-        minEl.addEventListener(eventName, bringMinFront);
-        maxEl.addEventListener(eventName, bringMaxFront);
-      }
-      if (host) {
-        host.addEventListener("mousemove", (event) => chooseClosestHandle(event.clientX));
-        host.addEventListener("pointerdown", (event) => chooseClosestHandle(event.clientX));
-      }
-    };
-
-    bindDualRangePriority("rating-min-range", "rating-max-range");
-    bindDualRangePriority("discount-min-range", "discount-max-range");
-    bindDualRangePriority("release-year-min-range", "release-year-max-range");
+    if (sharedRangeControls?.bindDualRangePairs) {
+      sharedRangeControls.bindDualRangePairs([
+        ["rating-min-range", "rating-max-range"],
+        ["discount-min-range", "discount-max-range"],
+        ["release-year-min-range", "release-year-max-range"]
+      ]);
+    }
 
     document.getElementById("rating-min-range")?.addEventListener("input", (event) => {
       h.onRatingMinInput?.(event.target.value);
