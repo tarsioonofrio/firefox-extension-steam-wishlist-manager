@@ -82,6 +82,7 @@
       if (!minEl || !maxEl) {
         return;
       }
+      const host = minEl.closest(".dual-range");
       const bringMinFront = () => {
         minEl.style.zIndex = "6";
         maxEl.style.zIndex = "5";
@@ -90,11 +91,36 @@
         maxEl.style.zIndex = "6";
         minEl.style.zIndex = "5";
       };
+      const chooseClosestHandle = (clientX) => {
+        if (!host) {
+          return;
+        }
+        const rect = host.getBoundingClientRect();
+        if (!(rect.width > 0)) {
+          return;
+        }
+        const minV = Number(minEl.value || 0);
+        const maxV = Number(maxEl.value || 0);
+        const lo = Number(minEl.min || 0);
+        const hi = Number(minEl.max || 100);
+        const span = Math.max(1, hi - lo);
+        const minX = rect.left + ((minV - lo) / span) * rect.width;
+        const maxX = rect.left + ((maxV - lo) / span) * rect.width;
+        if (Math.abs(clientX - minX) <= Math.abs(clientX - maxX)) {
+          bringMinFront();
+        } else {
+          bringMaxFront();
+        }
+      };
 
       bringMinFront();
       for (const eventName of ["pointerdown", "mousedown", "touchstart", "focus", "input"]) {
         minEl.addEventListener(eventName, bringMinFront);
         maxEl.addEventListener(eventName, bringMaxFront);
+      }
+      if (host) {
+        host.addEventListener("mousemove", (event) => chooseClosestHandle(event.clientX));
+        host.addEventListener("pointerdown", (event) => chooseClosestHandle(event.clientX));
       }
     };
 

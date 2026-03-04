@@ -320,55 +320,22 @@ button.active {
   inset: 0;
   width: 100%;
   margin: 0;
+  pointer-events: auto;
   background: transparent;
   border: 0;
   padding: 0;
-  -webkit-appearance: none;
-  appearance: none;
-  pointer-events: none;
 }
 
-.dual-range input[type="range"].range-min {
+#queue-rating-min-range,
+#queue-discount-min-range,
+#queue-release-year-min-range {
   z-index: 6;
 }
 
-.dual-range input[type="range"].range-max {
+#queue-rating-max-range,
+#queue-discount-max-range,
+#queue-release-year-max-range {
   z-index: 5;
-}
-
-.dual-range input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 999px;
-  background: #2f445a;
-}
-
-.dual-range input[type="range"]::-moz-range-track {
-  height: 4px;
-  border-radius: 999px;
-  background: #2f445a;
-}
-
-.dual-range input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  margin-top: -4px;
-  border-radius: 50%;
-  border: 1px solid #3f5c79;
-  background: #e6f4ff;
-  cursor: pointer;
-  pointer-events: auto;
-}
-
-.dual-range input[type="range"]::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1px solid #3f5c79;
-  background: #e6f4ff;
-  cursor: pointer;
-  pointer-events: auto;
 }
 
 .reviews-row {

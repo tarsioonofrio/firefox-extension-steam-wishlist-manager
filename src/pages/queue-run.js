@@ -717,31 +717,6 @@ function getFilteredIds(collection, listFilter) {
   return applyAdvancedFilters(deduped);
 }
 
-function resetQueueFiltersToDefaults() {
-  selectedTags = new Set();
-  tagSearchQuery = "";
-  tagShowLimit = TAG_SHOW_STEP;
-
-  selectedExtraFilters = Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, new Set()]));
-  extraFilterSearchQuery = Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, ""]));
-  extraFilterShowLimit = Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, EXTRA_SHOW_STEP]));
-
-  ratingMin = 0;
-  ratingMax = 100;
-  reviewsMin = 0;
-  reviewsMax = OPEN_ENDED_MAX_VALUE;
-  priceMin = 0;
-  priceMax = OPEN_ENDED_MAX_VALUE;
-  discountMin = 0;
-  discountMax = 100;
-  releaseTextEnabled = true;
-  releaseYearRangeEnabled = true;
-  releaseYearMin = 1970;
-  releaseYearMax = new Date().getUTCFullYear() + 1;
-
-  persistQueueFiltersState();
-}
-
 function reconcileQueueIds(collection, listFilter, currentAppId = "") {
   const allowedIds = getFilteredIds(collection, listFilter);
   const allowedSet = new Set(allowedIds);
@@ -1826,14 +1801,6 @@ async function startQueue(collectionOverride = "", listOverride = "") {
   }
   queueIndex = 0;
   buildQueueIds(collection, listFilter);
-  if (queueIds.length === 0) {
-    const baseIds = getQueueBaseIds(collection, listFilter);
-    if (baseIds.length > 0) {
-      resetQueueFiltersToDefaults();
-      buildQueueIds(collection, listFilter);
-      setStatus("No games matched active filters. Filters were reset for this run.");
-    }
-  }
   const setupPanelEl = document.querySelector(".setup-panel");
   const filtersPanelEl = document.getElementById("queue-filters-panel");
   const introEl = document.getElementById("queue-intro");
@@ -1871,6 +1838,7 @@ function bindEvents() {
     if (!minEl || !maxEl) {
       return;
     }
+    const host = minEl.closest(".dual-range");
     const bringMinFront = () => {
       minEl.style.zIndex = "6";
       maxEl.style.zIndex = "5";
@@ -1879,12 +1847,40 @@ function bindEvents() {
       maxEl.style.zIndex = "6";
       minEl.style.zIndex = "5";
     };
+    const chooseClosestHandle = (clientX) => {
+      if (!host) {
+        return;
+      }
+      const rect = host.getBoundingClientRect();
+      if (!(rect.width > 0)) {
+        return;
+      }
+      const minV = Number(minEl.value || 0);
+      const maxV = Number(maxEl.value || 0);
+      const lo = Number(minEl.min || 0);
+      const hi = Number(minEl.max || 100);
+      const span = Math.max(1, hi - lo);
+      const minX = rect.left + ((minV - lo) / span) * rect.width;
+      const maxX = rect.left + ((maxV - lo) / span) * rect.width;
+      if (Math.abs(clientX - minX) <= Math.abs(clientX - maxX)) {
+        bringMinFront();
+      } else {
+        bringMaxFront();
+      }
+    };
+    bringMinFront();
     minEl.addEventListener("pointerdown", bringMinFront);
+    minEl.addEventListener("mousedown", bringMinFront);
     minEl.addEventListener("focus", bringMinFront);
     minEl.addEventListener("input", bringMinFront);
     maxEl.addEventListener("pointerdown", bringMaxFront);
+    maxEl.addEventListener("mousedown", bringMaxFront);
     maxEl.addEventListener("focus", bringMaxFront);
     maxEl.addEventListener("input", bringMaxFront);
+    if (host) {
+      host.addEventListener("mousemove", (event) => chooseClosestHandle(event.clientX));
+      host.addEventListener("pointerdown", (event) => chooseClosestHandle(event.clientX));
+    }
   };
 
   bindDualRangePriority("queue-rating-min-range", "queue-rating-max-range");
