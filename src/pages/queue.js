@@ -13,7 +13,7 @@ let state = null;
 let wishlistOrderedIds = [];
 let queueIds = [];
 let queueIndex = 0;
-let currentQueueConfig = { collection: "__wishlist__", state: "all" };
+let currentQueueConfig = { collection: "__all__", list: "inbox" };
 let mediaState = { index: 0, items: [] };
 let mediaSeq = 0;
 const metaCache = new Map();
@@ -119,42 +119,44 @@ function getIntent(appId) {
   };
 }
 
-function matchesStateFilter(appId, stateFilter) {
+function matchesListFilter(appId, listFilter) {
   const intent = getIntent(appId);
-  switch (String(stateFilter || "all")) {
+  switch (String(listFilter || "inbox")) {
     case "inbox":
       return !intent.owned
         && intent.steamWishlistedObserved
         && !intent.steamFollowedObserved
         && intent.buy <= 0
         && String(intent.bucket || "").toUpperCase() === "INBOX";
-    case "track":
-      return !intent.owned && intent.track > 0;
-    case "maybe":
-      return !intent.owned && intent.buy === 1;
-    case "buy":
+    case "wishlist":
+      return !intent.owned && intent.steamWishlistedObserved;
+    case "follow":
+      return !intent.owned && intent.steamFollowedObserved;
+    case "confirm":
       return !intent.owned && intent.buy === 2;
-    case "archive":
-      return intent.owned === true;
+    case "wf":
+      return !intent.owned && (intent.steamWishlistedObserved || intent.steamFollowedObserved);
+    case "cf":
+      return !intent.owned && (intent.buy === 2 || intent.steamFollowedObserved);
     default:
-      return true;
+      return false;
   }
 }
 
 function getCollectionSelection() {
   const collectionEl = document.getElementById("collection-select");
-  return String(collectionEl?.value || "__wishlist__");
+  return String(collectionEl?.value || "__all__");
 }
 
-function getStateSelection() {
-  const stateEl = document.getElementById("state-select");
-  return String(stateEl?.value || "all");
+function getListSelection() {
+  const listEl = document.getElementById("list-select");
+  return String(listEl?.value || "inbox");
 }
 
 function persistUiState() {
   try {
     localStorage.setItem(QUEUE_COLLECTION_KEY, currentQueueConfig.collection);
-    localStorage.setItem(QUEUE_STATE_KEY, currentQueueConfig.state);
+    localStorage.setItem(QUEUE_STATE_KEY, currentQueueConfig.list);
     localStorage.setItem(QUEUE_INDEX_KEY, String(queueIndex));
   } catch {
     // noop
@@ -196,21 +198,22 @@ function hydrateQueueLeftWidth() {
 
 function hydrateUiState() {
   try {
-    const collection = String(localStorage.getItem(QUEUE_COLLECTION_KEY) || "__wishlist__");
-    const stateValue = String(localStorage.getItem(QUEUE_STATE_KEY) || "all");
+    const listValue = String(localStorage.getItem(QUEUE_STATE_KEY) || "inbox");
+    const collection = String(localStorage.getItem(QUEUE_COLLECTION_KEY) || "__all__");
     const index = Number(localStorage.getItem(QUEUE_INDEX_KEY) || 0);
+    const listEl = document.getElementById("list-select");
     const collectionEl = document.getElementById("collection-select");
-    const stateEl = document.getElementById("state-select");
+    if (listEl) {
+      listEl.value = listValue;
+    }
+    populateCollectionSelect(listValue);
     if (collectionEl) {
       collectionEl.value = collection;
-    }
-    if (stateEl) {
-      stateEl.value = stateValue;
     }
     if (Number.isFinite(index) && index >= 0) {
       queueIndex = Math.floor(index);
     }
-    currentQueueConfig = { collection, state: stateValue };
+    currentQueueConfig = { collection, list: listValue };
   } catch {
     // noop
   }
@@ -241,14 +244,15 @@ async function loadWishlistOrder() {
   }
 }
 
-function populateCollectionSelect() {
+function populateCollectionSelect(listFilter = getListSelection()) {
   const el = document.getElementById("collection-select");
   if (!el) {
     return;
   }
-  const selectedValue = String(el.value || "__wishlist__");
+  const selectedValue = String(el.value || "__all__");
+  const listLabel = String(listFilter || "inbox").toUpperCase();
   const options = [
-    { value: "__wishlist__", label: "Wishlist (all games)" }
+    { value: "__all__", label: `All (${listLabel})` }
   ];
   for (const name of Array.isArray(state?.collectionOrder) ? state.collectionOrder : []) {
     if (state?.dynamicCollections?.[name]) {
@@ -263,12 +267,12 @@ function populateCollectionSelect() {
     node.textContent = option.label;
     el.appendChild(node);
   }
-  el.value = options.some((x) => x.value === selectedValue) ? selectedValue : "__wishlist__";
+  el.value = options.some((x) => x.value === selectedValue) ? selectedValue : "__all__";
 }
 
-function resolveBaseIdsByCollection(collection) {
-  if (collection === "__wishlist__") {
-    if (wishlistOrderedIds.length > 0) {
+function resolveBaseIdsByCollection(collection, listFilter = "inbox") {
+  if (collection === "__all__") {
+    if (listFilter === "wishlist" && wishlistOrderedIds.length > 0) {
       return wishlistOrderedIds;
     }
     return Object.keys(state?.items || {});
@@ -276,16 +280,16 @@ function resolveBaseIdsByCollection(collection) {
   return Array.isArray(state?.collections?.[collection]) ? state.collections[collection] : [];
 }
 
-function buildQueueIds(collection, stateFilter) {
-  const deduped = getFilteredIds(collection, stateFilter);
+function buildQueueIds(collection, listFilter) {
+  const deduped = getFilteredIds(collection, listFilter);
   queueIds = shuffleIds(deduped);
   queueIndex = queueIds.length > 0 ? Math.min(queueIndex, queueIds.length - 1) : 0;
-  currentQueueConfig = { collection, state: stateFilter };
+  currentQueueConfig = { collection, list: listFilter };
   persistUiState();
 }
 
-function getFilteredIds(collection, stateFilter) {
-  const base = resolveBaseIdsByCollection(collection);
+function getFilteredIds(collection, listFilter) {
+  const base = resolveBaseIdsByCollection(collection, listFilter);
   const deduped = [];
   const seen = new Set();
   for (const rawId of base) {
@@ -293,7 +297,7 @@ function getFilteredIds(collection, stateFilter) {
     if (!appId || seen.has(appId)) {
       continue;
     }
-    if (!matchesStateFilter(appId, stateFilter)) {
+    if (!matchesListFilter(appId, listFilter)) {
       continue;
     }
     deduped.push(appId);
@@ -302,8 +306,8 @@ function getFilteredIds(collection, stateFilter) {
   return deduped;
 }
 
-function reconcileQueueIds(collection, stateFilter, currentAppId = "") {
-  const allowedIds = getFilteredIds(collection, stateFilter);
+function reconcileQueueIds(collection, listFilter, currentAppId = "") {
+  const allowedIds = getFilteredIds(collection, listFilter);
   const allowedSet = new Set(allowedIds);
   const orderedExisting = queueIds.filter((appId) => allowedSet.has(appId));
   const existingSet = new Set(orderedExisting);
@@ -836,14 +840,10 @@ async function refreshStateOnly() {
 
 async function startQueue() {
   await refreshStateOnly();
+  const listFilter = getListSelection();
   const collection = getCollectionSelection();
-  const stateFilter = "inbox";
-  const stateSelectEl = document.getElementById("state-select");
-  if (stateSelectEl) {
-    stateSelectEl.value = "inbox";
-  }
   queueIndex = 0;
-  buildQueueIds(collection, stateFilter);
+  buildQueueIds(collection, listFilter);
   const setupPanelEl = document.querySelector(".setup-panel");
   const headerBarEl = document.getElementById("queue-header-bar");
   if (setupPanelEl) {
@@ -859,11 +859,14 @@ async function startQueue() {
 
 async function rerenderAfterAction(currentAppId = "") {
   await loadState();
-  reconcileQueueIds(currentQueueConfig.collection, currentQueueConfig.state, currentAppId);
+  reconcileQueueIds(currentQueueConfig.collection, currentQueueConfig.list, currentAppId);
   await renderCurrent();
 }
 
 function bindEvents() {
+  document.getElementById("list-select")?.addEventListener("change", () => {
+    populateCollectionSelect(getListSelection());
+  });
   document.getElementById("go-btn")?.addEventListener("click", async () => {
     await startQueue();
   });

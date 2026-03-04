@@ -922,11 +922,11 @@
         try {
           await onSetIntent(appId, action.patch || {});
           if (action.key === "wishlist") {
-            setStatus("Set to Wishlist.");
+            setStatus("Set to Confirm.");
           } else if (action.key === "follow") {
             setStatus("Set to Follow.");
           } else if (action.key === "wishlist-follow") {
-            setStatus("Set to WF.");
+            setStatus("Set to C*F.");
           }
         } catch (error) {
           setStatus(String(error?.message || "Failed to update intent."), true);

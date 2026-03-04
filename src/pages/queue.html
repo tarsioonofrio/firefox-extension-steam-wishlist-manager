@@ -27,14 +27,19 @@
       </div>
       <div class="setup-panel">
         <label>
-          <span>Collection</span>
-          <select id="collection-select"></select>
+          <span>List</span>
+          <select id="list-select">
+            <option value="inbox">Inbox</option>
+            <option value="wishlist">Wishlist</option>
+            <option value="follow">Follow</option>
+            <option value="confirm">Confirm</option>
+            <option value="wf">W+F</option>
+            <option value="cf">C+F</option>
+          </select>
         </label>
         <label>
-          <span>State</span>
-          <select id="state-select">
-            <option value="inbox">Inbox</option>
-          </select>
+          <span>Collection</span>
+          <select id="collection-select"></select>
         </label>
         <button id="go-btn" type="button">Go!</button>
       </div>
@@ -58,9 +63,9 @@
             <img id="capsule-image" class="capsule-image" alt="">
           </a>
           <div class="actions">
-            <button id="action-wishlist-btn" type="button">Wishlist</button>
+            <button id="action-wishlist-btn" type="button">Confirm</button>
             <button id="action-follow-btn" type="button">Follow</button>
-            <button id="action-wishlist-follow-btn" type="button">Wishlist &amp; Follow</button>
+            <button id="action-wishlist-follow-btn" type="button">C*F</button>
           </div>
           <p id="short-description" class="short-description">-</p>
           <div class="meta-grid">

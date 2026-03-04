@@ -12,11 +12,9 @@
 
   function resolveCollectionSelection(value, wishlistSelectValue, inboxSelectValue, trackSelectValue, buySelectValue, archiveSelectValue, ownedSelectValue) {
     const raw = String(value || "__all__");
-    const isWishlist = raw === String(wishlistSelectValue || "__wishlist__");
-    const sourceMode = isWishlist ? "wishlist" : "collections";
     return {
-      sourceMode,
-      activeCollection: sourceMode === "wishlist" ? "__all__" : raw,
+      sourceMode: "collections",
+      activeCollection: raw,
       page: 1
     };
   }

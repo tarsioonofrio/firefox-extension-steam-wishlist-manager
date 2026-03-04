@@ -6,7 +6,6 @@ const TYPE_COUNTS_CACHE_KEY = "steamWishlistTypeCountsCacheV1";
 const EXTRA_FILTER_COUNTS_CACHE_KEY = "steamWishlistExtraFilterCountsCacheV2";
 const BACKUP_SETTINGS_KEY = "steamWishlistBackupSettingsV1";
 const BACKUP_SCHEMA_VERSION = 1;
-const DEFAULT_QUEUE_DAYS = 30;
 const DEFAULT_INBOX_DAYS = 7;
 const MIN_QUEUE_DAYS = 1;
 const MAX_QUEUE_DAYS = 365;
@@ -99,42 +98,24 @@ function normalizeBackupSettings(rawSettings) {
 
 function normalizeQueuePolicy(rawPolicy) {
   const raw = rawPolicy && typeof rawPolicy === "object" ? rawPolicy : {};
-  const maybeDays = Number.isFinite(Number(raw.maybeDays))
-    ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(Number(raw.maybeDays))))
-    : DEFAULT_QUEUE_DAYS;
-  const archiveDays = Number.isFinite(Number(raw.archiveDays))
-    ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(Number(raw.archiveDays))))
-    : DEFAULT_QUEUE_DAYS;
   const inboxDays = Number.isFinite(Number(raw.inboxDays))
     ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(Number(raw.inboxDays))))
     : DEFAULT_INBOX_DAYS;
-  return { maybeDays, archiveDays, inboxDays };
+  return { inboxDays };
 }
 
 function applyQueuePolicyToUI(policy) {
   const safe = normalizeQueuePolicy(policy);
   const inboxEl = document.getElementById("queue-inbox-days");
-  const maybeEl = document.getElementById("queue-maybe-days");
-  const archiveEl = document.getElementById("queue-archive-days");
   if (inboxEl) {
     inboxEl.value = String(safe.inboxDays);
-  }
-  if (maybeEl) {
-    maybeEl.value = String(safe.maybeDays);
-  }
-  if (archiveEl) {
-    archiveEl.value = String(safe.archiveDays);
   }
 }
 
 function getQueuePolicyFromUI() {
   const inboxEl = document.getElementById("queue-inbox-days");
-  const maybeEl = document.getElementById("queue-maybe-days");
-  const archiveEl = document.getElementById("queue-archive-days");
   return normalizeQueuePolicy({
-    inboxDays: Number(inboxEl?.value || DEFAULT_INBOX_DAYS),
-    maybeDays: Number(maybeEl?.value || DEFAULT_QUEUE_DAYS),
-    archiveDays: Number(archiveEl?.value || DEFAULT_QUEUE_DAYS)
+    inboxDays: Number(inboxEl?.value || DEFAULT_INBOX_DAYS)
   });
 }
 
@@ -267,8 +248,6 @@ function validateBackupPayload(parsed) {
 
 function buildQueueRunSummary(result) {
   const inboxProcessed = Number(result?.inboxProcessed || 0);
-  const maybeProcessed = Number(result?.maybeProcessed || 0);
-  const archiveProcessed = Number(result?.archiveProcessed || 0);
   const details = Array.isArray(result?.errorDetails) ? result.errorDetails : [];
   const queueCounts = details.reduce((acc, entry) => {
     const key = String(entry?.queue || "unknown");
@@ -276,11 +255,11 @@ function buildQueueRunSummary(result) {
     return acc;
   }, {});
   const queueParts = Object.entries(queueCounts).map(([k, v]) => `${k}:${v}`);
-  const totalProcessed = inboxProcessed + maybeProcessed + archiveProcessed;
+  const totalProcessed = inboxProcessed;
 
   if (details.length === 0) {
     return {
-      text: `Queue run ok | processed ${totalProcessed} (inbox:${inboxProcessed} maybe:${maybeProcessed} archive:${archiveProcessed})`,
+      text: `Queue run ok | processed ${totalProcessed} (inbox:${inboxProcessed})`,
       isError: false
     };
   }

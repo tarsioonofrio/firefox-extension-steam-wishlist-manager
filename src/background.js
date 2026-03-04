@@ -227,21 +227,11 @@ function normalizeBackupSettings(rawSettings) {
 
 function normalizeQueuePolicy(rawPolicy) {
   const raw = rawPolicy && typeof rawPolicy === "object" ? rawPolicy : {};
-  const maybeDaysRaw = Number(raw.maybeDays);
-  const archiveDaysRaw = Number(raw.archiveDays);
   const inboxDaysRaw = Number(raw.inboxDays);
-  const maybeDays = Number.isFinite(maybeDaysRaw)
-    ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(maybeDaysRaw)))
-    : DEFAULT_QUEUE_DAYS;
-  const archiveDays = Number.isFinite(archiveDaysRaw)
-    ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(archiveDaysRaw)))
-    : DEFAULT_QUEUE_DAYS;
   const inboxDays = Number.isFinite(inboxDaysRaw)
     ? Math.max(MIN_QUEUE_DAYS, Math.min(MAX_QUEUE_DAYS, Math.floor(inboxDaysRaw)))
     : DEFAULT_INBOX_DAYS;
   return {
-    maybeDays,
-    archiveDays,
     inboxDays
   };
 }
@@ -1308,8 +1298,6 @@ async function performQueueAutomationSweep(force = false) {
   const policy = await getQueuePolicy();
   const now = Date.now();
   const inboxMs = policy.inboxDays * 24 * 60 * 60 * 1000;
-  const maybeMs = policy.maybeDays * 24 * 60 * 60 * 1000;
-  const archiveMs = policy.archiveDays * 24 * 60 * 60 * 1000;
   let changed = false;
   try {
     const observed = await readSteamObservedSignals();
@@ -1321,14 +1309,7 @@ async function performQueueAutomationSweep(force = false) {
     // keep queue sweep running using cached/local state
   }
 
-  const storage = await browser.storage.local.get([META_CACHE_KEY, "steamWishlistTrackFeedV1"]);
-  const metaCache = storage?.[META_CACHE_KEY] || {};
-  const feedEntries = storage?.["steamWishlistTrackFeedV1"] || [];
-  const feedLatestByApp = getTrackFeedLatestMap(feedEntries);
-
   let inboxProcessed = 0;
-  let maybeProcessed = 0;
-  let archiveProcessed = 0;
   const errors = [];
   const errorDetails = [];
 
@@ -1386,70 +1367,11 @@ async function performQueueAutomationSweep(force = false) {
       changed = true;
     }
 
-    if (next.buy === 1 || next.buyIntent === "MAYBE") {
-      if (!(next.maybeQueuedAt > 0)) {
-        next.maybeQueuedAt = next.triagedAt > 0 ? next.triagedAt : now;
-        changed = true;
-      }
-      const due = (now - Number(next.maybeQueuedAt || 0)) >= maybeMs;
-      if (due || force) {
-        try {
-          await setSteamWishlist(appId, false);
-          await setSteamFollow(appId, false);
-          next.buy = 0;
-          next.track = 0;
-          next.buyIntent = "NONE";
-          next.trackIntent = "OFF";
-          next.bucket = "INBOX";
-          next.maybeQueuedAt = 0;
-          next.triagedAt = now;
-          maybeProcessed += 1;
-          changed = true;
-        } catch (error) {
-          pushQueueError("maybe", appId, error);
-        }
-      }
-    } else if (next.maybeQueuedAt > 0) {
+    if (next.maybeQueuedAt > 0) {
       next.maybeQueuedAt = 0;
       changed = true;
     }
-
-    if (String(next.bucket || "").toUpperCase() === "ARCHIVE") {
-      if (!(next.archiveQueuedAt > 0)) {
-        next.archiveQueuedAt = next.triagedAt > 0 ? next.triagedAt : now;
-        changed = true;
-      }
-      let lastActivityAt = Number(next.archiveLastActivityAt || next.archiveQueuedAt || now);
-      const discountPercent = Number(metaCache?.[appId]?.discountPercent || 0);
-      const hasPromotion = Number.isFinite(discountPercent) && discountPercent > 0;
-      const latestFeedAt = Number(feedLatestByApp.get(appId) || 0);
-      if (hasPromotion || latestFeedAt > lastActivityAt) {
-        lastActivityAt = now;
-      }
-      if (lastActivityAt !== Number(next.archiveLastActivityAt || 0)) {
-        next.archiveLastActivityAt = lastActivityAt;
-        changed = true;
-      }
-      const due = (now - lastActivityAt) >= archiveMs;
-      if ((due || force) && !hasPromotion && latestFeedAt <= lastActivityAt) {
-        try {
-          await setSteamWishlist(appId, false);
-          await setSteamFollow(appId, false);
-          next.buy = 0;
-          next.track = 0;
-          next.buyIntent = "NONE";
-          next.trackIntent = "OFF";
-          next.bucket = "INBOX";
-          next.archiveQueuedAt = 0;
-          next.archiveLastActivityAt = 0;
-          next.triagedAt = now;
-          archiveProcessed += 1;
-          changed = true;
-        } catch (error) {
-          pushQueueError("archive", appId, error);
-        }
-      }
-    } else if (next.archiveQueuedAt > 0 || next.archiveLastActivityAt > 0) {
+    if (next.archiveQueuedAt > 0 || next.archiveLastActivityAt > 0) {
       next.archiveQueuedAt = 0;
       next.archiveLastActivityAt = 0;
       changed = true;
@@ -1469,10 +1391,8 @@ async function performQueueAutomationSweep(force = false) {
       return acc;
     }, {});
     await logWarn("queue-automation", "Queue automation finished with errors.", {
-      inboxProcessed,
-      maybeProcessed,
-      archiveProcessed,
-      errorCount: errors.length,
+        inboxProcessed,
+        errorCount: errors.length,
       queueCounts,
       errors: errors.slice(0, 20),
       errorDetails: errorDetails.slice(0, 20).map((entry) => ({
@@ -1490,8 +1410,8 @@ async function performQueueAutomationSweep(force = false) {
     ok: true,
     changed,
     inboxProcessed,
-    maybeProcessed,
-    archiveProcessed,
+    maybeProcessed: 0,
+    archiveProcessed: 0,
     errors,
     errorDetails
   };

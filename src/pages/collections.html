@@ -21,12 +21,12 @@
           <button id="collection-menu-btn" type="button">Menu</button>
           <button id="batch-menu-btn" type="button">Batch</button>
           <select id="triage-filter-select">
-            <option value="all">All states</option>
             <option value="inbox">Inbox</option>
-            <option value="track">Follow</option>
-            <option value="maybe">Maybe</option>
-            <option value="buy">Confirmed</option>
-            <option value="archive">Archive</option>
+            <option value="wishlist">Wishlist</option>
+            <option value="follow">Follow</option>
+            <option value="confirm">Confirm</option>
+            <option value="wf">W+F</option>
+            <option value="cf">C+F</option>
           </select>
           <select id="track-window-select" class="hidden">
             <option value="7">Track: last 7d</option>
@@ -58,7 +58,6 @@
           </select>
         </div>
       </div>
-      <p id="radar-stats" class="radar-stats"></p>
       <p id="batch-shortcuts-hint" class="batch-shortcuts-hint hidden"></p>
       <div id="collection-select-panel" class="collection-menu-panel hidden">
         <div id="collection-select-options" class="menu-actions"></div>
@@ -98,9 +97,9 @@
         <div class="menu-actions">
           <button id="batch-action-add" type="button">Adicionar</button>
           <button id="batch-action-remove" type="button" class="danger">Remover da coleção atual</button>
-          <button id="batch-action-buy" type="button">Wishlist</button>
+          <button id="batch-action-buy" type="button">Confirm</button>
           <button id="batch-action-track" type="button">Follow</button>
-          <button id="batch-action-maybe" type="button">WF</button>
+          <button id="batch-action-maybe" type="button">C*F</button>
         </div>
         <div id="batch-add-form" class="menu-form batch-form hidden">
           <select id="batch-collection-select"></select>
@@ -288,9 +287,9 @@
         </a>
         <div class="order-col">
           <div class="triage-actions triage-primary-actions">
-            <button class="triage-buy-btn" type="button">Wishlist</button>
+            <button class="triage-buy-btn" type="button">Confirm</button>
             <button class="triage-track-btn" type="button">Follow</button>
-            <button class="triage-maybe-btn" type="button">WF</button>
+            <button class="triage-maybe-btn" type="button">C*F</button>
           </div>
           <div class="order-manual-row">
             <button class="order-up-btn" type="button" aria-label="Move up">▲</button>

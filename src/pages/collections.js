@@ -73,10 +73,10 @@ const STEAM_FILTER_SEEDS_JSON_PATH = "src/data/steam-filter-seeds-hardcoded.json
 
 let state = null;
 let activeCollection = "__all__";
-let sourceMode = "wishlist";
+let sourceMode = "collections";
 let page = 1;
 let searchQuery = "";
-let triageFilter = "all";
+let triageFilter = "inbox";
 let onlyUnderTarget = false;
 let trackWindowDays = 30;
 let sortMode = "position";
@@ -438,7 +438,9 @@ function deriveBucketFromState(track, buy, owned) {
 
 function getItemIntentState(appId) {
   const item = state?.items?.[appId] || {};
-  const steamWishlisted = Object.prototype.hasOwnProperty.call(wishlistAddedMap || {}, String(appId || ""));
+  const steamWishlisted = Object.prototype.hasOwnProperty.call(wishlistAddedMap || {}, String(appId || ""))
+    || Boolean(item.steamWishlistedObserved);
+  const steamFollowed = Boolean(item.steamFollowedObserved);
   const buyRaw = Number(item.buy || 0);
   const trackRaw = Number(item.track || 0);
   const rawBuyIntent = String(item.buyIntent || "").trim().toUpperCase();
@@ -465,6 +467,7 @@ function getItemIntentState(appId) {
     trackIntent,
     buyIntent,
     steamWishlisted,
+    steamFollowed,
     bucket,
     muted,
     note,
@@ -510,27 +513,30 @@ function matchesTriageFilter(appId) {
       return false;
     }
   }
-  const filter = String(triageFilter || "all").toLowerCase();
-  if (filter === "all") {
-    return true;
-  }
-  const bucket = String(intent.bucket || "INBOX").toLowerCase();
-  if (filter === "track") {
-    return bucket === "track";
-  }
-  if (filter === "buy") {
-    return bucket === "buy";
-  }
-  if (filter === "maybe") {
-    return bucket === "maybe";
-  }
-  if (filter === "archive") {
-    return bucket === "archive";
-  }
+  const filter = String(triageFilter || "inbox").toLowerCase();
   if (filter === "inbox") {
-    return bucket === "inbox";
+    return !intent.owned
+      && intent.steamWishlisted
+      && !intent.steamFollowed
+      && intent.buy <= 0
+      && String(intent.bucket || "").toUpperCase() === "INBOX";
   }
-  return true;
+  if (filter === "wishlist") {
+    return !intent.owned && intent.steamWishlisted;
+  }
+  if (filter === "follow") {
+    return !intent.owned && intent.steamFollowed;
+  }
+  if (filter === "confirm") {
+    return !intent.owned && intent.buy === 2;
+  }
+  if (filter === "wf") {
+    return !intent.owned && (intent.steamWishlisted || intent.steamFollowed);
+  }
+  if (filter === "cf") {
+    return !intent.owned && (intent.buy === 2 || intent.steamFollowed);
+  }
+  return false;
 }
 
 function isWishlistRankReady(appIds = null) {
@@ -847,13 +853,6 @@ function getDynamicCollectionAppIds(name, stack = new Set()) {
 }
 
 function getCurrentSourceAppIds() {
-  if (sourceMode === "wishlist") {
-    if (wishlistOrderedAppIds.length > 0) {
-      return [...wishlistOrderedAppIds];
-    }
-    return Object.keys(wishlistAddedMap);
-  }
-
   if (!state) {
     return [];
   }
@@ -927,14 +926,7 @@ function getCurrentSourceAppIds() {
   }
 
   if (activeCollection === "__all__") {
-    const all = [];
-    for (const name of getStaticCollectionNames()) {
-      const ids = state.collections?.[name] || [];
-      for (const id of ids) {
-        all.push(id);
-      }
-    }
-    return Array.from(new Set(all));
+    return Object.keys(state?.items || {});
   }
 
   if (isDynamicCollectionName(activeCollection)) {
@@ -2041,7 +2033,6 @@ async function renderStateDependentUi() {
   renderCollectionSelect();
   renderDynamicCollectionFormHint();
   renderBatchMenuState();
-  renderRadarStats();
   await renderCards();
 }
 
@@ -2129,7 +2120,7 @@ async function handleKeyboardBatchIntent(actionCode) {
   if (actionCode === "Digit1") {
     await applyBatchIntent(
       { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" },
-      "Selected games set to Wishlist."
+      "Selected games set to Confirm."
     );
     return;
   }
@@ -2143,7 +2134,7 @@ async function handleKeyboardBatchIntent(actionCode) {
   if (actionCode === "Digit3") {
     await applyBatchIntent(
       { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" },
-      "Selected games set to WF."
+      "Selected games set to C*F."
     );
     return;
   }
@@ -3815,26 +3806,30 @@ function renderTriageFilterSelect() {
   }
   const sourceIds = getCurrentSourceAppIds();
   let inboxCount = 0;
-  let trackCount = 0;
-  let maybeCount = 0;
-  let buyCount = 0;
-  let archiveCount = 0;
+  let wishlistCount = 0;
+  let followCount = 0;
+  let confirmCount = 0;
+  let wfCount = 0;
+  let cfCount = 0;
   for (const appId of sourceIds) {
     const intent = getItemIntentState(appId);
-    if (intent.owned) {
-      archiveCount += 1;
-      continue;
-    }
-    if (intent.bucket === "INBOX") {
+    if (!intent.owned && intent.steamWishlisted && !intent.steamFollowed && intent.buy <= 0 && intent.bucket === "INBOX") {
       inboxCount += 1;
     }
-    if (intent.track > 0) {
-      trackCount += 1;
+    if (!intent.owned && intent.steamWishlisted) {
+      wishlistCount += 1;
     }
-    if (intent.buy === 1) {
-      maybeCount += 1;
-    } else if (intent.buy === 2) {
-      buyCount += 1;
+    if (!intent.owned && intent.steamFollowed) {
+      followCount += 1;
+    }
+    if (!intent.owned && intent.buy === 2) {
+      confirmCount += 1;
+    }
+    if (!intent.owned && (intent.steamWishlisted || intent.steamFollowed)) {
+      wfCount += 1;
+    }
+    if (!intent.owned && (intent.buy === 2 || intent.steamFollowed)) {
+      cfCount += 1;
     }
   }
   const setLabel = (value, label, count) => {
@@ -3843,12 +3838,12 @@ function renderTriageFilterSelect() {
       option.textContent = `${label} (${count})`;
     }
   };
-  setLabel("all", "All states", sourceIds.length);
   setLabel("inbox", "Inbox", inboxCount);
-  setLabel("track", "Follow", trackCount);
-  setLabel("maybe", "Maybe", maybeCount);
-  setLabel("buy", "Confirmed", buyCount);
-  setLabel("archive", "Archive", archiveCount);
+  setLabel("wishlist", "Wishlist", wishlistCount);
+  setLabel("follow", "Follow", followCount);
+  setLabel("confirm", "Confirm", confirmCount);
+  setLabel("wf", "W+F", wfCount);
+  setLabel("cf", "C+F", cfCount);
 }
 
 function renderPager(totalItems) {
@@ -4006,14 +4001,14 @@ function createLineRow(options) {
   const buyBtn = document.createElement("button");
   buyBtn.type = "button";
   buyBtn.className = "line-btn line-col-action";
-  buyBtn.textContent = "Wishlist";
+  buyBtn.textContent = "Confirm";
   buyBtn.classList.toggle("active", itemIntent.buyIntent === "BUY" && itemIntent.trackIntent === "OFF");
   bindLineAction(buyBtn, async () => {
     try {
       await onSetIntent(appId, { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" });
-      setStatus("Set to Wishlist.");
+      setStatus("Set to Confirm.");
     } catch {
-      setStatus("Failed to set Wishlist.", true);
+      setStatus("Failed to set Confirm.", true);
       throw new Error("wishlist-action-failed");
     }
   });
@@ -4021,14 +4016,14 @@ function createLineRow(options) {
   const maybeBtn = document.createElement("button");
   maybeBtn.type = "button";
   maybeBtn.className = "line-btn line-col-action line-col-action-wf";
-  maybeBtn.textContent = "WF";
+  maybeBtn.textContent = "C*F";
   maybeBtn.classList.toggle("active", itemIntent.buyIntent === "BUY" && itemIntent.trackIntent === "ON");
   bindLineAction(maybeBtn, async () => {
     try {
       await onSetIntent(appId, { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" });
-      setStatus("Set to WF.");
+      setStatus("Set to C*F.");
     } catch {
-      setStatus("Failed to set WF.", true);
+      setStatus("Failed to set C*F.", true);
       throw new Error("wishlist-follow-action-failed");
     }
   });
@@ -4127,8 +4122,8 @@ function renderBatchMenuState() {
   if (batchHint) {
     const count = batchSelectedIds.size;
     batchHint.textContent = count > 0
-      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Wishlist, Shift+2 Follow, Shift+3 WF`
-      : "Batch mode active | Select cards to use shortcuts: Shift+1 Wishlist, Shift+2 Follow, Shift+3 WF";
+      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Confirm, Shift+2 Follow, Shift+3 C*F`
+      : "Batch mode active | Select cards to use shortcuts: Shift+1 Confirm, Shift+2 Follow, Shift+3 C*F";
     batchHint.classList.toggle("hidden", !batchMode);
   }
   if (collectionSelect) {
@@ -4146,30 +4141,6 @@ function renderBatchMenuState() {
     collectionSelect.value = batchAddTargetCollection;
     collectionSelect.disabled = names.length === 0;
   }
-}
-
-function renderRadarStats() {
-  const el = document.getElementById("radar-stats");
-  if (!el) {
-    return;
-  }
-  const ids = Object.keys(state?.items || {});
-  let buyRadar = 0;
-  let underTarget = 0;
-  let owned = 0;
-  for (const appId of ids) {
-    const intent = getItemIntentState(appId);
-    if (!intent.owned && intent.buy > 0) {
-      buyRadar += 1;
-    }
-    if (intent.owned) {
-      owned += 1;
-    }
-    if (isPriceAtOrUnderTarget(metaCache?.[appId] || {}, intent.targetPriceCents)) {
-      underTarget += 1;
-    }
-  }
-  el.textContent = `Radar | Buy: ${buyRadar} | Under target: ${underTarget} | Owned: ${owned}`;
 }
 
 function toggleBatchMode(force = null) {
@@ -4740,15 +4711,15 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     openBtn.addEventListener("click", () => window.open(String(entry.url || "#"), "_blank", "noopener"));
     const buyBtn = document.createElement("button");
     buyBtn.type = "button";
-    buyBtn.textContent = "Wishlist";
+    buyBtn.textContent = "Confirm";
     buyBtn.addEventListener("click", () => {
-      setItemIntent(appId, { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" }).catch(() => setStatus("Failed to set Wishlist.", true));
+      setItemIntent(appId, { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" }).catch(() => setStatus("Failed to set Confirm.", true));
     });
     const maybeBtn = document.createElement("button");
     maybeBtn.type = "button";
-    maybeBtn.textContent = "WF";
+    maybeBtn.textContent = "C*F";
     maybeBtn.addEventListener("click", () => {
-      setItemIntent(appId, { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" }).catch(() => setStatus("Failed to set WF.", true));
+      setItemIntent(appId, { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" }).catch(() => setStatus("Failed to set C*F.", true));
     });
     const followBtn = document.createElement("button");
     followBtn.type = "button";
@@ -4916,7 +4887,7 @@ async function render() {
   }
   if (triageFilterSelect) {
     renderTriageFilterSelect();
-    triageFilterSelect.value = triageFilter;
+    triageFilterSelect.value = triageFilterSelect.querySelector(`option[value="${triageFilter}"]`) ? triageFilter : "inbox";
   }
   if (underTargetCheckbox) {
     underTargetCheckbox.checked = onlyUnderTarget;
@@ -4947,7 +4918,6 @@ async function render() {
   renderCollectionSelect();
   renderDynamicCollectionFormHint();
   renderBatchMenuState();
-  renderRadarStats();
   const canRenameCurrent = sourceMode !== "wishlist"
     && activeCollection !== "__all__"
     && !isVirtualCollectionSelection(activeCollection);
@@ -5230,7 +5200,7 @@ function bindBatchControls() {
   buyActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
       { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" },
-      "Selected games set to Wishlist."
+      "Selected games set to Confirm."
     ).catch(() => setStatus("Failed to apply batch buy.", true));
   });
 
@@ -5244,7 +5214,7 @@ function bindBatchControls() {
   maybeActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
       { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" },
-      "Selected games set to WF."
+      "Selected games set to C*F."
     ).catch(() => setStatus("Failed to apply batch maybe.", true));
   });
 
@@ -5420,7 +5390,7 @@ function bindFilterControls() {
         .catch(() => setStatus("Failed to reset dismissed feed items.", true));
     },
     onTriageFilterChange: async (value) => {
-      triageFilter = String(value || "all");
+      triageFilter = String(value || "inbox");
       page = 1;
       await renderCards();
     },
@@ -5608,7 +5578,7 @@ initUtils.run({
   },
   setActiveCollectionFromState: (nextState) => {
     activeCollection = nextState?.activeCollection || "__all__";
-    sourceMode = "wishlist";
+    sourceMode = "collections";
   },
   attachEvents,
   syncFollowedFromSteam,

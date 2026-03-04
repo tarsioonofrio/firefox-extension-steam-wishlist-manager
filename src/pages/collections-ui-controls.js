@@ -1,10 +1,7 @@
 (() => {
   function renderCollectionSelect(options) {
     const state = options?.state || null;
-    const sourceMode = String(options?.sourceMode || "collections");
     const activeCollection = String(options?.activeCollection || "__all__");
-    const wishlistCount = Number(options?.wishlistCount || 0);
-    const wishlistSelectValue = String(options?.wishlistSelectValue || "__wishlist__");
     const collectionSizes = options?.collectionSizes || {};
     const dynamicNames = new Set(Array.isArray(options?.dynamicNames) ? options.dynamicNames : []);
 
@@ -18,10 +15,10 @@
 
     select.innerHTML = "";
 
-    const wishlistOption = document.createElement("option");
-    wishlistOption.value = wishlistSelectValue;
-    wishlistOption.textContent = `Wishlist (${wishlistCount})`;
-    select.appendChild(wishlistOption);
+    const allOption = document.createElement("option");
+    allOption.value = "__all__";
+    allOption.textContent = "All";
+    select.appendChild(allOption);
 
     for (const name of state.collectionOrder || []) {
       const option = document.createElement("option");
@@ -48,9 +45,7 @@
         : (validValues[0] || "__all__");
     }
 
-    const selectedValue = sourceMode === "wishlist"
-      ? wishlistSelectValue
-      : (validValues.includes(nextActiveCollection) ? nextActiveCollection : validValues[0]);
+    const selectedValue = validValues.includes(nextActiveCollection) ? nextActiveCollection : validValues[0];
     select.value = selectedValue;
     if (selectBtn) {
       const selectedOption = select.options[select.selectedIndex];
@@ -84,7 +79,7 @@
       }
     }
 
-    return { activeCollection: sourceMode === "wishlist" ? "__all__" : nextActiveCollection };
+    return { activeCollection: nextActiveCollection };
   }
 
   function renderSortMenu(options) {

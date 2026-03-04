@@ -293,8 +293,8 @@ function testCollectionsActionsSelection(context) {
     "__owned__",
     "__track_feed__"
   );
-  assert.equal(wishlist.sourceMode, "wishlist");
-  assert.equal(wishlist.activeCollection, "__all__");
+  assert.equal(wishlist.sourceMode, "collections");
+  assert.equal(wishlist.activeCollection, "__wishlist__");
 
   const feed = actions.resolveCollectionSelection(
     "__track_feed__",
