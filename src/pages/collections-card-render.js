@@ -829,7 +829,6 @@
       triageBuyBtn: fragment.querySelector(".triage-buy-btn"),
       triageMaybeBtn: fragment.querySelector(".triage-maybe-btn"),
       triageTrackBtn: fragment.querySelector(".triage-track-btn"),
-      triageArchiveBtn: fragment.querySelector(".triage-archive-btn"),
       targetPriceInput: fragment.querySelector(".target-price-input"),
       refreshItemBtn: fragment.querySelector(".refresh-item-btn"),
       collectionsToggleBtn: fragment.querySelector(".collections-toggle-btn"),
@@ -896,38 +895,38 @@
 
     const triageActions = [
       {
-        key: "buy",
+        key: "wishlist",
         btn: card.triageBuyBtn,
-        patch: { buy: itemIntent.buy === 2 ? 0 : 2 },
-        isActive: (intent) => intent.buy === 2
+        patch: { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" },
+        isActive: (intent) => intent.buyIntent === "BUY" && intent.trackIntent === "OFF"
       },
       {
-        key: "maybe",
+        key: "wishlist-follow",
         btn: card.triageMaybeBtn,
-        patch: { buy: itemIntent.buy === 1 ? 0 : 1 },
-        isActive: (intent) => intent.buy === 1
+        patch: { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" },
+        isActive: (intent) => intent.buyIntent === "BUY" && intent.trackIntent === "ON"
       },
       {
-        key: "track",
+        key: "follow",
         btn: card.triageTrackBtn,
-        patch: { track: itemIntent.track > 0 ? 0 : 1 },
-        isActive: (intent) => intent.track > 0
-      },
-      { key: "archive", btn: card.triageArchiveBtn, patch: { track: 0, buy: 0, owned: true }, isActive: (intent) => intent.owned }
+        patch: { buy: 0, track: 1, buyIntent: "NONE", trackIntent: "ON", bucket: "TRACK" },
+        isActive: (intent) => intent.buyIntent === "NONE" && intent.trackIntent === "ON"
+      }
     ];
     for (const action of triageActions) {
       if (!action.btn) {
         continue;
       }
-      if (action.key === "track") {
-        action.btn.textContent = "Follow";
-      }
       action.btn.classList.toggle("active", Boolean(action.isActive?.(itemIntent)));
       action.btn.addEventListener("click", async () => {
         try {
           await onSetIntent(appId, action.patch || {});
-          if (action.key === "track") {
-            setStatus(itemIntent.track > 0 ? "Unfollowed on Steam." : "Followed on Steam.");
+          if (action.key === "wishlist") {
+            setStatus("Set to Wishlist.");
+          } else if (action.key === "follow") {
+            setStatus("Set to Follow.");
+          } else if (action.key === "wishlist-follow") {
+            setStatus("Set to Wishlist & Follow.");
           }
         } catch (error) {
           setStatus(String(error?.message || "Failed to update intent."), true);

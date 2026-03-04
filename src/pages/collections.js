@@ -2107,12 +2107,10 @@ async function handleKeyboardTriageIntent(actionKey) {
   if (!appId) {
     return;
   }
-  const currentIntent = getItemIntentState(appId);
   const intentByKey = {
-    "1": { track: currentIntent.track > 0 ? 0 : 1 },
-    "2": { buy: currentIntent.buy === 1 ? 0 : 1 },
-    "3": { buy: currentIntent.buy === 2 ? 0 : 2 },
-    "4": { track: 0, buy: 0, owned: true }
+    "1": { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" },
+    "2": { buy: 0, track: 1, buyIntent: "NONE", trackIntent: "ON", bucket: "TRACK" },
+    "3": { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" }
   };
   const patch = intentByKey[actionKey];
   if (!patch) {
@@ -2130,22 +2128,22 @@ async function handleKeyboardBatchIntent(actionCode) {
   }
   if (actionCode === "Digit1") {
     await applyBatchIntent(
-      { buy: 2 },
-      "Selected games set to Buy."
+      { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" },
+      "Selected games set to Wishlist."
     );
     return;
   }
   if (actionCode === "Digit2") {
     await applyBatchIntent(
-      { buy: 1 },
-      "Selected games set to Maybe."
+      { buy: 0, track: 1, buyIntent: "NONE", trackIntent: "ON", bucket: "TRACK" },
+      "Selected games set to Follow."
     );
     return;
   }
   if (actionCode === "Digit3") {
     await applyBatchIntent(
-      { track: 1 },
-      "Selected games set to Follow."
+      { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" },
+      "Selected games set to Wishlist & Follow."
     );
     return;
   }
@@ -4008,30 +4006,30 @@ function createLineRow(options) {
   const buyBtn = document.createElement("button");
   buyBtn.type = "button";
   buyBtn.className = "line-btn line-col-action";
-  buyBtn.textContent = "Confirm";
-  buyBtn.classList.toggle("active", itemIntent.buy === 2);
+  buyBtn.textContent = "Wishlist";
+  buyBtn.classList.toggle("active", itemIntent.buyIntent === "BUY" && itemIntent.trackIntent === "OFF");
   bindLineAction(buyBtn, async () => {
     try {
-      await onSetIntent(appId, { buy: itemIntent.buy === 2 ? 0 : 2 });
-      setStatus(itemIntent.buy === 2 ? "Buy cleared (removed from Steam wishlist)." : "Set to Buy (added to Steam wishlist).");
+      await onSetIntent(appId, { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" });
+      setStatus("Set to Wishlist.");
     } catch {
-      setStatus("Failed to set Buy.", true);
-      throw new Error("buy-action-failed");
+      setStatus("Failed to set Wishlist.", true);
+      throw new Error("wishlist-action-failed");
     }
   });
 
   const maybeBtn = document.createElement("button");
   maybeBtn.type = "button";
   maybeBtn.className = "line-btn line-col-action";
-  maybeBtn.textContent = "Maybe";
-  maybeBtn.classList.toggle("active", itemIntent.buy === 1);
+  maybeBtn.textContent = "Wishlist & Follow";
+  maybeBtn.classList.toggle("active", itemIntent.buyIntent === "BUY" && itemIntent.trackIntent === "ON");
   bindLineAction(maybeBtn, async () => {
     try {
-      await onSetIntent(appId, { buy: itemIntent.buy === 1 ? 0 : 1 });
-      setStatus(itemIntent.buy === 1 ? "Maybe cleared (removed from Steam wishlist)." : "Set to Maybe (added to Steam wishlist).");
+      await onSetIntent(appId, { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" });
+      setStatus("Set to Wishlist & Follow.");
     } catch {
-      setStatus("Failed to set Maybe.", true);
-      throw new Error("maybe-action-failed");
+      setStatus("Failed to set Wishlist & Follow.", true);
+      throw new Error("wishlist-follow-action-failed");
     }
   });
 
@@ -4039,14 +4037,14 @@ function createLineRow(options) {
   trackBtn.type = "button";
   trackBtn.className = "line-btn line-col-action";
   trackBtn.textContent = "Follow";
-  trackBtn.classList.toggle("active", itemIntent.track > 0);
+  trackBtn.classList.toggle("active", itemIntent.buyIntent === "NONE" && itemIntent.trackIntent === "ON");
   bindLineAction(trackBtn, async () => {
     try {
-      await onSetIntent(appId, { track: itemIntent.track > 0 ? 0 : 1 });
-      setStatus(itemIntent.track > 0 ? "Untracked (unfollowed on Steam)." : "Tracked (followed on Steam).");
+      await onSetIntent(appId, { buy: 0, track: 1, buyIntent: "NONE", trackIntent: "ON", bucket: "TRACK" });
+      setStatus("Set to Follow.");
     } catch {
-      setStatus("Failed to toggle track.", true);
-      throw new Error("track-action-failed");
+      setStatus("Failed to set Follow.", true);
+      throw new Error("follow-action-failed");
     }
   });
 
@@ -4129,8 +4127,8 @@ function renderBatchMenuState() {
   if (batchHint) {
     const count = batchSelectedIds.size;
     batchHint.textContent = count > 0
-      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Follow`
-      : "Batch mode active | Select cards to use shortcuts: Shift+1 Buy, Shift+2 Maybe, Shift+3 Follow";
+      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Wishlist, Shift+2 Follow, Shift+3 Wishlist & Follow`
+      : "Batch mode active | Select cards to use shortcuts: Shift+1 Wishlist, Shift+2 Follow, Shift+3 Wishlist & Follow";
     batchHint.classList.toggle("hidden", !batchMode);
   }
   if (collectionSelect) {
@@ -4742,21 +4740,21 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     openBtn.addEventListener("click", () => window.open(String(entry.url || "#"), "_blank", "noopener"));
     const buyBtn = document.createElement("button");
     buyBtn.type = "button";
-    buyBtn.textContent = "Buy";
+    buyBtn.textContent = "Wishlist";
     buyBtn.addEventListener("click", () => {
-      setItemIntent(appId, { buy: intent.buy === 2 ? 0 : 2 }).catch(() => setStatus("Failed to set Buy.", true));
+      setItemIntent(appId, { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" }).catch(() => setStatus("Failed to set Wishlist.", true));
     });
     const maybeBtn = document.createElement("button");
     maybeBtn.type = "button";
-    maybeBtn.textContent = "Maybe";
+    maybeBtn.textContent = "Wishlist & Follow";
     maybeBtn.addEventListener("click", () => {
-      setItemIntent(appId, { buy: intent.buy === 1 ? 0 : 1 }).catch(() => setStatus("Failed to set Maybe.", true));
+      setItemIntent(appId, { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" }).catch(() => setStatus("Failed to set Wishlist & Follow.", true));
     });
-    const archiveBtn = document.createElement("button");
-    archiveBtn.type = "button";
-    archiveBtn.textContent = "Archive";
-    archiveBtn.addEventListener("click", () => {
-      setItemIntent(appId, { track: 0, buy: 0, owned: true }).catch(() => setStatus("Failed to archive item.", true));
+    const followBtn = document.createElement("button");
+    followBtn.type = "button";
+    followBtn.textContent = "Follow";
+    followBtn.addEventListener("click", () => {
+      setItemIntent(appId, { buy: 0, track: 1, buyIntent: "NONE", trackIntent: "ON", bucket: "TRACK" }).catch(() => setStatus("Failed to set Follow.", true));
     });
     const dismissBtn = document.createElement("button");
     dismissBtn.type = "button";
@@ -4774,7 +4772,7 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     actions.appendChild(openBtn);
     actions.appendChild(buyBtn);
     actions.appendChild(maybeBtn);
-    actions.appendChild(archiveBtn);
+    actions.appendChild(followBtn);
     actions.appendChild(dismissBtn);
 
     row.appendChild(head);
@@ -5231,21 +5229,21 @@ function bindBatchControls() {
 
   buyActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
-      { buy: 2 },
-      "Selected games set to Buy."
+      { buy: 2, track: 0, buyIntent: "BUY", trackIntent: "OFF", bucket: "BUY" },
+      "Selected games set to Wishlist."
     ).catch(() => setStatus("Failed to apply batch buy.", true));
   });
 
   maybeActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
-      { buy: 1 },
-      "Selected games set to Maybe."
+      { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" },
+      "Selected games set to Wishlist & Follow."
     ).catch(() => setStatus("Failed to apply batch maybe.", true));
   });
 
   trackActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
-      { track: 1 },
+      { buy: 0, track: 1, buyIntent: "NONE", trackIntent: "ON", bucket: "TRACK" },
       "Selected games set to Follow."
     ).catch(() => setStatus("Failed to apply batch follow.", true));
   });

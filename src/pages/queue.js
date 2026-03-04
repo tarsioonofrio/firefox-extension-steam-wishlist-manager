@@ -109,6 +109,11 @@ function getIntent(appId) {
   return {
     track,
     buy,
+    buyIntent: rawBuyIntent || "UNSET",
+    trackIntent: rawTrackIntent || "UNSET",
+    bucket: String(item.bucket || "").trim().toUpperCase(),
+    steamWishlistedObserved: Boolean(item.steamWishlistedObserved),
+    steamFollowedObserved: Boolean(item.steamFollowedObserved),
     owned: labels.includes("owned"),
     targetPriceCents: Number.isFinite(Number(item.targetPriceCents)) ? Number(item.targetPriceCents) : null
   };
@@ -118,7 +123,11 @@ function matchesStateFilter(appId, stateFilter) {
   const intent = getIntent(appId);
   switch (String(stateFilter || "all")) {
     case "inbox":
-      return !intent.owned && intent.track <= 0 && intent.buy <= 0;
+      return !intent.owned
+        && intent.steamWishlistedObserved
+        && !intent.steamFollowedObserved
+        && intent.buy <= 0
+        && String(intent.bucket || "").toUpperCase() === "INBOX";
     case "track":
       return !intent.owned && intent.track > 0;
     case "maybe":
@@ -624,21 +633,20 @@ function renderMedia() {
 }
 
 function updateActionButtons(intent) {
-  const confirmBtn = document.getElementById("action-confirm-btn");
-  const maybeBtn = document.getElementById("action-maybe-btn");
-  const trackBtn = document.getElementById("action-track-btn");
-  const archiveBtn = document.getElementById("action-archive-btn");
-  if (confirmBtn) {
-    confirmBtn.classList.toggle("active", intent.buy === 2);
+  const wishlistBtn = document.getElementById("action-wishlist-btn");
+  const followBtn = document.getElementById("action-follow-btn");
+  const wishlistFollowBtn = document.getElementById("action-wishlist-follow-btn");
+  const isWishlistOnly = intent.buyIntent === "BUY" && intent.trackIntent === "OFF";
+  const isFollowOnly = intent.buyIntent === "NONE" && intent.trackIntent === "ON";
+  const isWishlistAndFollow = intent.buyIntent === "BUY" && intent.trackIntent === "ON";
+  if (wishlistBtn) {
+    wishlistBtn.classList.toggle("active", isWishlistOnly);
   }
-  if (maybeBtn) {
-    maybeBtn.classList.toggle("active", intent.buy === 1);
+  if (followBtn) {
+    followBtn.classList.toggle("active", isFollowOnly);
   }
-  if (trackBtn) {
-    trackBtn.classList.toggle("active", intent.track > 0);
-  }
-  if (archiveBtn) {
-    archiveBtn.classList.toggle("active", intent.owned === true);
+  if (wishlistFollowBtn) {
+    wishlistFollowBtn.classList.toggle("active", isWishlistAndFollow);
   }
 }
 
@@ -829,7 +837,11 @@ async function refreshStateOnly() {
 async function startQueue() {
   await refreshStateOnly();
   const collection = getCollectionSelection();
-  const stateFilter = getStateSelection();
+  const stateFilter = "inbox";
+  const stateSelectEl = document.getElementById("state-select");
+  if (stateSelectEl) {
+    stateSelectEl.value = "inbox";
+  }
   queueIndex = 0;
   buildQueueIds(collection, stateFilter);
   const setupPanelEl = document.querySelector(".setup-panel");
@@ -898,39 +910,46 @@ function bindEvents() {
     renderMedia();
   });
 
-  document.getElementById("action-confirm-btn")?.addEventListener("click", async () => {
+  document.getElementById("action-wishlist-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
     if (!appId) {
       return;
     }
-    const intent = getIntent(appId);
-    await setIntent(appId, { buy: intent.buy === 2 ? 0 : 2 });
+    await setIntent(appId, {
+      buy: 2,
+      track: 0,
+      buyIntent: "BUY",
+      trackIntent: "OFF",
+      bucket: "BUY"
+    });
     await rerenderAfterAction(appId);
   });
-  document.getElementById("action-maybe-btn")?.addEventListener("click", async () => {
+  document.getElementById("action-follow-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
     if (!appId) {
       return;
     }
-    const intent = getIntent(appId);
-    await setIntent(appId, { buy: intent.buy === 1 ? 0 : 1 });
+    await setIntent(appId, {
+      buy: 0,
+      track: 1,
+      buyIntent: "NONE",
+      trackIntent: "ON",
+      bucket: "TRACK"
+    });
     await rerenderAfterAction(appId);
   });
-  document.getElementById("action-track-btn")?.addEventListener("click", async () => {
+  document.getElementById("action-wishlist-follow-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
     if (!appId) {
       return;
     }
-    const intent = getIntent(appId);
-    await setIntent(appId, { track: intent.track > 0 ? 0 : 1 });
-    await rerenderAfterAction(appId);
-  });
-  document.getElementById("action-archive-btn")?.addEventListener("click", async () => {
-    const appId = queueIds[queueIndex];
-    if (!appId) {
-      return;
-    }
-    await setIntent(appId, { track: 0, buy: 0, owned: true });
+    await setIntent(appId, {
+      buy: 2,
+      track: 1,
+      buyIntent: "BUY",
+      trackIntent: "ON",
+      bucket: "BUY"
+    });
     await rerenderAfterAction(appId);
   });
   document.getElementById("target-input")?.addEventListener("keydown", async (event) => {
