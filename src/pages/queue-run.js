@@ -9,6 +9,10 @@ const COLLECTIONS_META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const QUEUE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const steamFetchUtils = window.SWMSteamFetch || {};
+const PAGE_PATH = String(window.location.pathname || "").toLowerCase();
+const PAGE_MODE = PAGE_PATH.endsWith("/queue-run.html")
+  ? "run"
+  : (PAGE_PATH.endsWith("/queue-setup.html") ? "setup" : "setup");
 
 let state = null;
 let wishlistOrderedIds = [];
@@ -261,8 +265,7 @@ function getReleaseYearBounds(appIds) {
 }
 
 function isQueueRunning() {
-  const setup = document.querySelector(".setup-panel");
-  return Boolean(setup && setup.classList.contains("hidden"));
+  return PAGE_MODE === "run";
 }
 
 function persistQueueFiltersState() {
@@ -457,17 +460,17 @@ function matchesListFilter(appId, listFilter) {
 
 function getCollectionSelection() {
   const collectionEl = document.getElementById("collection-select");
-  return String(collectionEl?.value || "__all__");
+  return String(collectionEl?.value || currentQueueConfig.collection || "__all__");
 }
 
 function getListSelection() {
   const listEl = document.getElementById("list-select");
-  return String(listEl?.value || "inbox");
+  return String(listEl?.value || currentQueueConfig.list || "inbox");
 }
 
 function parseQueueRunQuery() {
   const params = new URLSearchParams(window.location.search || "");
-  const run = params.get("run") === "1";
+  const run = PAGE_MODE === "run" || params.get("run") === "1";
   const listRaw = String(params.get("list") || "").trim().toLowerCase();
   const collectionRaw = String(params.get("collection") || "").trim();
   const validLists = new Set(["inbox", "wishlist", "follow", "confirm", "wf", "cf"]);
@@ -479,8 +482,7 @@ function parseQueueRunQuery() {
 }
 
 function openQueueRunWindow(listFilter, collection) {
-  const url = new URL(browser.runtime.getURL("src/pages/queue.html"));
-  url.searchParams.set("run", "1");
+  const url = new URL(browser.runtime.getURL("src/pages/queue-run.html"));
   url.searchParams.set("list", String(listFilter || "inbox"));
   url.searchParams.set("collection", String(collection || "__all__"));
   window.open(url.toString(), "_blank", "noopener,noreferrer");
@@ -2041,16 +2043,17 @@ async function init() {
   await loadCollectionsMetaCache();
   await loadQueueCaches();
   hydrateQueueFiltersState();
-  ensureExtraFilterUi();
-  populateCollectionSelect();
-  hydrateUiState();
-  applyAdvancedFiltersToInputs();
-  refreshFilterOptionsForSelection();
+  if (PAGE_MODE === "setup") {
+    ensureExtraFilterUi();
+    populateCollectionSelect();
+    hydrateUiState();
+    applyAdvancedFiltersToInputs();
+    refreshFilterOptionsForSelection();
+  }
   hydrateQueueLeftWidth();
   bindEvents();
-  if (runQuery.run) {
+  if (PAGE_MODE === "run" || runQuery.run) {
     await startQueue(runQuery.collection, runQuery.list);
-    await applyFiltersToQueueView();
     return;
   }
   await applyFiltersToQueueView();

@@ -49,12 +49,12 @@ This section is the user-facing map of current screens and capabilities.
 
 ### Rediscover Queue Page
 
-- Starts with `Collection` + `State` selectors and a `Go!` action.
-- Shows one game at a time in a triage flow.
+- Opens first in a setup screen (`queue-setup`) with `Collection` + `State` selectors, advanced filters, and a `Go!` action.
+- `Go!` opens a dedicated run screen (`queue-run`) focused on one game at a time triage.
 - Queue order is randomized for each `Go!` run.
 - Includes media controls (videos/screenshots with previous/next navigation).
 - Shows card-style metadata (price, discount, reviews, release, tags) and quick actions (`Confirm`, `Maybe`, `Follow`, `Archive`, target price).
-- Layout auto-fits viewport height to avoid page scrolling during triage.
+- Run screen layout auto-fits viewport height to avoid page scrolling during triage.
 
 ### Collections Page
 

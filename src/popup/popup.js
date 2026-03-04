@@ -5,7 +5,7 @@ document.getElementById("open-collections")?.addEventListener("click", async () 
 });
 
 document.getElementById("open-queue")?.addEventListener("click", async () => {
-  const url = browser.runtime.getURL("src/pages/queue.html");
+  const url = browser.runtime.getURL("src/pages/queue-setup.html");
   await browser.tabs.create({ url });
   window.close();
 });

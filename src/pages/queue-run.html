@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rediscover Queue Run</title>
+  <link rel="stylesheet" href="queue-run.css">
+</head>
+<body>
+  <main class="container">
+    <header class="top">
+      <div class="top-title-row">
+        <h1>Rediscover Queue</h1>
+        <div id="queue-header-bar" class="queue-header-bar hidden">
+          <div class="queue-topbar-left">
+            <div id="queue-nav" class="queue-nav hidden">
+              <button id="prev-btn" type="button">Previous</button>
+              <button id="next-btn" type="button">Next</button>
+            </div>
+          </div>
+          <div class="queue-topbar-right">
+            <a id="game-link" class="title" target="_blank" rel="noopener noreferrer"></a>
+            <span id="game-appid" class="meta"></span>
+            <span id="queue-pos" class="meta"></span>
+          </div>
+        </div>
+      </div>
+      <p id="status" class="status"></p>
+    </header>
+
+    <section id="empty" class="empty hidden">No games for current source/filter.</section>
+    <article id="queue-card" class="queue-card hidden">
+      <div class="queue-body">
+        <div class="queue-left">
+          <div class="media-stage">
+            <video id="media-video" class="media hidden" controls muted playsinline preload="none"></video>
+            <img id="media-image" class="media hidden" alt="">
+            <button id="media-prev-btn" class="media-nav-btn media-nav-prev" type="button" aria-label="Previous media">‹</button>
+            <button id="media-next-btn" class="media-nav-btn media-nav-next" type="button" aria-label="Next media">›</button>
+          </div>
+        </div>
+        <div id="queue-column-resize-handle" class="queue-column-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize queue columns"></div>
+        <div class="info">
+          <a id="capsule-link" class="capsule-link" target="_blank" rel="noopener noreferrer">
+            <img id="capsule-image" class="capsule-image" alt="">
+          </a>
+          <div class="actions">
+            <button id="action-wishlist-btn" type="button">Confirm</button>
+            <button id="action-follow-btn" type="button">Follow</button>
+            <button id="action-wishlist-follow-btn" type="button">C*F</button>
+            <button id="action-none-btn" type="button">None</button>
+          </div>
+          <p id="short-description" class="short-description">-</p>
+          <div class="meta-grid">
+            <p id="price-text" class="meta">Price: -</p>
+            <p id="discount-text" class="meta">Discount: -</p>
+            <p id="review-text" class="meta">Reviews: -</p>
+            <p id="release-text" class="meta">Release: -</p>
+          </div>
+          <div id="tags-row" class="tags-row"></div>
+          <label class="target">
+            <span>Target</span>
+            <input id="target-input" type="number" min="0" step="0.01" placeholder="">
+          </label>
+          <div class="target-actions">
+            <button id="action-demo-btn" type="button">DEMO</button>
+          </div>
+        </div>
+      </div>
+    </article>
+  </main>
+  <script src="collections-filters.js"></script>
+  <script src="steam-fetch.js"></script>
+  <script src="queue-run.js"></script>
+</body>
+</html>
