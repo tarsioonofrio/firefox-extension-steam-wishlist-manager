@@ -419,7 +419,9 @@ async function fetchMeta(appId) {
     reviewText: "No user reviews",
     priceText: "-",
     discountText: "-",
-    tags: []
+    tags: [],
+    hasDemo: false,
+    demoAppId: ""
   };
   try {
     const fetchJson = steamFetchUtils.fetchJson || ((url, options = {}) => fetch(url, options).then((r) => r.json()));
@@ -460,7 +462,9 @@ async function fetchMeta(appId) {
       discountText: Number(appData?.price_overview?.discount_percent || 0) > 0
         ? `${Number(appData.price_overview.discount_percent)}% off`
         : "-",
-      tags: Array.from(new Set([...genres, ...categories])).slice(0, 12)
+      tags: Array.from(new Set([...genres, ...categories])).slice(0, 12),
+      hasDemo: Array.isArray(appData?.demos) && appData.demos.length > 0,
+      demoAppId: String(appData?.demos?.[0]?.appid || "").trim()
     };
     metaCache.set(appId, meta);
     await persistMetaCache();
@@ -720,15 +724,20 @@ function renderMedia() {
 function updateActionButtons(intent) {
   const wishlistBtn = document.getElementById("action-wishlist-btn");
   const followBtn = document.getElementById("action-follow-btn");
+  const noneBtn = document.getElementById("action-none-btn");
   const wishlistFollowBtn = document.getElementById("action-wishlist-follow-btn");
   const isWishlistOnly = intent.buyIntent === "BUY" && intent.trackIntent === "OFF";
   const isFollowOnly = intent.buyIntent === "NONE" && intent.trackIntent === "ON";
+  const isNone = intent.buyIntent === "NONE" && intent.trackIntent === "OFF";
   const isWishlistAndFollow = intent.buyIntent === "BUY" && intent.trackIntent === "ON";
   if (wishlistBtn) {
     wishlistBtn.classList.toggle("active", isWishlistOnly);
   }
   if (followBtn) {
     followBtn.classList.toggle("active", isFollowOnly);
+  }
+  if (noneBtn) {
+    noneBtn.classList.toggle("active", isNone);
   }
   if (wishlistFollowBtn) {
     wishlistFollowBtn.classList.toggle("active", isWishlistAndFollow);
@@ -803,6 +812,7 @@ async function renderCurrent() {
   const appIdEl = document.getElementById("game-appid");
   const posEl = document.getElementById("queue-pos");
   const targetInput = document.getElementById("target-input");
+  const demoBtn = document.getElementById("action-demo-btn");
   const steamUrl = `https://store.steampowered.com/app/${encodeURIComponent(appId)}/`;
   const fallbackTitle = String(item.title || "").trim() || `App ${appId}`;
   if (titleEl) {
@@ -822,6 +832,11 @@ async function renderCurrent() {
     targetInput.value = Number.isFinite(Number(intent.targetPriceCents)) && Number(intent.targetPriceCents) > 0
       ? (Number(intent.targetPriceCents) / 100).toFixed(2)
       : "";
+  }
+  if (demoBtn) {
+    demoBtn.disabled = true;
+    demoBtn.textContent = "DEMO (N/A)";
+    demoBtn.title = "Checking demo availability...";
   }
   updateActionButtons(intent);
 
@@ -870,6 +885,12 @@ async function renderCurrent() {
       tagsRow.appendChild(chip);
     }
   }
+  if (demoBtn) {
+    const hasDemo = Boolean(meta?.hasDemo) && String(meta?.demoAppId || "").trim().length > 0;
+    demoBtn.disabled = !hasDemo;
+    demoBtn.textContent = hasDemo ? "DEMO" : "DEMO (N/A)";
+    demoBtn.title = hasDemo ? "Add demo to Steam library" : "No demo available for this game";
+  }
 
   fitLayoutToViewport();
   setStatus("Loading media...");
@@ -912,6 +933,141 @@ async function setIntent(appId, patch) {
   if (errs.length > 0) {
     setStatus(`Local state saved, Steam write failed: ${errs[0]}`, true);
   }
+}
+
+async function fetchSteamSessionId() {
+  const fetchText = steamFetchUtils.fetchText || ((url, options = {}) => fetch(url, options).then((r) => r.text()));
+  const html = await fetchText("https://store.steampowered.com/account/preferences", {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store"
+  });
+  const match = String(html || "").match(/g_sessionID\s*=\s*"([^"]+)"/i);
+  const sessionId = String(match?.[1] || "").trim();
+  if (!sessionId) {
+    throw new Error("Could not resolve Steam session id.");
+  }
+  return sessionId;
+}
+
+function createFormData(values) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(values || {})) {
+    form.append(String(key), String(value ?? ""));
+  }
+  return form;
+}
+
+async function postSteamForm(url, values) {
+  const response = await fetch(url, {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    body: createFormData(values),
+    headers: {
+      "X-Requested-With": "SteamWishlistManager"
+    }
+  });
+  const bodyText = await response.text().catch(() => "");
+  if (!response.ok) {
+    throw new Error(`Steam request failed (${response.status})${bodyText ? `: ${bodyText.slice(0, 120)}` : ""}`);
+  }
+  if (!bodyText) {
+    return null;
+  }
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    return bodyText;
+  }
+}
+
+function parseSuccessBody(body) {
+  if (body == null || body === "") {
+    return true;
+  }
+  if (body === true) {
+    return true;
+  }
+  if (typeof body === "object") {
+    return body.success === true || Number(body.success) > 0 || body.result === 1;
+  }
+  const text = String(body || "").toLowerCase();
+  return text.includes("\"success\":1") || text.includes("\"success\":true") || text.includes("success");
+}
+
+async function resolveDemoAppId(appId) {
+  const fetchJson = steamFetchUtils.fetchJson || ((url, options = {}) => fetch(url, options).then((r) => r.json()));
+  const payload = await fetchJson(
+    `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(appId)}&l=english`,
+    { cache: "no-store", credentials: "include" }
+  );
+  const appData = payload?.[appId]?.data || {};
+  const demo = Array.isArray(appData?.demos) ? appData.demos[0] : null;
+  const demoAppId = String(demo?.appid || "").trim();
+  if (!demoAppId) {
+    throw new Error("No demo available for this game.");
+  }
+  return demoAppId;
+}
+
+async function resolveDemoSubId(demoAppId) {
+  const fetchText = steamFetchUtils.fetchText || ((url, options = {}) => fetch(url, options).then((r) => r.text()));
+  const html = await fetchText(
+    `https://store.steampowered.com/app/${encodeURIComponent(demoAppId)}/?l=english`,
+    { cache: "no-store", credentials: "include" }
+  );
+  const patterns = [
+    /AddFreeLicense\s*\(\s*(\d+)\s*\)/i,
+    /addfreelicense\/(\d+)/i,
+    /data-subid="(\d+)"/i,
+    /name="subid"\s+value="(\d+)"/i
+  ];
+  for (const pattern of patterns) {
+    const match = String(html || "").match(pattern);
+    const subId = String(match?.[1] || "").trim();
+    if (subId) {
+      return subId;
+    }
+  }
+  throw new Error("Could not resolve demo package id.");
+}
+
+async function addDemoToLibrary(appId) {
+  const demoAppId = await resolveDemoAppId(appId);
+  const subId = await resolveDemoSubId(demoAppId);
+  const sessionId = await fetchSteamSessionId();
+  const attempts = [
+    {
+      url: "https://store.steampowered.com/checkout/addfreelicense",
+      payload: { action: "add_to_cart", sessionid: sessionId, subid: subId }
+    },
+    {
+      url: `https://store.steampowered.com/checkout/addfreelicense/${encodeURIComponent(subId)}`,
+      payload: { action: "add_to_cart", sessionid: sessionId, subid: subId }
+    },
+    {
+      url: "https://store.steampowered.com/freelicense/addfreelicense",
+      payload: { sessionid: sessionId, subid: subId }
+    },
+    {
+      url: `https://store.steampowered.com/freelicense/addfreelicense/${encodeURIComponent(subId)}`,
+      payload: { sessionid: sessionId, subid: subId }
+    }
+  ];
+  let lastError = null;
+  for (const attempt of attempts) {
+    try {
+      const body = await postSteamForm(attempt.url, attempt.payload);
+      if (!parseSuccessBody(body)) {
+        throw new Error("Steam did not confirm the demo claim.");
+      }
+      return { demoAppId, subId };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Could not add demo to library.");
 }
 
 async function refreshStateOnly() {
@@ -999,6 +1155,7 @@ function bindEvents() {
     if (!appId) {
       return;
     }
+    updateActionButtons({ buyIntent: "BUY", trackIntent: "OFF" });
     await setIntent(appId, {
       buy: 2,
       track: 0,
@@ -1013,6 +1170,7 @@ function bindEvents() {
     if (!appId) {
       return;
     }
+    updateActionButtons({ buyIntent: "NONE", trackIntent: "ON" });
     await setIntent(appId, {
       buy: 0,
       track: 1,
@@ -1022,11 +1180,27 @@ function bindEvents() {
     });
     await rerenderAfterAction(appId);
   });
+  document.getElementById("action-none-btn")?.addEventListener("click", async () => {
+    const appId = queueIds[queueIndex];
+    if (!appId) {
+      return;
+    }
+    updateActionButtons({ buyIntent: "NONE", trackIntent: "OFF" });
+    await setIntent(appId, {
+      buy: 0,
+      track: 0,
+      buyIntent: "NONE",
+      trackIntent: "OFF",
+      bucket: "INBOX"
+    });
+    await rerenderAfterAction(appId);
+  });
   document.getElementById("action-wishlist-follow-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
     if (!appId) {
       return;
     }
+    updateActionButtons({ buyIntent: "BUY", trackIntent: "ON" });
     await setIntent(appId, {
       buy: 2,
       track: 1,
@@ -1035,6 +1209,37 @@ function bindEvents() {
       bucket: "BUY"
     });
     await rerenderAfterAction(appId);
+  });
+  document.getElementById("action-demo-btn")?.addEventListener("click", async () => {
+    const appId = queueIds[queueIndex];
+    if (!appId) {
+      return;
+    }
+    const currentMeta = metaCache.get(appId);
+    if (!currentMeta || !currentMeta.hasDemo || !String(currentMeta.demoAppId || "").trim()) {
+      setStatus("No demo available for this game.", true);
+      return;
+    }
+    const ok = window.confirm("Add this game's demo to your Steam library?");
+    if (!ok) {
+      return;
+    }
+    const demoBtn = document.getElementById("action-demo-btn");
+    if (demoBtn) {
+      demoBtn.disabled = true;
+    }
+    setStatus("Adding demo to Steam library...");
+    try {
+      const added = await addDemoToLibrary(appId);
+      setStatus(`Demo added to library (app ${added.demoAppId}).`);
+    } catch (error) {
+      const message = String(error?.message || error || "unknown error");
+      setStatus(`Could not add demo automatically: ${message}`, true);
+    } finally {
+      if (demoBtn) {
+        demoBtn.disabled = false;
+      }
+    }
   });
   document.getElementById("target-input")?.addEventListener("keydown", async (event) => {
     if (event.key !== "Enter") {
