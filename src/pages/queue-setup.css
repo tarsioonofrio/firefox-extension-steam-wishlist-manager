@@ -320,7 +320,7 @@ button.active {
   inset: 0;
   width: 100%;
   margin: 0;
-  pointer-events: auto;
+  pointer-events: none;
   background: transparent;
   border: 0;
   padding: 0;
@@ -336,6 +336,14 @@ button.active {
 #queue-discount-max-range,
 #queue-release-year-max-range {
   z-index: 5;
+}
+
+.dual-range input[type="range"]::-webkit-slider-thumb {
+  pointer-events: auto;
+}
+
+.dual-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
 }
 
 .reviews-row {
