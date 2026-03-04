@@ -320,17 +320,54 @@ button.active {
   inset: 0;
   width: 100%;
   margin: 0;
-  pointer-events: none;
   background: transparent;
   border: 0;
   padding: 0;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.dual-range input[type="range"].range-min {
+  z-index: 2;
+}
+
+.dual-range input[type="range"].range-max {
+  z-index: 3;
+}
+
+.dual-range input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #2f445a;
+}
+
+.dual-range input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: #2f445a;
 }
 
 .dual-range input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  border: 1px solid #3f5c79;
+  background: #e6f4ff;
+  cursor: pointer;
   pointer-events: auto;
 }
 
 .dual-range input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid #3f5c79;
+  background: #e6f4ff;
+  cursor: pointer;
   pointer-events: auto;
 }
 

@@ -24,11 +24,13 @@ let mediaSeq = 0;
 const metaCache = new Map();
 const mediaCache = new Map();
 let collectionsMetaCache = {};
+let queueActionInFlight = false;
 
 const QUEUE_FILTERS_STATE_KEY = "swmQueueFiltersV1";
 const TAG_SHOW_STEP = 12;
 const EXTRA_SHOW_STEP = 12;
 const OPEN_ENDED_MAX_VALUE = 999999999;
+const ACTION_VISUAL_FEEDBACK_MS = 220;
 const collectionsFiltersUtils = window.SWMCollectionsFilters || null;
 const EXTRA_FILTER_CONFIGS = [
   { key: "types", label: "Type", placeholder: "Search types..." },
@@ -1542,6 +1544,7 @@ async function setIntent(appId, patch) {
     type: "set-item-intent",
     appId,
     title: String(state?.items?.[appId]?.title || ""),
+    deferSteam: true,
     ...patch
   });
   const errs = Array.isArray(response?.steamWrite?.errors)
@@ -1550,6 +1553,93 @@ async function setIntent(appId, patch) {
   if (errs.length > 0) {
     setStatus(`Local state saved, Steam write failed: ${errs[0]}`, true);
   }
+}
+
+function setQueueActionButtonsDisabled(disabled) {
+  const ids = [
+    "action-wishlist-btn",
+    "action-follow-btn",
+    "action-none-btn",
+    "action-wishlist-follow-btn"
+  ];
+  for (const id of ids) {
+    const button = document.getElementById(id);
+    if (button) {
+      button.disabled = Boolean(disabled);
+    }
+  }
+}
+
+function applyLocalIntentPatch(appId, patch) {
+  const key = String(appId || "").trim();
+  if (!key) {
+    return;
+  }
+  if (!state || typeof state !== "object") {
+    state = { items: {} };
+  }
+  if (!state.items || typeof state.items !== "object") {
+    state.items = {};
+  }
+  const current = state.items[key] && typeof state.items[key] === "object"
+    ? state.items[key]
+    : {};
+  state.items[key] = {
+    ...current,
+    ...patch
+  };
+}
+
+function moveQueueToNextAfterAction(processedAppId) {
+  const appId = String(processedAppId || "").trim();
+  reconcileQueueIds(currentQueueConfig.collection, currentQueueConfig.list, appId);
+  if (queueIds.length === 0) {
+    queueIndex = 0;
+  } else {
+    const previousIdx = queueIds.indexOf(appId);
+    if (previousIdx >= 0) {
+      queueIndex = (previousIdx + 1) % queueIds.length;
+    } else {
+      queueIndex = Math.max(0, Math.min(queueIndex, queueIds.length - 1));
+    }
+  }
+  persistUiState();
+  renderCurrent().catch((error) => setStatus(String(error?.message || error || "Could not render queue item."), true));
+}
+
+function persistIntentInBackground(appId, patch) {
+  setTimeout(() => {
+    void setIntent(appId, patch).catch((error) => {
+      setStatus(`Local state saved, write failed: ${String(error?.message || error || "unknown error")}`, true);
+    });
+  }, 0);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, Math.max(0, Number(ms) || 0));
+  });
+}
+
+function unlockQueueActionsSoon(delayMs = 250) {
+  setTimeout(() => {
+    queueActionInFlight = false;
+    setQueueActionButtonsDisabled(false);
+  }, Math.max(0, Number(delayMs) || 0));
+}
+
+async function handleQueueIntentAction(appId, patch, optimisticIntent) {
+  if (!appId || queueActionInFlight) {
+    return;
+  }
+  queueActionInFlight = true;
+  setQueueActionButtonsDisabled(true);
+  updateActionButtons(optimisticIntent);
+  applyLocalIntentPatch(appId, patch);
+  await sleep(ACTION_VISUAL_FEEDBACK_MS);
+  moveQueueToNextAfterAction(appId);
+  persistIntentInBackground(appId, patch);
+  unlockQueueActionsSoon(250);
 }
 
 async function fetchSteamSessionId() {
@@ -1737,7 +1827,6 @@ async function startQueue(collectionOverride = "", listOverride = "") {
 }
 
 async function rerenderAfterAction(currentAppId = "") {
-  await loadState();
   reconcileQueueIds(currentQueueConfig.collection, currentQueueConfig.list, currentAppId);
   await renderCurrent();
 }
@@ -1883,60 +1972,52 @@ function bindEvents() {
     if (!appId) {
       return;
     }
-    updateActionButtons({ buyIntent: "BUY", trackIntent: "OFF" });
-    await setIntent(appId, {
+    handleQueueIntentAction(appId, {
       buy: 2,
       track: 0,
       buyIntent: "BUY",
       trackIntent: "OFF",
       bucket: "BUY"
-    });
-    await rerenderAfterAction(appId);
+    }, { buyIntent: "BUY", trackIntent: "OFF" });
   });
   document.getElementById("action-follow-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
     if (!appId) {
       return;
     }
-    updateActionButtons({ buyIntent: "NONE", trackIntent: "ON" });
-    await setIntent(appId, {
+    handleQueueIntentAction(appId, {
       buy: 0,
       track: 1,
       buyIntent: "NONE",
       trackIntent: "ON",
       bucket: "TRACK"
-    });
-    await rerenderAfterAction(appId);
+    }, { buyIntent: "NONE", trackIntent: "ON" });
   });
   document.getElementById("action-none-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
     if (!appId) {
       return;
     }
-    updateActionButtons({ buyIntent: "NONE", trackIntent: "OFF" });
-    await setIntent(appId, {
+    handleQueueIntentAction(appId, {
       buy: 0,
       track: 0,
       buyIntent: "NONE",
       trackIntent: "OFF",
       bucket: "INBOX"
-    });
-    await rerenderAfterAction(appId);
+    }, { buyIntent: "NONE", trackIntent: "OFF" });
   });
   document.getElementById("action-wishlist-follow-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
     if (!appId) {
       return;
     }
-    updateActionButtons({ buyIntent: "BUY", trackIntent: "ON" });
-    await setIntent(appId, {
+    handleQueueIntentAction(appId, {
       buy: 2,
       track: 1,
       buyIntent: "BUY",
       trackIntent: "ON",
       bucket: "BUY"
-    });
-    await rerenderAfterAction(appId);
+    }, { buyIntent: "BUY", trackIntent: "ON" });
   });
   document.getElementById("action-demo-btn")?.addEventListener("click", async () => {
     const appId = queueIds[queueIndex];
