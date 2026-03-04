@@ -21,6 +21,49 @@ const metaCache = new Map();
 const mediaCache = new Map();
 let collectionsMetaCache = {};
 
+const QUEUE_FILTERS_STATE_KEY = "swmQueueFiltersV1";
+const TAG_SHOW_STEP = 12;
+const EXTRA_SHOW_STEP = 12;
+const OPEN_ENDED_MAX_VALUE = 999999999;
+const collectionsFiltersUtils = window.SWMCollectionsFilters || null;
+const EXTRA_FILTER_CONFIGS = [
+  { key: "types", label: "Type", placeholder: "Search types..." },
+  { key: "players", label: "Number of Players", placeholder: "Search players..." },
+  { key: "features", label: "Features", placeholder: "Search features..." },
+  { key: "hardware", label: "Hardware & Controllers", placeholder: "Search hardware..." },
+  { key: "accessibility", label: "Accessibility", placeholder: "Search accessibility..." },
+  { key: "platforms", label: "Platforms", placeholder: "Search platforms..." },
+  { key: "languages", label: "Languages", placeholder: "Search languages..." },
+  { key: "fullAudioLanguages", label: "Languages with Full Audio", placeholder: "Search full audio languages..." },
+  { key: "subtitleLanguages", label: "Languages with Subtitles", placeholder: "Search subtitle languages..." },
+  { key: "technologies", label: "Technologies", placeholder: "Search technologies..." },
+  { key: "developers", label: "Developers", placeholder: "Search developers..." },
+  { key: "publishers", label: "Publishers", placeholder: "Search publishers..." }
+];
+
+let selectedTags = new Set();
+let tagSearchQuery = "";
+let tagShowLimit = TAG_SHOW_STEP;
+let tagCounts = [];
+
+let selectedExtraFilters = Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, new Set()]));
+let extraFilterCounts = Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, []]));
+let extraFilterSearchQuery = Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, ""]));
+let extraFilterShowLimit = Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, EXTRA_SHOW_STEP]));
+
+let ratingMin = 0;
+let ratingMax = 100;
+let reviewsMin = 0;
+let reviewsMax = OPEN_ENDED_MAX_VALUE;
+let priceMin = 0;
+let priceMax = OPEN_ENDED_MAX_VALUE;
+let discountMin = 0;
+let discountMax = 100;
+let releaseTextEnabled = true;
+let releaseYearRangeEnabled = true;
+let releaseYearMin = 1970;
+let releaseYearMax = new Date().getUTCFullYear() + 1;
+
 function mapToObject(map) {
   const out = {};
   for (const [key, value] of map.entries()) {
@@ -97,6 +140,263 @@ function setStatus(message, isError = false) {
   }
   el.textContent = String(message || "");
   el.style.color = isError ? "#ff9696" : "#9db5c9";
+}
+
+function normalizeName(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeNameLower(value) {
+  return normalizeName(value).toLowerCase();
+}
+
+function parseReleaseYear(meta) {
+  const releaseUnix = Number(meta?.releaseUnix || 0);
+  if (Number.isFinite(releaseUnix) && releaseUnix > 0) {
+    return new Date(releaseUnix * 1000).getUTCFullYear();
+  }
+  const releaseText = String(meta?.releaseText || "");
+  const match = releaseText.match(/\b(19\d{2}|20\d{2}|21\d{2})\b/);
+  return match?.[1] ? Number(match[1]) : 0;
+}
+
+function getMergedMeta(appId) {
+  const collectionsMeta = collectionsMetaCache?.[appId] && typeof collectionsMetaCache[appId] === "object"
+    ? collectionsMetaCache[appId]
+    : {};
+  const queueMeta = metaCache.get(appId) || {};
+
+  const merged = { ...queueMeta, ...collectionsMeta };
+  if (!Array.isArray(merged.tags) || merged.tags.length === 0) {
+    merged.tags = Array.isArray(queueMeta.tags) ? queueMeta.tags : [];
+  }
+  if (!Number.isFinite(Number(merged.reviewPositivePct))) {
+    const reviewText = String(queueMeta.reviewText || "");
+    const pctMatch = reviewText.match(/^(\d{1,3})%/);
+    merged.reviewPositivePct = pctMatch?.[1] ? Number(pctMatch[1]) : -1;
+  }
+  if (!Number.isFinite(Number(merged.reviewTotalVotes))) {
+    const reviewText = String(queueMeta.reviewText || "");
+    const votesMatch = reviewText.match(/\((\d[\d,.]*)\s+reviews\)/i);
+    const rawVotes = String(votesMatch?.[1] || "").replace(/[^\d]/g, "");
+    merged.reviewTotalVotes = rawVotes ? Number(rawVotes) : 0;
+  }
+  if (!Number.isFinite(Number(merged.discountPercent))) {
+    const discountText = String(queueMeta.discountText || "");
+    const discMatch = discountText.match(/(\d{1,3})\s*%/);
+    merged.discountPercent = discMatch?.[1] ? Number(discMatch[1]) : 0;
+  }
+  if (!Number.isFinite(Number(merged.priceFinal))) {
+    merged.priceFinal = 0;
+  }
+  if (!merged.releaseText) {
+    merged.releaseText = String(queueMeta.releaseText || "-");
+  }
+  if (!Number.isFinite(Number(merged.releaseUnix))) {
+    merged.releaseUnix = 0;
+  }
+  return merged;
+}
+
+function getMetaNumberForFilters(appId, key, fallback = 0) {
+  const n = Number(getMergedMeta(appId)?.[key]);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function getMetaArrayForFilters(appId, key) {
+  const value = getMergedMeta(appId)?.[key];
+  return Array.isArray(value)
+    ? value.map((entry) => normalizeName(entry)).filter(Boolean)
+    : [];
+}
+
+function getMetaTagsForFilters(appId) {
+  return getMetaArrayForFilters(appId, "tags");
+}
+
+function countValuesByKey(appIds, key) {
+  const counts = new Map();
+  for (const appId of appIds) {
+    const values = new Set(getMetaArrayForFilters(appId, key));
+    for (const value of values) {
+      counts.set(value, Number(counts.get(value) || 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
+}
+
+function countTags(appIds) {
+  const counts = new Map();
+  for (const appId of appIds) {
+    const tags = new Set(getMetaTagsForFilters(appId));
+    for (const tag of tags) {
+      counts.set(tag, Number(counts.get(tag) || 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name));
+}
+
+function getReleaseYearBounds(appIds) {
+  let min = Number.MAX_SAFE_INTEGER;
+  let max = 0;
+  for (const appId of appIds) {
+    const year = parseReleaseYear(getMergedMeta(appId));
+    if (!Number.isFinite(year) || year <= 0) {
+      continue;
+    }
+    min = Math.min(min, year);
+    max = Math.max(max, year);
+  }
+  const fallbackMax = new Date().getUTCFullYear() + 1;
+  const safeMin = min === Number.MAX_SAFE_INTEGER ? 1970 : min;
+  const safeMax = max > 0 ? max : fallbackMax;
+  return {
+    min: safeMin,
+    max: Math.max(safeMin, safeMax)
+  };
+}
+
+function isQueueRunning() {
+  const setup = document.querySelector(".setup-panel");
+  return Boolean(setup && setup.classList.contains("hidden"));
+}
+
+function persistQueueFiltersState() {
+  try {
+    const payload = {
+      selectedTags: Array.from(selectedTags),
+      tagSearchQuery,
+      tagShowLimit,
+      selectedExtraFilters: Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, Array.from(selectedExtraFilters[cfg.key] || [])])),
+      extraFilterSearchQuery,
+      extraFilterShowLimit,
+      ratingMin,
+      ratingMax,
+      reviewsMin,
+      reviewsMax,
+      priceMin,
+      priceMax,
+      discountMin,
+      discountMax,
+      releaseTextEnabled,
+      releaseYearRangeEnabled,
+      releaseYearMin,
+      releaseYearMax
+    };
+    localStorage.setItem(QUEUE_FILTERS_STATE_KEY, JSON.stringify(payload));
+  } catch {
+    // noop
+  }
+}
+
+function hydrateQueueFiltersState() {
+  try {
+    const raw = localStorage.getItem(QUEUE_FILTERS_STATE_KEY);
+    if (!raw) {
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    selectedTags = new Set(Array.isArray(parsed?.selectedTags) ? parsed.selectedTags.map(normalizeName).filter(Boolean) : []);
+    tagSearchQuery = String(parsed?.tagSearchQuery || "");
+    tagShowLimit = Math.max(TAG_SHOW_STEP, Number(parsed?.tagShowLimit || TAG_SHOW_STEP));
+
+    const selected = parsed?.selectedExtraFilters && typeof parsed.selectedExtraFilters === "object"
+      ? parsed.selectedExtraFilters
+      : {};
+    for (const cfg of EXTRA_FILTER_CONFIGS) {
+      selectedExtraFilters[cfg.key] = new Set(
+        (Array.isArray(selected[cfg.key]) ? selected[cfg.key] : [])
+          .map(normalizeName)
+          .filter(Boolean)
+      );
+      extraFilterSearchQuery[cfg.key] = String(parsed?.extraFilterSearchQuery?.[cfg.key] || "");
+      extraFilterShowLimit[cfg.key] = Math.max(EXTRA_SHOW_STEP, Number(parsed?.extraFilterShowLimit?.[cfg.key] || EXTRA_SHOW_STEP));
+    }
+
+    const toNum = (value, fallback) => {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    };
+    ratingMin = Math.max(0, Math.min(100, toNum(parsed?.ratingMin, 0)));
+    ratingMax = Math.max(ratingMin, Math.min(100, toNum(parsed?.ratingMax, 100)));
+    reviewsMin = Math.max(0, toNum(parsed?.reviewsMin, 0));
+    reviewsMax = Math.max(reviewsMin, toNum(parsed?.reviewsMax, OPEN_ENDED_MAX_VALUE));
+    priceMin = Math.max(0, toNum(parsed?.priceMin, 0));
+    priceMax = Math.max(priceMin, toNum(parsed?.priceMax, OPEN_ENDED_MAX_VALUE));
+    discountMin = Math.max(0, Math.min(100, toNum(parsed?.discountMin, 0)));
+    discountMax = Math.max(discountMin, Math.min(100, toNum(parsed?.discountMax, 100)));
+    releaseTextEnabled = parsed?.releaseTextEnabled !== false;
+    releaseYearRangeEnabled = parsed?.releaseYearRangeEnabled !== false;
+    releaseYearMin = Math.max(1970, Math.floor(toNum(parsed?.releaseYearMin, 1970)));
+    releaseYearMax = Math.max(releaseYearMin, Math.floor(toNum(parsed?.releaseYearMax, new Date().getUTCFullYear() + 1)));
+  } catch {
+    // noop
+  }
+}
+
+function buildCollectionsFilterContext() {
+  const selected = selectedExtraFilters;
+  return {
+    sourceMode: "collections",
+    sortMode: "title",
+    selectedTags,
+    selectedTypes: selected.types || new Set(),
+    selectedPlayers: selected.players || new Set(),
+    selectedFeatures: selected.features || new Set(),
+    selectedHardware: selected.hardware || new Set(),
+    selectedAccessibility: selected.accessibility || new Set(),
+    selectedPlatforms: selected.platforms || new Set(),
+    selectedLanguages: selected.languages || new Set(),
+    selectedFullAudioLanguages: selected.fullAudioLanguages || new Set(),
+    selectedSubtitleLanguages: selected.subtitleLanguages || new Set(),
+    selectedTechnologies: selected.technologies || new Set(),
+    selectedDevelopers: selected.developers || new Set(),
+    selectedPublishers: selected.publishers || new Set(),
+    releaseTextEnabled,
+    releaseYearRangeEnabled,
+    releaseYearMin,
+    releaseYearMax,
+    ratingMin,
+    ratingMax,
+    reviewsMin,
+    reviewsMax,
+    discountMin,
+    discountMax,
+    priceMin,
+    priceMax,
+    getMeta: getMergedMeta,
+    getMetaTags: getMetaTagsForFilters,
+    getMetaType: (appId) => String(getMergedMeta(appId)?.appType || "Unknown"),
+    getMetaNumber: getMetaNumberForFilters,
+    getMetaArray: getMetaArrayForFilters,
+    getReleaseFilterData: (appId) => {
+      const meta = getMergedMeta(appId);
+      const releaseText = normalizeName(meta?.releaseText);
+      const lower = releaseText.toLowerCase();
+      let textLabel = "";
+      if (releaseText && releaseText !== "-") {
+        if (lower.includes("coming soon") || lower === "soon") {
+          textLabel = "Soon";
+        } else if (lower.includes("tba") || lower.includes("to be announced")) {
+          textLabel = "TBA";
+        } else {
+          textLabel = releaseText;
+        }
+      }
+      return { year: parseReleaseYear(meta), textLabel };
+    }
+  };
+}
+
+function applyAdvancedFilters(appIds) {
+  if (!collectionsFiltersUtils?.getFilteredAndSorted) {
+    return Array.isArray(appIds) ? appIds : [];
+  }
+  return collectionsFiltersUtils.getFilteredAndSorted(appIds, buildCollectionsFilterContext());
 }
 
 function shuffleIds(ids) {
@@ -382,15 +682,7 @@ function getDynamicCollectionIds(collection, listFilter = "inbox") {
   return out;
 }
 
-function buildQueueIds(collection, listFilter) {
-  const deduped = getFilteredIds(collection, listFilter);
-  queueIds = shuffleIds(deduped);
-  queueIndex = queueIds.length > 0 ? Math.min(queueIndex, queueIds.length - 1) : 0;
-  currentQueueConfig = { collection, list: listFilter };
-  persistUiState();
-}
-
-function getFilteredIds(collection, listFilter) {
+function getQueueBaseIds(collection, listFilter) {
   const base = resolveBaseIdsByCollection(collection, listFilter);
   const deduped = [];
   const seen = new Set();
@@ -408,6 +700,19 @@ function getFilteredIds(collection, listFilter) {
   return deduped;
 }
 
+function buildQueueIds(collection, listFilter) {
+  const deduped = getFilteredIds(collection, listFilter);
+  queueIds = shuffleIds(deduped);
+  queueIndex = queueIds.length > 0 ? Math.min(queueIndex, queueIds.length - 1) : 0;
+  currentQueueConfig = { collection, list: listFilter };
+  persistUiState();
+}
+
+function getFilteredIds(collection, listFilter) {
+  const deduped = getQueueBaseIds(collection, listFilter);
+  return applyAdvancedFilters(deduped);
+}
+
 function reconcileQueueIds(collection, listFilter, currentAppId = "") {
   const allowedIds = getFilteredIds(collection, listFilter);
   const allowedSet = new Set(allowedIds);
@@ -423,6 +728,295 @@ function reconcileQueueIds(collection, listFilter, currentAppId = "") {
   } else {
     queueIndex = Math.max(0, Math.min(queueIndex, queueIds.length - 1));
   }
+}
+
+function updateAdvancedFilterLabels() {
+  const ratingMinLabel = document.getElementById("queue-rating-min-label");
+  const ratingMaxLabel = document.getElementById("queue-rating-max-label");
+  if (ratingMinLabel) {
+    ratingMinLabel.textContent = `${Math.round(ratingMin)}%`;
+  }
+  if (ratingMaxLabel) {
+    ratingMaxLabel.textContent = `${Math.round(ratingMax)}%`;
+  }
+
+  const discountMinLabel = document.getElementById("queue-discount-min-label");
+  const discountMaxLabel = document.getElementById("queue-discount-max-label");
+  if (discountMinLabel) {
+    discountMinLabel.textContent = `${Math.round(discountMin)}%`;
+  }
+  if (discountMaxLabel) {
+    discountMaxLabel.textContent = `${Math.round(discountMax)}%`;
+  }
+
+  const releaseYearMinLabel = document.getElementById("queue-release-year-min-label");
+  const releaseYearMaxLabel = document.getElementById("queue-release-year-max-label");
+  if (releaseYearMinLabel) {
+    releaseYearMinLabel.textContent = String(Math.round(releaseYearMin));
+  }
+  if (releaseYearMaxLabel) {
+    releaseYearMaxLabel.textContent = String(Math.round(releaseYearMax));
+  }
+
+  const releaseYearPanel = document.getElementById("queue-release-year-range-panel");
+  if (releaseYearPanel) {
+    releaseYearPanel.classList.toggle("disabled", !releaseYearRangeEnabled);
+  }
+}
+
+function applyAdvancedFiltersToInputs() {
+  const setValue = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.value = value;
+    }
+  };
+  const setChecked = (id, checked) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.checked = Boolean(checked);
+    }
+  };
+
+  setValue("queue-rating-min-range", String(ratingMin));
+  setValue("queue-rating-max-range", String(ratingMax));
+  setValue("queue-reviews-min-input", String(reviewsMin));
+  setValue("queue-reviews-max-input", reviewsMax >= OPEN_ENDED_MAX_VALUE ? "" : String(reviewsMax));
+  setValue("queue-price-min-input", String(priceMin));
+  setValue("queue-price-max-input", priceMax >= OPEN_ENDED_MAX_VALUE ? "" : String(priceMax));
+  setValue("queue-discount-min-range", String(discountMin));
+  setValue("queue-discount-max-range", String(discountMax));
+  setChecked("queue-release-text-enabled", releaseTextEnabled);
+  setChecked("queue-release-year-range-enabled", releaseYearRangeEnabled);
+
+  const minRange = document.getElementById("queue-release-year-min-range");
+  const maxRange = document.getElementById("queue-release-year-max-range");
+  if (minRange) {
+    minRange.value = String(releaseYearMin);
+    minRange.disabled = !releaseYearRangeEnabled;
+  }
+  if (maxRange) {
+    maxRange.value = String(releaseYearMax);
+    maxRange.disabled = !releaseYearRangeEnabled;
+  }
+
+  const tagSearchInput = document.getElementById("queue-tag-search-input");
+  if (tagSearchInput) {
+    tagSearchInput.value = tagSearchQuery;
+  }
+  for (const cfg of EXTRA_FILTER_CONFIGS) {
+    const searchInput = document.getElementById(`queue-${cfg.key}-search`);
+    if (searchInput) {
+      searchInput.value = String(extraFilterSearchQuery[cfg.key] || "");
+    }
+  }
+  updateAdvancedFilterLabels();
+}
+
+function renderTagOptions() {
+  const optionsEl = document.getElementById("queue-tag-options");
+  const showMoreBtn = document.getElementById("queue-tag-show-more-btn");
+  if (!optionsEl || !showMoreBtn) {
+    return;
+  }
+  const query = normalizeNameLower(tagSearchQuery);
+  const selectedRows = [];
+  const selectedSeen = new Set();
+  for (const tagName of selectedTags) {
+    const found = tagCounts.find((item) => normalizeName(item.name) === tagName);
+    selectedRows.push(found || { name: tagName, count: 0 });
+    selectedSeen.add(tagName);
+  }
+  const filtered = tagCounts.filter((item) => !query || normalizeNameLower(item.name).includes(query));
+  const remaining = filtered.filter((item) => !selectedSeen.has(normalizeName(item.name)));
+  const ordered = [...selectedRows, ...remaining];
+  const visible = ordered.slice(0, tagShowLimit);
+
+  optionsEl.innerHTML = "";
+  for (const item of visible) {
+    const tagName = normalizeName(item?.name);
+    if (!tagName) {
+      continue;
+    }
+    const row = document.createElement("label");
+    row.className = "tag-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selectedTags.has(tagName);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selectedTags.add(tagName);
+      } else {
+        selectedTags.delete(tagName);
+      }
+      persistQueueFiltersState();
+      renderTagOptions();
+      applyFiltersToQueueView().catch((error) => setStatus(String(error?.message || error || "Could not apply filters."), true));
+    });
+    const name = document.createElement("span");
+    name.className = "tag-name";
+    name.textContent = tagName;
+    const count = document.createElement("span");
+    count.className = "tag-count";
+    count.textContent = Number(item?.count || 0) > 0 ? String(item.count) : "";
+    row.appendChild(checkbox);
+    row.appendChild(name);
+    row.appendChild(count);
+    optionsEl.appendChild(row);
+  }
+  showMoreBtn.style.display = ordered.length > tagShowLimit ? "" : "none";
+}
+
+function renderExtraFilterOptions(key) {
+  const optionsEl = document.getElementById(`queue-${key}-options`);
+  const showMoreBtn = document.getElementById(`queue-${key}-show-more`);
+  if (!optionsEl || !showMoreBtn) {
+    return;
+  }
+  const selected = selectedExtraFilters[key] || new Set();
+  const counts = Array.isArray(extraFilterCounts[key]) ? extraFilterCounts[key] : [];
+  const query = normalizeNameLower(extraFilterSearchQuery[key] || "");
+
+  const selectedRows = [];
+  const selectedSeen = new Set();
+  for (const value of selected) {
+    const found = counts.find((item) => normalizeName(item?.name) === value);
+    selectedRows.push(found || { name: value, count: 0 });
+    selectedSeen.add(value);
+  }
+  const filtered = counts.filter((item) => !query || normalizeNameLower(item?.name).includes(query));
+  const remaining = filtered.filter((item) => !selectedSeen.has(normalizeName(item?.name)));
+  const ordered = [...selectedRows, ...remaining];
+  const visible = ordered.slice(0, Number(extraFilterShowLimit[key] || EXTRA_SHOW_STEP));
+
+  optionsEl.innerHTML = "";
+  for (const item of visible) {
+    const value = normalizeName(item?.name);
+    if (!value) {
+      continue;
+    }
+    const row = document.createElement("label");
+    row.className = "tag-option";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = selected.has(value);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        selected.add(value);
+      } else {
+        selected.delete(value);
+      }
+      selectedExtraFilters[key] = selected;
+      persistQueueFiltersState();
+      renderExtraFilterOptions(key);
+      applyFiltersToQueueView().catch((error) => setStatus(String(error?.message || error || "Could not apply filters."), true));
+    });
+    const name = document.createElement("span");
+    name.className = "tag-name";
+    name.textContent = value;
+    const count = document.createElement("span");
+    count.className = "tag-count";
+    count.textContent = Number(item?.count || 0) > 0 ? String(item.count) : "";
+    row.appendChild(checkbox);
+    row.appendChild(name);
+    row.appendChild(count);
+    optionsEl.appendChild(row);
+  }
+
+  showMoreBtn.style.display = ordered.length > Number(extraFilterShowLimit[key] || EXTRA_SHOW_STEP) ? "" : "none";
+}
+
+function ensureExtraFilterUi() {
+  const root = document.getElementById("queue-extra-filters-root");
+  if (!root || root.dataset.ready === "1") {
+    return;
+  }
+  for (const cfg of EXTRA_FILTER_CONFIGS) {
+    const block = document.createElement("div");
+    block.className = "extra-filter-block";
+
+    const title = document.createElement("div");
+    title.className = "extra-filter-title";
+    title.textContent = cfg.label;
+
+    const search = document.createElement("input");
+    search.type = "search";
+    search.id = `queue-${cfg.key}-search`;
+    search.placeholder = cfg.placeholder;
+    search.addEventListener("input", (event) => {
+      extraFilterSearchQuery[cfg.key] = String(event?.target?.value || "").slice(0, 80);
+      extraFilterShowLimit[cfg.key] = EXTRA_SHOW_STEP;
+      persistQueueFiltersState();
+      renderExtraFilterOptions(cfg.key);
+    });
+
+    const options = document.createElement("div");
+    options.id = `queue-${cfg.key}-options`;
+    options.className = "tag-options";
+
+    const showMore = document.createElement("button");
+    showMore.type = "button";
+    showMore.id = `queue-${cfg.key}-show-more`;
+    showMore.className = "small-btn";
+    showMore.textContent = "Show more";
+    showMore.addEventListener("click", () => {
+      extraFilterShowLimit[cfg.key] = Number(extraFilterShowLimit[cfg.key] || EXTRA_SHOW_STEP) + EXTRA_SHOW_STEP;
+      persistQueueFiltersState();
+      renderExtraFilterOptions(cfg.key);
+    });
+
+    block.appendChild(title);
+    block.appendChild(search);
+    block.appendChild(options);
+    block.appendChild(showMore);
+    root.appendChild(block);
+  }
+  root.dataset.ready = "1";
+}
+
+function refreshFilterOptionsForSelection() {
+  const listFilter = getListSelection();
+  const collection = getCollectionSelection();
+  const baseIds = getQueueBaseIds(collection, listFilter);
+
+  tagCounts = countTags(baseIds);
+  for (const cfg of EXTRA_FILTER_CONFIGS) {
+    extraFilterCounts[cfg.key] = countValuesByKey(baseIds, cfg.key);
+  }
+
+  const bounds = getReleaseYearBounds(baseIds);
+  releaseYearMin = Math.max(bounds.min, Math.min(releaseYearMin, bounds.max));
+  releaseYearMax = Math.max(releaseYearMin, Math.min(releaseYearMax, bounds.max));
+
+  const minRange = document.getElementById("queue-release-year-min-range");
+  const maxRange = document.getElementById("queue-release-year-max-range");
+  if (minRange) {
+    minRange.min = String(bounds.min);
+    minRange.max = String(bounds.max);
+  }
+  if (maxRange) {
+    maxRange.min = String(bounds.min);
+    maxRange.max = String(bounds.max);
+  }
+
+  renderTagOptions();
+  for (const cfg of EXTRA_FILTER_CONFIGS) {
+    renderExtraFilterOptions(cfg.key);
+  }
+  updateAdvancedFilterLabels();
+}
+
+async function applyFiltersToQueueView() {
+  const listFilter = getListSelection();
+  const collection = getCollectionSelection();
+  if (isQueueRunning()) {
+    const currentAppId = queueIds[queueIndex] || "";
+    reconcileQueueIds(collection, listFilter, currentAppId);
+    await renderCurrent();
+    return;
+  }
+  const previewCount = getFilteredIds(collection, listFilter).length;
+  setStatus(`Choose list and collection, then click Go. Preview: ${previewCount} game(s).`);
 }
 
 async function fetchMeta(appId) {
@@ -1116,9 +1710,21 @@ async function startQueue(collectionOverride = "", listOverride = "") {
   queueIndex = 0;
   buildQueueIds(collection, listFilter);
   const setupPanelEl = document.querySelector(".setup-panel");
+  const filtersPanelEl = document.getElementById("queue-filters-panel");
+  const introEl = document.getElementById("queue-intro");
+  const goBtnEl = document.getElementById("go-btn");
   const headerBarEl = document.getElementById("queue-header-bar");
   if (setupPanelEl) {
     setupPanelEl.classList.add("hidden");
+  }
+  if (filtersPanelEl) {
+    filtersPanelEl.classList.add("hidden");
+  }
+  if (introEl) {
+    introEl.classList.add("hidden");
+  }
+  if (goBtnEl) {
+    goBtnEl.classList.add("hidden");
   }
   if (headerBarEl) {
     headerBarEl.classList.remove("hidden");
@@ -1137,6 +1743,12 @@ async function rerenderAfterAction(currentAppId = "") {
 function bindEvents() {
   document.getElementById("list-select")?.addEventListener("change", () => {
     populateCollectionSelect(getListSelection());
+    refreshFilterOptionsForSelection();
+    applyFiltersToQueueView().catch((error) => setStatus(String(error?.message || error || "Could not apply filters."), true));
+  });
+  document.getElementById("collection-select")?.addEventListener("change", () => {
+    refreshFilterOptionsForSelection();
+    applyFiltersToQueueView().catch((error) => setStatus(String(error?.message || error || "Could not apply filters."), true));
   });
   document.getElementById("go-btn")?.addEventListener("click", async () => {
     const listFilter = getListSelection();
@@ -1148,6 +1760,79 @@ function bindEvents() {
     }
     openQueueRunWindow(listFilter, collection);
   });
+
+  document.getElementById("queue-tag-search-input")?.addEventListener("input", (event) => {
+    tagSearchQuery = String(event?.target?.value || "").slice(0, 80);
+    tagShowLimit = TAG_SHOW_STEP;
+    persistQueueFiltersState();
+    renderTagOptions();
+  });
+  document.getElementById("queue-tag-show-more-btn")?.addEventListener("click", () => {
+    tagShowLimit += TAG_SHOW_STEP;
+    persistQueueFiltersState();
+    renderTagOptions();
+  });
+
+  const queueFilterInputs = [
+    "queue-rating-min-range",
+    "queue-rating-max-range",
+    "queue-reviews-min-input",
+    "queue-reviews-max-input",
+    "queue-price-min-input",
+    "queue-price-max-input",
+    "queue-discount-min-range",
+    "queue-discount-max-range",
+    "queue-release-text-enabled",
+    "queue-release-year-range-enabled",
+    "queue-release-year-min-range",
+    "queue-release-year-max-range"
+  ];
+  for (const id of queueFilterInputs) {
+    const el = document.getElementById(id);
+    if (!el) {
+      continue;
+    }
+    const applyFromInputs = async () => {
+      const num = (value, fallback) => {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : fallback;
+      };
+
+      ratingMin = Math.max(0, Math.min(100, num(document.getElementById("queue-rating-min-range")?.value, ratingMin)));
+      ratingMax = Math.max(ratingMin, Math.min(100, num(document.getElementById("queue-rating-max-range")?.value, ratingMax)));
+
+      const rawReviewsMin = num(document.getElementById("queue-reviews-min-input")?.value, reviewsMin);
+      const rawReviewsMax = String(document.getElementById("queue-reviews-max-input")?.value || "").trim();
+      const parsedReviewsMax = rawReviewsMax === "" ? OPEN_ENDED_MAX_VALUE : num(rawReviewsMax, reviewsMax);
+      reviewsMin = Math.max(0, Math.min(rawReviewsMin, parsedReviewsMax));
+      reviewsMax = Math.max(reviewsMin, parsedReviewsMax);
+
+      const rawPriceMin = num(document.getElementById("queue-price-min-input")?.value, priceMin);
+      const rawPriceMax = String(document.getElementById("queue-price-max-input")?.value || "").trim();
+      const parsedPriceMax = rawPriceMax === "" ? OPEN_ENDED_MAX_VALUE : num(rawPriceMax, priceMax);
+      priceMin = Math.max(0, Math.min(rawPriceMin, parsedPriceMax));
+      priceMax = Math.max(priceMin, parsedPriceMax);
+
+      discountMin = Math.max(0, Math.min(100, num(document.getElementById("queue-discount-min-range")?.value, discountMin)));
+      discountMax = Math.max(discountMin, Math.min(100, num(document.getElementById("queue-discount-max-range")?.value, discountMax)));
+
+      releaseTextEnabled = Boolean(document.getElementById("queue-release-text-enabled")?.checked);
+      releaseYearRangeEnabled = Boolean(document.getElementById("queue-release-year-range-enabled")?.checked);
+      releaseYearMin = Math.max(1970, Math.floor(num(document.getElementById("queue-release-year-min-range")?.value, releaseYearMin)));
+      releaseYearMax = Math.max(releaseYearMin, Math.floor(num(document.getElementById("queue-release-year-max-range")?.value, releaseYearMax)));
+
+      applyAdvancedFiltersToInputs();
+      persistQueueFiltersState();
+      await applyFiltersToQueueView();
+    };
+
+    el.addEventListener("input", () => {
+      applyFromInputs().catch((error) => setStatus(String(error?.message || error || "Could not apply filters."), true));
+    });
+    el.addEventListener("change", () => {
+      applyFromInputs().catch((error) => setStatus(String(error?.message || error || "Could not apply filters."), true));
+    });
+  }
 
   document.getElementById("prev-btn")?.addEventListener("click", async () => {
     if (queueIds.length === 0) {
@@ -1355,15 +2040,20 @@ async function init() {
   await loadWishlistOrder();
   await loadCollectionsMetaCache();
   await loadQueueCaches();
+  hydrateQueueFiltersState();
+  ensureExtraFilterUi();
   populateCollectionSelect();
   hydrateUiState();
+  applyAdvancedFiltersToInputs();
+  refreshFilterOptionsForSelection();
   hydrateQueueLeftWidth();
   bindEvents();
   if (runQuery.run) {
     await startQueue(runQuery.collection, runQuery.list);
+    await applyFiltersToQueueView();
     return;
   }
-  setStatus("Choose list and collection, then click Go.");
+  await applyFiltersToQueueView();
 }
 
 init().catch((error) => {
