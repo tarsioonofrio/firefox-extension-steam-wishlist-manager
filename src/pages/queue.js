@@ -165,6 +165,27 @@ function getListSelection() {
   return String(listEl?.value || "inbox");
 }
 
+function parseQueueRunQuery() {
+  const params = new URLSearchParams(window.location.search || "");
+  const run = params.get("run") === "1";
+  const listRaw = String(params.get("list") || "").trim().toLowerCase();
+  const collectionRaw = String(params.get("collection") || "").trim();
+  const validLists = new Set(["inbox", "wishlist", "follow", "confirm", "wf", "cf"]);
+  return {
+    run,
+    list: validLists.has(listRaw) ? listRaw : "inbox",
+    collection: collectionRaw || "__all__"
+  };
+}
+
+function openQueueRunWindow(listFilter, collection) {
+  const url = new URL(browser.runtime.getURL("src/pages/queue.html"));
+  url.searchParams.set("run", "1");
+  url.searchParams.set("list", String(listFilter || "inbox"));
+  url.searchParams.set("collection", String(collection || "__all__"));
+  window.open(url.toString(), "_blank", "noopener,noreferrer");
+}
+
 function persistUiState() {
   try {
     localStorage.setItem(QUEUE_COLLECTION_KEY, currentQueueConfig.collection);
@@ -1075,10 +1096,23 @@ async function refreshStateOnly() {
   populateCollectionSelect();
 }
 
-async function startQueue() {
+async function startQueue(collectionOverride = "", listOverride = "") {
   await refreshStateOnly();
-  const listFilter = getListSelection();
-  const collection = getCollectionSelection();
+  const listFilter = String(listOverride || getListSelection() || "inbox");
+  const listEl = document.getElementById("list-select");
+  if (listEl) {
+    listEl.value = listFilter;
+  }
+  populateCollectionSelect(listFilter);
+  const collectionEl = document.getElementById("collection-select");
+  let collection = String(collectionOverride || getCollectionSelection() || "__all__");
+  if (collectionEl) {
+    collectionEl.value = collection;
+    if (String(collectionEl.value || "__all__") !== collection) {
+      collection = "__all__";
+      collectionEl.value = "__all__";
+    }
+  }
   queueIndex = 0;
   buildQueueIds(collection, listFilter);
   const setupPanelEl = document.querySelector(".setup-panel");
@@ -1105,7 +1139,14 @@ function bindEvents() {
     populateCollectionSelect(getListSelection());
   });
   document.getElementById("go-btn")?.addEventListener("click", async () => {
-    await startQueue();
+    const listFilter = getListSelection();
+    const collection = getCollectionSelection();
+    const runQuery = parseQueueRunQuery();
+    if (runQuery.run) {
+      await startQueue(collection, listFilter);
+      return;
+    }
+    openQueueRunWindow(listFilter, collection);
   });
 
   document.getElementById("prev-btn")?.addEventListener("click", async () => {
@@ -1309,6 +1350,7 @@ function bindEvents() {
 }
 
 async function init() {
+  const runQuery = parseQueueRunQuery();
   await loadState();
   await loadWishlistOrder();
   await loadCollectionsMetaCache();
@@ -1317,7 +1359,11 @@ async function init() {
   hydrateUiState();
   hydrateQueueLeftWidth();
   bindEvents();
-  setStatus("");
+  if (runQuery.run) {
+    await startQueue(runQuery.collection, runQuery.list);
+    return;
+  }
+  setStatus("Choose list and collection, then click Go.");
 }
 
 init().catch((error) => {
