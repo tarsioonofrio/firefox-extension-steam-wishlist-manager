@@ -129,6 +129,10 @@
     const discountMax = Number(ctx?.discountMax ?? 100);
     const priceMin = Number(ctx?.priceMin ?? 0);
     const priceMax = Number(ctx?.priceMax ?? 9999999);
+    const staleNoDiscountMode = discountMin === 0
+      && discountMax === 0
+      && releaseYearRangeEnabled
+      && releaseYearMax <= (new Date().getUTCFullYear() - 1);
 
     function passesTagFilter(appId) {
       if (selectedTags.size === 0) {
@@ -206,6 +210,42 @@
       return rangeMatch;
     }
 
+    function passesStaleNoDiscountReleaseGuard(appId) {
+      if (!staleNoDiscountMode) {
+        return true;
+      }
+      const nowSec = Math.floor(Date.now() / 1000);
+      const oneYearSec = 365 * 24 * 60 * 60;
+      const info = getReleaseFilterData(appId) || {};
+      const textLabel = String(info.textLabel || "").toLowerCase();
+      if (textLabel === "soon" || textLabel === "tba") {
+        return false;
+      }
+      const releaseUnix = getMetaNumber(appId, "releaseUnix", 0);
+      if (Number.isFinite(releaseUnix) && releaseUnix > nowSec) {
+        return false;
+      }
+      const firstSeenAtMs = getMetaNumber(appId, "firstSeenAt", 0);
+      if (!(Number.isFinite(firstSeenAtMs) && firstSeenAtMs > 0)) {
+        return false;
+      }
+      const firstSeenAtSec = Math.floor(firstSeenAtMs / 1000);
+      if ((nowSec - firstSeenAtSec) < oneYearSec) {
+        return false;
+      }
+      const lastDiscountAtMs = getMetaNumber(appId, "lastDiscountAt", 0);
+      if (Number.isFinite(lastDiscountAtMs) && lastDiscountAtMs > 0) {
+        const lastDiscountAtSec = Math.floor(lastDiscountAtMs / 1000);
+        if ((nowSec - lastDiscountAtSec) < oneYearSec) {
+          return false;
+        }
+      }
+      if (Number.isFinite(releaseUnix) && releaseUnix > 0 && (nowSec - releaseUnix) < oneYearSec) {
+        return false;
+      }
+      return true;
+    }
+
     const effectiveSortMode = (sortMode === "position" && !isWishlistRankReady(source))
       ? "title"
       : sortMode;
@@ -227,6 +267,7 @@
         && passesDiscountFilter(appId)
         && passesPriceFilter(appId)
         && passesReleaseYearFilter(appId)
+        && passesStaleNoDiscountReleaseGuard(appId)
         && passesArrayFilter(getMetaArray, appId, "players", selectedPlayers)
         && passesArrayFilter(getMetaArray, appId, "features", selectedFeatures)
         && passesArrayFilter(getMetaArray, appId, "hardware", selectedHardware)

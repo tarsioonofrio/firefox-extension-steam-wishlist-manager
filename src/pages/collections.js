@@ -660,7 +660,7 @@ function buildDynamicDefinitionFromCurrentView() {
   if (sourceMode === "wishlist") {
     baseSource = "wishlist";
   } else if (activeCollection === "__all__") {
-    baseSource = "all-static";
+    baseSource = "all-items";
   } else if (isDynamicCollectionName(activeCollection)) {
     const currentDef = state?.dynamicCollections?.[activeCollection] || {};
     baseSource = String(currentDef.baseSource || "wishlist");
@@ -774,6 +774,9 @@ function describeDynamicBase(definition) {
   if (baseSource === "all-static") {
     return "All static collections";
   }
+  if (baseSource === "all-items") {
+    return "All items";
+  }
   if (baseSource === "static-collection") {
     return `Static: ${String(def.baseCollection || "-")}`;
   }
@@ -805,6 +808,9 @@ function getDynamicBaseIds(definition, stack = new Set()) {
 
   if (baseSource === "static-collection") {
     return Array.isArray(state?.collections?.[baseCollection]) ? [...state.collections[baseCollection]] : [];
+  }
+  if (baseSource === "all-items") {
+    return Object.keys(state?.items || {});
   }
 
   const all = [];
@@ -1721,6 +1727,8 @@ async function resolveCurrentSteamId() {
 function mergeMetaFromWishlistEntry(appId, entry) {
   const existing = metaCache[appId] || {};
   const now = Date.now();
+  const existingFirstSeenAt = Number(existing.firstSeenAt || existing.cachedAt || 0);
+  const existingLastDiscountAt = Number(existing.lastDiscountAt || 0);
 
   const name = String(entry?.name || "").trim();
   const releaseString = String(entry?.release_string || "").trim();
@@ -1746,6 +1754,9 @@ function mergeMetaFromWishlistEntry(appId, entry) {
   metaCache[appId] = {
     ...existing,
     cachedAt: now,
+    firstSeenAt: existingFirstSeenAt > 0 ? existingFirstSeenAt : now,
+    lastSeenAt: now,
+    lastDiscountAt: discountPercent > 0 ? now : existingLastDiscountAt,
     titleText: name || existing.titleText || "",
     priceText,
     priceFinal: Number.isFinite(priceFinal) ? priceFinal : Number(existing.priceFinal || 0),
@@ -2472,6 +2483,9 @@ async function fetchAppMeta(appId, options = {}) {
     }
 
     const releaseText = appData?.release_date?.date || (appData?.release_date?.coming_soon ? "Coming soon" : "-");
+    const existing = metaCache?.[appId] || {};
+    const existingFirstSeenAt = Number(existing.firstSeenAt || existing.cachedAt || 0);
+    const existingLastDiscountAt = Number(existing.lastDiscountAt || 0);
 
     const totalPositive = Number(reviewSummary?.total_positive || 0);
     const totalNegative = Number(reviewSummary?.total_negative || 0);
@@ -2495,6 +2509,9 @@ async function fetchAppMeta(appId, options = {}) {
 
     const meta = {
       cachedAt: now,
+      firstSeenAt: existingFirstSeenAt > 0 ? existingFirstSeenAt : now,
+      lastSeenAt: now,
+      lastDiscountAt: Number(appData?.price_overview?.discount_percent || 0) > 0 ? now : existingLastDiscountAt,
       titleText: String(appData?.name || "").trim(),
       headerImage: String(appData?.header_image || "").trim(),
       capsuleImage: String(appData?.capsule_image || "").trim(),

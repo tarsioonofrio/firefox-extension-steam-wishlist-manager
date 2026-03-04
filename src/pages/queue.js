@@ -5,6 +5,7 @@ const QUEUE_INDEX_KEY = "swmQueueIndexV2";
 const QUEUE_LEFT_WIDTH_KEY = "swmQueueLeftWidthV1";
 const QUEUE_META_CACHE_KEY = "steamWishlistQueueMetaCacheV1";
 const QUEUE_MEDIA_CACHE_KEY = "steamWishlistQueueMediaCacheV1";
+const COLLECTIONS_META_CACHE_KEY = "steamWishlistCollectionsMetaCacheV4";
 const QUEUE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const steamFetchUtils = window.SWMSteamFetch || {};
@@ -18,6 +19,7 @@ let mediaState = { index: 0, items: [] };
 let mediaSeq = 0;
 const metaCache = new Map();
 const mediaCache = new Map();
+let collectionsMetaCache = {};
 
 function mapToObject(map) {
   const out = {};
@@ -55,6 +57,16 @@ async function loadQueueCaches() {
     }
   } catch {
     // noop
+  }
+}
+
+async function loadCollectionsMetaCache() {
+  try {
+    const stored = await browser.storage.local.get(COLLECTIONS_META_CACHE_KEY);
+    const raw = stored?.[COLLECTIONS_META_CACHE_KEY];
+    collectionsMetaCache = raw && typeof raw === "object" ? raw : {};
+  } catch {
+    collectionsMetaCache = {};
   }
 }
 
@@ -255,10 +267,11 @@ function populateCollectionSelect(listFilter = getListSelection()) {
     { value: "__all__", label: `All (${listLabel})` }
   ];
   for (const name of Array.isArray(state?.collectionOrder) ? state.collectionOrder : []) {
-    if (state?.dynamicCollections?.[name]) {
-      continue;
-    }
-    options.push({ value: String(name), label: String(name) });
+    const isDynamic = Boolean(state?.dynamicCollections?.[name]);
+    options.push({
+      value: String(name),
+      label: isDynamic ? `${String(name)} [dynamic]` : String(name)
+    });
   }
   el.innerHTML = "";
   for (const option of options) {
@@ -277,7 +290,75 @@ function resolveBaseIdsByCollection(collection, listFilter = "inbox") {
     }
     return Object.keys(state?.items || {});
   }
+  if (state?.dynamicCollections?.[collection]) {
+    return getDynamicCollectionIds(collection, listFilter);
+  }
   return Array.isArray(state?.collections?.[collection]) ? state.collections[collection] : [];
+}
+
+function getDynamicCollectionBaseIds(definition, listFilter) {
+  const def = definition && typeof definition === "object" ? definition : {};
+  const baseSource = String(def.baseSource || "wishlist");
+  const baseCollection = String(def.baseCollection || "").trim();
+  if (baseSource === "wishlist") {
+    if (wishlistOrderedIds.length > 0) {
+      return [...wishlistOrderedIds];
+    }
+    return Object.keys(state?.items || {});
+  }
+  if (baseSource === "all-items") {
+    return Object.keys(state?.items || {});
+  }
+  if (baseSource === "all-static") {
+    const out = [];
+    for (const name of Array.isArray(state?.collectionOrder) ? state.collectionOrder : []) {
+      if (state?.dynamicCollections?.[name]) {
+        continue;
+      }
+      for (const appId of (state?.collections?.[name] || [])) {
+        out.push(String(appId || "").trim());
+      }
+    }
+    return Array.from(new Set(out));
+  }
+  if (baseSource === "static-collection") {
+    return Array.isArray(state?.collections?.[baseCollection]) ? state.collections[baseCollection] : [];
+  }
+  return resolveBaseIdsByCollection("__all__", listFilter);
+}
+
+function getDynamicCollectionIds(collection, listFilter = "inbox") {
+  const definition = state?.dynamicCollections?.[collection];
+  const baseIds = getDynamicCollectionBaseIds(definition, listFilter);
+  const filters = definition?.filters && typeof definition.filters === "object" ? definition.filters : {};
+  const selectedTags = new Set(Array.isArray(filters.selectedTags) ? filters.selectedTags.map((x) => String(x || "").trim()).filter(Boolean) : []);
+  const selectedTypes = new Set(Array.isArray(filters.selectedTypes) ? filters.selectedTypes.map((x) => String(x || "").trim()).filter(Boolean) : []);
+  const out = [];
+  const seen = new Set();
+  for (const rawId of baseIds) {
+    const appId = String(rawId || "").trim();
+    if (!appId || seen.has(appId)) {
+      continue;
+    }
+    seen.add(appId);
+    const meta = collectionsMetaCache?.[appId] && typeof collectionsMetaCache[appId] === "object"
+      ? collectionsMetaCache[appId]
+      : {};
+    if (selectedTags.size > 0) {
+      const tags = Array.isArray(meta?.tags) ? meta.tags.map((t) => String(t || "").trim()).filter(Boolean) : [];
+      if (!tags.some((tag) => selectedTags.has(tag))) {
+        continue;
+      }
+    }
+    if (selectedTypes.size > 0) {
+      const appType = String(meta?.appType || "").trim();
+      if (!selectedTypes.has(appType)) {
+        continue;
+      }
+    }
+    out.push(appId);
+  }
+  return out;
 }
 
 function buildQueueIds(collection, listFilter) {
@@ -1025,6 +1106,7 @@ function bindEvents() {
 async function init() {
   await loadState();
   await loadWishlistOrder();
+  await loadCollectionsMetaCache();
   await loadQueueCaches();
   populateCollectionSelect();
   hydrateUiState();
