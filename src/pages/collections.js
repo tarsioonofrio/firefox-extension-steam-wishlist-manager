@@ -2143,7 +2143,7 @@ async function handleKeyboardBatchIntent(actionCode) {
   if (actionCode === "Digit3") {
     await applyBatchIntent(
       { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" },
-      "Selected games set to Wishlist & Follow."
+      "Selected games set to WF."
     );
     return;
   }
@@ -4020,15 +4020,15 @@ function createLineRow(options) {
 
   const maybeBtn = document.createElement("button");
   maybeBtn.type = "button";
-  maybeBtn.className = "line-btn line-col-action";
-  maybeBtn.textContent = "Wishlist & Follow";
+  maybeBtn.className = "line-btn line-col-action line-col-action-wf";
+  maybeBtn.textContent = "WF";
   maybeBtn.classList.toggle("active", itemIntent.buyIntent === "BUY" && itemIntent.trackIntent === "ON");
   bindLineAction(maybeBtn, async () => {
     try {
       await onSetIntent(appId, { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" });
-      setStatus("Set to Wishlist & Follow.");
+      setStatus("Set to WF.");
     } catch {
-      setStatus("Failed to set Wishlist & Follow.", true);
+      setStatus("Failed to set WF.", true);
       throw new Error("wishlist-follow-action-failed");
     }
   });
@@ -4098,8 +4098,8 @@ function createLineRow(options) {
   row.appendChild(nameCol);
   row.appendChild(reviewEl);
   row.appendChild(buyBtn);
-  row.appendChild(maybeBtn);
   row.appendChild(trackBtn);
+  row.appendChild(maybeBtn);
   row.appendChild(collectionsWrap);
   row.appendChild(discountEl);
   row.appendChild(priceEl);
@@ -4127,8 +4127,8 @@ function renderBatchMenuState() {
   if (batchHint) {
     const count = batchSelectedIds.size;
     batchHint.textContent = count > 0
-      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Wishlist, Shift+2 Follow, Shift+3 Wishlist & Follow`
-      : "Batch mode active | Select cards to use shortcuts: Shift+1 Wishlist, Shift+2 Follow, Shift+3 Wishlist & Follow";
+      ? `Batch mode active (${count} selected) | Shortcuts: Shift+1 Wishlist, Shift+2 Follow, Shift+3 WF`
+      : "Batch mode active | Select cards to use shortcuts: Shift+1 Wishlist, Shift+2 Follow, Shift+3 WF";
     batchHint.classList.toggle("hidden", !batchMode);
   }
   if (collectionSelect) {
@@ -4746,9 +4746,9 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     });
     const maybeBtn = document.createElement("button");
     maybeBtn.type = "button";
-    maybeBtn.textContent = "Wishlist & Follow";
+    maybeBtn.textContent = "WF";
     maybeBtn.addEventListener("click", () => {
-      setItemIntent(appId, { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" }).catch(() => setStatus("Failed to set Wishlist & Follow.", true));
+      setItemIntent(appId, { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" }).catch(() => setStatus("Failed to set WF.", true));
     });
     const followBtn = document.createElement("button");
     followBtn.type = "button";
@@ -4771,8 +4771,8 @@ async function renderTrackFeedItems(cardsEl, emptyEl) {
     });
     actions.appendChild(openBtn);
     actions.appendChild(buyBtn);
-    actions.appendChild(maybeBtn);
     actions.appendChild(followBtn);
+    actions.appendChild(maybeBtn);
     actions.appendChild(dismissBtn);
 
     row.appendChild(head);
@@ -5234,18 +5234,18 @@ function bindBatchControls() {
     ).catch(() => setStatus("Failed to apply batch buy.", true));
   });
 
-  maybeActionBtn?.addEventListener("click", () => {
-    applyBatchIntent(
-      { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" },
-      "Selected games set to Wishlist & Follow."
-    ).catch(() => setStatus("Failed to apply batch maybe.", true));
-  });
-
   trackActionBtn?.addEventListener("click", () => {
     applyBatchIntent(
       { buy: 0, track: 1, buyIntent: "NONE", trackIntent: "ON", bucket: "TRACK" },
       "Selected games set to Follow."
     ).catch(() => setStatus("Failed to apply batch follow.", true));
+  });
+
+  maybeActionBtn?.addEventListener("click", () => {
+    applyBatchIntent(
+      { buy: 2, track: 1, buyIntent: "BUY", trackIntent: "ON", bucket: "BUY" },
+      "Selected games set to WF."
+    ).catch(() => setStatus("Failed to apply batch maybe.", true));
   });
 
 }

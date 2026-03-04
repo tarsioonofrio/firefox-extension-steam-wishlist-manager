@@ -880,7 +880,7 @@ main {
 
 .line-row {
   display: grid;
-  grid-template-columns: 112px 84px minmax(0, 1fr) 64px 52px 52px 62px 76px 72px 72px;
+  grid-template-columns: 112px 84px minmax(0, 1fr) 64px 52px 52px 52px 76px 72px 72px;
   gap: 8px;
   align-items: center;
   border: 1px solid #2f445a;
@@ -891,7 +891,7 @@ main {
 }
 
 .line-row.line-row-batch {
-  grid-template-columns: 24px 112px 84px minmax(0, 1fr) 64px 52px 52px 62px 76px 72px 72px;
+  grid-template-columns: 24px 112px 84px minmax(0, 1fr) 64px 52px 52px 52px 76px 72px 72px;
 }
 
 .line-row > * {
@@ -1087,6 +1087,10 @@ main {
 .line-col-action {
   justify-self: end;
   white-space: nowrap;
+}
+
+.line-col-action-wf {
+  justify-self: start;
 }
 
 .line-col-collections {

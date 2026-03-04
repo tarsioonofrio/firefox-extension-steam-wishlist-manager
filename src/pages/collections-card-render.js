@@ -926,7 +926,7 @@
           } else if (action.key === "follow") {
             setStatus("Set to Follow.");
           } else if (action.key === "wishlist-follow") {
-            setStatus("Set to Wishlist & Follow.");
+            setStatus("Set to WF.");
           }
         } catch (error) {
           setStatus(String(error?.message || "Failed to update intent."), true);
