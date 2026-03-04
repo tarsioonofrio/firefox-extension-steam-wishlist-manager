@@ -76,6 +76,32 @@
 
   function bindRangeControls(handlers) {
     const h = handlers || {};
+    const bindDualRangePriority = (minId, maxId) => {
+      const minEl = document.getElementById(minId);
+      const maxEl = document.getElementById(maxId);
+      if (!minEl || !maxEl) {
+        return;
+      }
+      const bringMinFront = () => {
+        minEl.style.zIndex = "6";
+        maxEl.style.zIndex = "5";
+      };
+      const bringMaxFront = () => {
+        maxEl.style.zIndex = "6";
+        minEl.style.zIndex = "5";
+      };
+
+      bringMinFront();
+      for (const eventName of ["pointerdown", "mousedown", "touchstart", "focus", "input"]) {
+        minEl.addEventListener(eventName, bringMinFront);
+        maxEl.addEventListener(eventName, bringMaxFront);
+      }
+    };
+
+    bindDualRangePriority("rating-min-range", "rating-max-range");
+    bindDualRangePriority("discount-min-range", "discount-max-range");
+    bindDualRangePriority("release-year-min-range", "release-year-max-range");
+
     document.getElementById("rating-min-range")?.addEventListener("input", (event) => {
       h.onRatingMinInput?.(event.target.value);
     });

@@ -496,6 +496,18 @@ button.danger,
   pointer-events: auto;
 }
 
+#rating-min-range,
+#discount-min-range,
+#release-year-min-range {
+  z-index: 6;
+}
+
+#rating-max-range,
+#discount-max-range,
+#release-year-max-range {
+  z-index: 5;
+}
+
 .reviews-row {
   display: grid;
   grid-template-columns: 1fr auto 1fr auto;

@@ -717,6 +717,31 @@ function getFilteredIds(collection, listFilter) {
   return applyAdvancedFilters(deduped);
 }
 
+function resetQueueFiltersToDefaults() {
+  selectedTags = new Set();
+  tagSearchQuery = "";
+  tagShowLimit = TAG_SHOW_STEP;
+
+  selectedExtraFilters = Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, new Set()]));
+  extraFilterSearchQuery = Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, ""]));
+  extraFilterShowLimit = Object.fromEntries(EXTRA_FILTER_CONFIGS.map((cfg) => [cfg.key, EXTRA_SHOW_STEP]));
+
+  ratingMin = 0;
+  ratingMax = 100;
+  reviewsMin = 0;
+  reviewsMax = OPEN_ENDED_MAX_VALUE;
+  priceMin = 0;
+  priceMax = OPEN_ENDED_MAX_VALUE;
+  discountMin = 0;
+  discountMax = 100;
+  releaseTextEnabled = true;
+  releaseYearRangeEnabled = true;
+  releaseYearMin = 1970;
+  releaseYearMax = new Date().getUTCFullYear() + 1;
+
+  persistQueueFiltersState();
+}
+
 function reconcileQueueIds(collection, listFilter, currentAppId = "") {
   const allowedIds = getFilteredIds(collection, listFilter);
   const allowedSet = new Set(allowedIds);
@@ -1801,6 +1826,14 @@ async function startQueue(collectionOverride = "", listOverride = "") {
   }
   queueIndex = 0;
   buildQueueIds(collection, listFilter);
+  if (queueIds.length === 0) {
+    const baseIds = getQueueBaseIds(collection, listFilter);
+    if (baseIds.length > 0) {
+      resetQueueFiltersToDefaults();
+      buildQueueIds(collection, listFilter);
+      setStatus("No games matched active filters. Filters were reset for this run.");
+    }
+  }
   const setupPanelEl = document.querySelector(".setup-panel");
   const filtersPanelEl = document.getElementById("queue-filters-panel");
   const introEl = document.getElementById("queue-intro");
@@ -1832,6 +1865,32 @@ async function rerenderAfterAction(currentAppId = "") {
 }
 
 function bindEvents() {
+  const bindDualRangePriority = (minId, maxId) => {
+    const minEl = document.getElementById(minId);
+    const maxEl = document.getElementById(maxId);
+    if (!minEl || !maxEl) {
+      return;
+    }
+    const bringMinFront = () => {
+      minEl.style.zIndex = "6";
+      maxEl.style.zIndex = "5";
+    };
+    const bringMaxFront = () => {
+      maxEl.style.zIndex = "6";
+      minEl.style.zIndex = "5";
+    };
+    minEl.addEventListener("pointerdown", bringMinFront);
+    minEl.addEventListener("focus", bringMinFront);
+    minEl.addEventListener("input", bringMinFront);
+    maxEl.addEventListener("pointerdown", bringMaxFront);
+    maxEl.addEventListener("focus", bringMaxFront);
+    maxEl.addEventListener("input", bringMaxFront);
+  };
+
+  bindDualRangePriority("queue-rating-min-range", "queue-rating-max-range");
+  bindDualRangePriority("queue-discount-min-range", "queue-discount-max-range");
+  bindDualRangePriority("queue-release-year-min-range", "queue-release-year-max-range");
+
   document.getElementById("list-select")?.addEventListener("change", () => {
     populateCollectionSelect(getListSelection());
     refreshFilterOptionsForSelection();

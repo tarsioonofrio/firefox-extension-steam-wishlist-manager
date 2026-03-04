@@ -323,17 +323,17 @@ button.active {
   background: transparent;
   border: 0;
   padding: 0;
-  pointer-events: none;
   -webkit-appearance: none;
   appearance: none;
+  pointer-events: none;
 }
 
 .dual-range input[type="range"].range-min {
-  z-index: 2;
+  z-index: 6;
 }
 
 .dual-range input[type="range"].range-max {
-  z-index: 3;
+  z-index: 5;
 }
 
 .dual-range input[type="range"]::-webkit-slider-runnable-track {
