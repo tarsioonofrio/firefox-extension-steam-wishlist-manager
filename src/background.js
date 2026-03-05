@@ -2667,6 +2667,53 @@ async function sendMessageToStoreTabWithFallback(message, options = {}) {
   }
 }
 
+async function claimDemoLicenseViaProxy(appId, demoAppId, subId) {
+  const app = String(appId || "").trim();
+  const demo = String(demoAppId || "").trim();
+  const sub = String(subId || "").trim();
+  if (!app) {
+    throw new Error("appId is required.");
+  }
+  validateAppId(app);
+  if (!demo) {
+    throw new Error("demoAppId is required.");
+  }
+  validateAppId(demo);
+  if (!/^\d+$/.test(sub)) {
+    throw new Error("Invalid demo subId.");
+  }
+
+  const proxyResponse = await sendMessageToStoreTabWithFallback({
+    type: "steam-proxy-write-action",
+    action: "demo-add",
+    appId: app,
+    payload: {
+      demoAppId: demo,
+      subId: sub
+    }
+  }, { allowCreateTab: true });
+
+  if (!proxyResponse?.ok) {
+    const attempts = Array.isArray(proxyResponse?.attempts) ? proxyResponse.attempts : [];
+    const lastAttempt = attempts.length > 0 ? attempts[attempts.length - 1] : null;
+    const status = Number(lastAttempt?.status || proxyResponse?.status || 0);
+    const error = new Error(status > 0
+      ? `Steam did not confirm demo claim (${status}).`
+      : "Steam did not confirm demo claim.");
+    error.attempts = attempts;
+    throw error;
+  }
+
+  return {
+    ok: true,
+    mode: "proxy",
+    appId: app,
+    demoAppId: demo,
+    subId: sub,
+    attempts: Array.isArray(proxyResponse?.attempts) ? proxyResponse.attempts : []
+  };
+}
+
 async function waitForWishlistTabReady(tabId, timeoutMs = 90000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -3485,6 +3532,57 @@ browser.runtime.onMessage.addListener((message, sender) => {
         return {
           ok: true,
           ...result
+        };
+      }
+
+      case "claim-demo-license": {
+        const appId = String(message.appId || "").trim();
+        const demoAppId = String(message.demoAppId || "").trim();
+        const subId = String(message.subId || "").trim();
+        try {
+          return await claimDemoLicenseViaProxy(appId, demoAppId, subId);
+        } catch (error) {
+          const attempts = Array.isArray(error?.attempts) ? error.attempts : [];
+          await logWarn("claim-demo-license", "Demo auto-claim via proxy failed.", {
+            appId,
+            demoAppId,
+            subId,
+            error: String(error?.message || error || "unknown error"),
+            attempts: attempts.slice(0, 6)
+          });
+          throw error;
+        }
+      }
+
+      case "demo-popup-success": {
+        const appId = String(message.appId || "").trim();
+        const demoAppId = String(message.demoAppId || "").trim();
+        const reason = String(message.reason || "ok");
+        const senderTabId = Number(sender?.tab?.id || 0);
+        const senderWindowId = Number(sender?.tab?.windowId || 0);
+        let closedWindowId = 0;
+        if (senderWindowId > 0) {
+          try {
+            await browser.windows.remove(senderWindowId);
+            closedWindowId = senderWindowId;
+          } catch (error) {
+            await logWarn("demo-popup-success", "Could not close demo popup window.", {
+              appId,
+              demoAppId,
+              reason,
+              senderTabId,
+              senderWindowId,
+              error: String(error?.message || error || "window close failed")
+            });
+          }
+        }
+        return {
+          ok: true,
+          appId,
+          demoAppId,
+          reason,
+          senderTabId: senderTabId > 0 ? senderTabId : null,
+          closedWindowId: closedWindowId > 0 ? closedWindowId : null
         };
       }
 

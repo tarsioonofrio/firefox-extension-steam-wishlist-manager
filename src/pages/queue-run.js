@@ -47,6 +47,13 @@ const EXTRA_FILTER_CONFIGS = [
   { key: "developers", label: "Developers", placeholder: "Search developers..." },
   { key: "publishers", label: "Publishers", placeholder: "Search publishers..." }
 ];
+const EXTRA_RIGHT_COLUMN_KEYS = new Set([
+  "languages",
+  "fullAudioLanguages",
+  "subtitleLanguages",
+  "developers",
+  "publishers"
+]);
 
 let selectedTags = new Set();
 let tagSearchQuery = "";
@@ -147,6 +154,15 @@ function setStatus(message, isError = false) {
   }
   el.textContent = String(message || "");
   el.style.color = isError ? "#ff9696" : "#9db5c9";
+}
+
+function updateQueuePreviewCount(previewCount) {
+  const el = document.getElementById("queue-preview-count");
+  if (!el) {
+    return;
+  }
+  const count = Math.max(0, Number(previewCount) || 0);
+  el.textContent = `${count} game${count === 1 ? "" : "s"}`;
 }
 
 function normalizeName(value) {
@@ -933,7 +949,10 @@ function renderExtraFilterOptions(key) {
 
 function ensureExtraFilterUi() {
   const root = document.getElementById("queue-extra-filters-root");
-  if (!root || root.dataset.ready === "1") {
+  const leftRoot = document.getElementById("queue-extra-filters-left");
+  const rightRoot = document.getElementById("queue-extra-filters-right");
+  const targetRoot = root || leftRoot || rightRoot;
+  if (!targetRoot || targetRoot.dataset.ready === "1") {
     return;
   }
   for (const cfg of EXTRA_FILTER_CONFIGS) {
@@ -974,9 +993,17 @@ function ensureExtraFilterUi() {
     block.appendChild(search);
     block.appendChild(options);
     block.appendChild(showMore);
-    root.appendChild(block);
+    if (root) {
+      root.appendChild(block);
+    } else {
+      const inRightColumn = EXTRA_RIGHT_COLUMN_KEYS.has(cfg.key);
+      const destination = inRightColumn ? (rightRoot || leftRoot) : (leftRoot || rightRoot);
+      if (destination) {
+        destination.appendChild(block);
+      }
+    }
   }
-  root.dataset.ready = "1";
+  targetRoot.dataset.ready = "1";
 }
 
 function refreshFilterOptionsForSelection() {
@@ -1021,7 +1048,8 @@ async function applyFiltersToQueueView() {
     return;
   }
   const previewCount = getFilteredIds(collection, listFilter).length;
-  setStatus(`Choose list and collection, then click Go. Preview: ${previewCount} game(s).`);
+  updateQueuePreviewCount(previewCount);
+  setStatus("Choose list and collection, then click Go.");
 }
 
 async function fetchMeta(appId) {
@@ -1643,67 +1671,6 @@ async function handleQueueIntentAction(appId, patch, optimisticIntent) {
   unlockQueueActionsSoon(250);
 }
 
-async function fetchSteamSessionId() {
-  const fetchText = steamFetchUtils.fetchText || ((url, options = {}) => fetch(url, options).then((r) => r.text()));
-  const html = await fetchText("https://store.steampowered.com/account/preferences", {
-    method: "GET",
-    credentials: "include",
-    cache: "no-store"
-  });
-  const match = String(html || "").match(/g_sessionID\s*=\s*"([^"]+)"/i);
-  const sessionId = String(match?.[1] || "").trim();
-  if (!sessionId) {
-    throw new Error("Could not resolve Steam session id.");
-  }
-  return sessionId;
-}
-
-function createFormData(values) {
-  const form = new FormData();
-  for (const [key, value] of Object.entries(values || {})) {
-    form.append(String(key), String(value ?? ""));
-  }
-  return form;
-}
-
-async function postSteamForm(url, values) {
-  const response = await fetch(url, {
-    method: "POST",
-    credentials: "include",
-    cache: "no-store",
-    body: createFormData(values),
-    headers: {
-      "X-Requested-With": "SteamWishlistManager"
-    }
-  });
-  const bodyText = await response.text().catch(() => "");
-  if (!response.ok) {
-    throw new Error(`Steam request failed (${response.status})${bodyText ? `: ${bodyText.slice(0, 120)}` : ""}`);
-  }
-  if (!bodyText) {
-    return null;
-  }
-  try {
-    return JSON.parse(bodyText);
-  } catch {
-    return bodyText;
-  }
-}
-
-function parseSuccessBody(body) {
-  if (body == null || body === "") {
-    return true;
-  }
-  if (body === true) {
-    return true;
-  }
-  if (typeof body === "object") {
-    return body.success === true || Number(body.success) > 0 || body.result === 1;
-  }
-  const text = String(body || "").toLowerCase();
-  return text.includes("\"success\":1") || text.includes("\"success\":true") || text.includes("success");
-}
-
 async function resolveDemoAppId(appId) {
   const fetchJson = steamFetchUtils.fetchJson || ((url, options = {}) => fetch(url, options).then((r) => r.json()));
   const payload = await fetchJson(
@@ -1720,6 +1687,27 @@ async function resolveDemoAppId(appId) {
 }
 
 async function resolveDemoSubId(demoAppId) {
+  const fetchJson = steamFetchUtils.fetchJson || ((url, options = {}) => fetch(url, options).then((r) => r.json()));
+  try {
+    const payload = await fetchJson(
+      `https://store.steampowered.com/api/appdetails?appids=${encodeURIComponent(demoAppId)}&l=english`,
+      { cache: "no-store", credentials: "include" }
+    );
+    const appData = payload?.[demoAppId]?.data || {};
+    const packageGroups = Array.isArray(appData?.package_groups) ? appData.package_groups : [];
+    for (const group of packageGroups) {
+      const subs = Array.isArray(group?.subs) ? group.subs : [];
+      for (const sub of subs) {
+        const subId = String(sub?.packageid || sub?.package_id || "").trim();
+        if (subId) {
+          return subId;
+        }
+      }
+    }
+  } catch {
+    // fallback to HTML parsing below
+  }
+
   const fetchText = steamFetchUtils.fetchText || ((url, options = {}) => fetch(url, options).then((r) => r.text()));
   const html = await fetchText(
     `https://store.steampowered.com/app/${encodeURIComponent(demoAppId)}/?l=english`,
@@ -1744,38 +1732,59 @@ async function resolveDemoSubId(demoAppId) {
 async function addDemoToLibrary(appId) {
   const demoAppId = await resolveDemoAppId(appId);
   const subId = await resolveDemoSubId(demoAppId);
-  const sessionId = await fetchSteamSessionId();
-  const attempts = [
-    {
-      url: "https://store.steampowered.com/checkout/addfreelicense",
-      payload: { action: "add_to_cart", sessionid: sessionId, subid: subId }
-    },
-    {
-      url: `https://store.steampowered.com/checkout/addfreelicense/${encodeURIComponent(subId)}`,
-      payload: { action: "add_to_cart", sessionid: sessionId, subid: subId }
-    },
-    {
-      url: "https://store.steampowered.com/freelicense/addfreelicense",
-      payload: { sessionid: sessionId, subid: subId }
-    },
-    {
-      url: `https://store.steampowered.com/freelicense/addfreelicense/${encodeURIComponent(subId)}`,
-      payload: { sessionid: sessionId, subid: subId }
-    }
-  ];
-  let lastError = null;
-  for (const attempt of attempts) {
+  const response = await browser.runtime.sendMessage({
+    type: "claim-demo-license",
+    appId: String(appId || "").trim(),
+    demoAppId,
+    subId
+  });
+  if (!response?.ok) {
+    throw new Error(String(response?.error || "Could not add demo to library."));
+  }
+  return {
+    demoAppId: String(response?.demoAppId || demoAppId),
+    subId: String(response?.subId || subId),
+    attempts: Array.isArray(response?.attempts) ? response.attempts : []
+  };
+}
+
+async function openDemoFallbackPopup(demoAppId, appId) {
+  const demoId = String(demoAppId || "").trim();
+  if (!demoId) {
+    throw new Error("Missing demo app id for fallback popup.");
+  }
+  const queueAppId = String(appId || "").trim();
+  const url = new URL(`https://store.steampowered.com/app/${encodeURIComponent(demoId)}/`);
+  url.searchParams.set("swm_demo_popup", "1");
+  url.searchParams.set("swm_from_queue", "1");
+  if (queueAppId) {
+    url.searchParams.set("swm_appid", queueAppId);
+  }
+
+  if (typeof browser?.windows?.create === "function") {
     try {
-      const body = await postSteamForm(attempt.url, attempt.payload);
-      if (!parseSuccessBody(body)) {
-        throw new Error("Steam did not confirm the demo claim.");
+      const popup = await browser.windows.create({
+        type: "popup",
+        url: url.toString(),
+        focused: true,
+        width: 820,
+        height: 430
+      });
+      if (popup && Number(popup.id) > 0) {
+        return { mode: "popup", windowId: Number(popup.id) };
       }
-      return { demoAppId, subId };
-    } catch (error) {
-      lastError = error;
+    } catch {
+      // fallback to tab
     }
   }
-  throw lastError || new Error("Could not add demo to library.");
+
+  if (typeof browser?.tabs?.create === "function") {
+    const tab = await browser.tabs.create({ url: url.toString(), active: true });
+    return { mode: "tab", tabId: Number(tab?.id || 0) || null };
+  }
+
+  window.open(url.toString(), "_blank", "noopener,noreferrer");
+  return { mode: "window-open", tabId: null };
 }
 
 async function refreshStateOnly() {
@@ -2052,7 +2061,21 @@ function bindEvents() {
       setStatus(`Demo added to library (app ${added.demoAppId}).`);
     } catch (error) {
       const message = String(error?.message || error || "unknown error");
-      setStatus(`Could not add demo automatically: ${message}`, true);
+      const demoAppId = String(currentMeta?.demoAppId || "").trim();
+      if (demoAppId) {
+        try {
+          const opened = await openDemoFallbackPopup(demoAppId, appId);
+          if (opened?.mode === "popup") {
+            setStatus(`Could not add demo automatically (${message}). Opened demo quick-add window.`, true);
+          } else {
+            setStatus(`Could not add demo automatically (${message}). Opened demo page to add manually.`, true);
+          }
+        } catch {
+          setStatus(`Could not add demo automatically: ${message}`, true);
+        }
+      } else {
+        setStatus(`Could not add demo automatically: ${message}`, true);
+      }
     } finally {
       if (demoBtn) {
         demoBtn.disabled = false;

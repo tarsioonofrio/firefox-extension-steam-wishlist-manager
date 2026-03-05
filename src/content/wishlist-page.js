@@ -3301,30 +3301,21 @@ function proxyReadSteamIdentity() {
   };
 }
 
-async function proxyWriteSteamAction(action, appId) {
-  const act = String(action || "").trim();
-  const id = String(appId || "").trim();
-  if (!id) {
-    throw new Error("Invalid appId.");
+function parseSteamProxyWriteSuccess(body) {
+  if (body == null || body === "") {
+    return true;
   }
-  const sessionId = await getStoreSessionIdFromPage();
-  let url = "";
-  const form = new FormData();
-  form.set("sessionid", sessionId);
-  form.set("appid", id);
-  if (act === "wishlist-add") {
-    url = "https://store.steampowered.com/api/addtowishlist";
-  } else if (act === "wishlist-remove") {
-    url = "https://store.steampowered.com/api/removefromwishlist";
-  } else if (act === "follow-on") {
-    url = "https://store.steampowered.com/explore/followgame/";
-  } else if (act === "follow-off") {
-    url = "https://store.steampowered.com/explore/followgame/";
-    form.set("unfollow", "1");
-  } else {
-    throw new Error("Unsupported action.");
+  if (body === true) {
+    return true;
   }
+  if (typeof body === "object") {
+    return body.success === true || Number(body.success) > 0 || body.result === 1;
+  }
+  const text = String(body || "").toLowerCase();
+  return text.includes("\"success\":1") || text.includes("\"success\":true") || text.includes("success");
+}
 
+async function postSteamProxyForm(url, form) {
   const response = await withTimeout(fetch(url, {
     method: "POST",
     credentials: "include",
@@ -3344,15 +3335,314 @@ async function proxyWriteSteamAction(action, appId) {
       body = rawText;
     }
   }
-  const success = body === true
-    || body?.success === true
-    || Number(body?.success) > 0
-    || body?.result === 1;
+  const success = parseSteamProxyWriteSuccess(body);
   return {
     ok: status >= 200 && status < 300 && success,
     status,
     body
   };
+}
+
+async function proxyWriteSteamAction(action, appId, payload = {}) {
+  const act = String(action || "").trim();
+  const id = String(appId || "").trim();
+  if (!id) {
+    throw new Error("Invalid appId.");
+  }
+  const sessionId = await getStoreSessionIdFromPage();
+  if (act === "demo-add") {
+    const subId = String(payload?.subId || "").trim();
+    if (!/^\d+$/.test(subId)) {
+      throw new Error("Invalid demo subId.");
+    }
+    const demoAttempts = [
+      {
+        endpoint: "https://store.steampowered.com/checkout/addfreelicense",
+        buildForm: () => {
+          const form = new FormData();
+          form.set("action", "add_to_cart");
+          form.set("sessionid", sessionId);
+          form.set("subid", subId);
+          form.set("appid", id);
+          return form;
+        }
+      },
+      {
+        endpoint: `https://store.steampowered.com/checkout/addfreelicense/${encodeURIComponent(subId)}`,
+        buildForm: () => {
+          const form = new FormData();
+          form.set("action", "add_to_cart");
+          form.set("sessionid", sessionId);
+          form.set("subid", subId);
+          form.set("appid", id);
+          return form;
+        }
+      },
+      {
+        endpoint: "https://store.steampowered.com/freelicense/addfreelicense",
+        buildForm: () => {
+          const form = new FormData();
+          form.set("sessionid", sessionId);
+          form.set("subid", subId);
+          form.set("appid", id);
+          return form;
+        }
+      },
+      {
+        endpoint: `https://store.steampowered.com/freelicense/addfreelicense/${encodeURIComponent(subId)}`,
+        buildForm: () => {
+          const form = new FormData();
+          form.set("sessionid", sessionId);
+          form.set("subid", subId);
+          form.set("appid", id);
+          return form;
+        }
+      }
+    ];
+    const attempts = [];
+    for (const attempt of demoAttempts) {
+      try {
+        const result = await postSteamProxyForm(attempt.endpoint, attempt.buildForm());
+        attempts.push({
+          endpoint: attempt.endpoint,
+          status: Number(result?.status || 0),
+          ok: Boolean(result?.ok)
+        });
+        if (result?.ok) {
+          return {
+            ok: true,
+            status: Number(result?.status || 0),
+            body: result?.body ?? null,
+            attempts
+          };
+        }
+      } catch (error) {
+        attempts.push({
+          endpoint: attempt.endpoint,
+          status: 0,
+          ok: false,
+          note: String(error?.message || error || "request failed")
+        });
+      }
+    }
+    return {
+      ok: false,
+      status: 0,
+      body: null,
+      attempts
+    };
+  }
+  let url = "";
+  const form = new FormData();
+  form.set("sessionid", sessionId);
+  form.set("appid", id);
+  if (act === "wishlist-add") {
+    url = "https://store.steampowered.com/api/addtowishlist";
+  } else if (act === "wishlist-remove") {
+    url = "https://store.steampowered.com/api/removefromwishlist";
+  } else if (act === "follow-on") {
+    url = "https://store.steampowered.com/explore/followgame/";
+  } else if (act === "follow-off") {
+    url = "https://store.steampowered.com/explore/followgame/";
+    form.set("unfollow", "1");
+  } else {
+    throw new Error("Unsupported action.");
+  }
+  return postSteamProxyForm(url, form);
+}
+
+function isDemoPopupMode() {
+  if (!window.location.pathname.startsWith("/app/")) {
+    return false;
+  }
+  const params = new URLSearchParams(window.location.search || "");
+  return params.get("swm_demo_popup") === "1";
+}
+
+function readDemoPopupContext() {
+  const params = new URLSearchParams(window.location.search || "");
+  const queueAppId = String(params.get("swm_appid") || "").trim();
+  const demoPathMatch = String(window.location.pathname || "").match(/\/app\/(\d+)/);
+  const demoAppId = String(demoPathMatch?.[1] || "").trim();
+  return {
+    appId: queueAppId,
+    demoAppId
+  };
+}
+
+function findDemoPopupTarget() {
+  const direct = document.querySelector(".game_area_purchase_game.demo_above_purchase");
+  if (direct) {
+    return direct;
+  }
+  const byOnClick = document.querySelector("[onclick*=\"AddFreeLicense(\"]");
+  if (byOnClick) {
+    return byOnClick.closest(".game_area_purchase_game, .game_purchase_action, .game_area_purchase") || byOnClick;
+  }
+  const byInstall = document.querySelector("a[href*=\"ShowGotSteamModal\"], a[href^=\"steam://install/\"]");
+  if (byInstall) {
+    return byInstall.closest(".game_area_purchase_game, .game_purchase_action, .game_area_purchase") || byInstall;
+  }
+  return null;
+}
+
+function demoPopupLooksSuccessful(root) {
+  if (!root) {
+    return false;
+  }
+  const addButton = root.querySelector("[onclick*=\"AddFreeLicense(\"], .btn_packageinfo [role=\"button\"], .btn_packageinfo .btn_blue_steamui");
+  if (!addButton) {
+    return true;
+  }
+  const text = String(root.textContent || "").toLowerCase();
+  return (
+    text.includes("in library")
+    || text.includes("already in your library")
+    || text.includes("play now")
+    || text.includes("na biblioteca")
+    || text.includes("já está na sua biblioteca")
+    || text.includes("jogar agora")
+  );
+}
+
+function initDemoPopupMode() {
+  const applyMode = () => {
+    if (document.getElementById("swm-demo-popup-root")) {
+      return true;
+    }
+    const target = findDemoPopupTarget();
+    if (!target) {
+      return false;
+    }
+
+    if (!document.getElementById("swm-demo-popup-style")) {
+      const style = document.createElement("style");
+      style.id = "swm-demo-popup-style";
+      style.textContent = `
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          background: #0e141b !important;
+          min-height: 100vh !important;
+        }
+        #swm-demo-popup-root {
+          box-sizing: border-box;
+          min-height: 100vh;
+          padding: 14px;
+          font-family: "Motiva Sans", Arial, sans-serif;
+          color: #c7d5e0;
+        }
+        #swm-demo-popup-head {
+          font-size: 14px;
+          letter-spacing: 0.04em;
+          font-weight: 700;
+          text-transform: uppercase;
+          color: #8f98a0;
+          margin: 0 0 10px 0;
+        }
+        #swm-demo-popup-card {
+          max-width: 780px;
+          margin: 0 auto;
+        }
+      `;
+      document.documentElement.appendChild(style);
+    }
+
+    const root = document.createElement("div");
+    root.id = "swm-demo-popup-root";
+    const head = document.createElement("div");
+    head.id = "swm-demo-popup-head";
+    head.textContent = "Demo Quick Add";
+    const card = document.createElement("div");
+    card.id = "swm-demo-popup-card";
+    root.appendChild(head);
+    root.appendChild(card);
+    document.body.appendChild(root);
+
+    const bodyChildren = Array.from(document.body.children);
+    for (const child of bodyChildren) {
+      if (child === root) {
+        continue;
+      }
+      child.setAttribute("data-swm-demo-hidden", "1");
+      child.style.display = "none";
+    }
+    card.appendChild(target);
+
+    const context = readDemoPopupContext();
+    let successSent = false;
+    let monitorTimer = null;
+    const closePopup = async (reason) => {
+      if (successSent) {
+        return;
+      }
+      successSent = true;
+      browser.runtime.sendMessage({
+        type: "demo-popup-success",
+        appId: context.appId,
+        demoAppId: context.demoAppId,
+        reason: String(reason || "ok")
+      }).catch(() => {});
+      setTimeout(() => {
+        try {
+          window.close();
+        } catch {
+          // noop
+        }
+      }, 150);
+    };
+
+    const startSuccessMonitor = () => {
+      if (monitorTimer) {
+        return;
+      }
+      let ticks = 0;
+      monitorTimer = setInterval(() => {
+        ticks += 1;
+        if (demoPopupLooksSuccessful(root)) {
+          clearInterval(monitorTimer);
+          monitorTimer = null;
+          closePopup("add-to-library");
+          return;
+        }
+        if (ticks >= 30) {
+          clearInterval(monitorTimer);
+          monitorTimer = null;
+        }
+      }, 400);
+    };
+
+    root.addEventListener("click", (event) => {
+      const node = event.target instanceof Element ? event.target : null;
+      if (!node) {
+        return;
+      }
+      const addBtn = node.closest("[onclick*=\"AddFreeLicense(\"], .btn_packageinfo [role=\"button\"], .btn_packageinfo .btn_blue_steamui");
+      if (addBtn) {
+        startSuccessMonitor();
+        return;
+      }
+      const downloadBtn = node.closest("a[href*=\"ShowGotSteamModal\"], a[href^=\"steam://install/\"]");
+      if (downloadBtn) {
+        setTimeout(() => {
+          closePopup("download");
+        }, 1200);
+      }
+    }, true);
+
+    return true;
+  };
+
+  if (applyMode()) {
+    return;
+  }
+  let attempts = 0;
+  const waiter = setInterval(() => {
+    attempts += 1;
+    if (applyMode() || attempts >= 20) {
+      clearInterval(waiter);
+    }
+  }, 250);
 }
 
 browser.runtime.onMessage.addListener((message) => {
@@ -3372,7 +3662,11 @@ browser.runtime.onMessage.addListener((message) => {
     return { ok: true, ready: true };
   }
   if (message.type === "steam-proxy-write-action") {
-    return proxyWriteSteamAction(String(message.action || ""), String(message.appId || ""));
+    return proxyWriteSteamAction(
+      String(message.action || ""),
+      String(message.appId || ""),
+      message.payload || {}
+    );
   }
   if (message.type === "wishlist-filters-get") {
     return getWishlistFiltersSnapshot();
@@ -3393,4 +3687,8 @@ if (window.location.pathname.startsWith("/wishlist")) {
   }
   syncWishlistOrderCache().catch((error) => reportNonFatal("sync-wishlist-order-cache", error));
   initWishlistFollowUi();
+}
+
+if (isDemoPopupMode()) {
+  initDemoPopupMode();
 }

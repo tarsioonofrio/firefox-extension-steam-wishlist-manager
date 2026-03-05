@@ -10,9 +10,14 @@
   <main class="container">
     <header class="top">
       <div class="top-title-row">
-        <h1>Rediscover Queue</h1>
-        <p id="queue-intro" class="intro">Choose list and collection, then click Go.</p>
-        <button id="go-btn" type="button">Go!</button>
+        <div class="top-title-left">
+          <h1>Rediscover Queue</h1>
+          <p id="queue-intro" class="intro">Choose list and collection, then click Go.</p>
+        </div>
+        <div class="top-title-right">
+          <p id="queue-preview-count" class="queue-preview-count">0 games</p>
+          <button id="go-btn" type="button">Go!</button>
+        </div>
       </div>
       <div class="setup-panel">
         <label>
@@ -32,82 +37,88 @@
         </label>
       </div>
       <section id="queue-filters-panel" class="queue-filters-panel">
-        <details class="filter-group" open>
-          <summary>Tags</summary>
-          <div class="filter-content">
-            <input id="queue-tag-search-input" type="search" placeholder="Search tags...">
-            <div id="queue-tag-options" class="tag-options"></div>
-            <button id="queue-tag-show-more-btn" type="button" class="small-btn">Show more</button>
-          </div>
-        </details>
-
-        <details class="filter-group" open>
-          <summary>Rating &amp; Reviews</summary>
-          <div class="filter-content">
-            <div class="range-header">
-              <span id="queue-rating-min-label">0%</span>
-              <span id="queue-rating-max-label">100%</span>
+        <div class="queue-filters-main-grid">
+          <details class="filter-group" open>
+            <summary>Tags</summary>
+            <div class="filter-content">
+              <input id="queue-tag-search-input" type="search" placeholder="Search tags...">
+              <div id="queue-tag-options" class="tag-options"></div>
+              <button id="queue-tag-show-more-btn" type="button" class="small-btn">Show more</button>
             </div>
-            <div class="dual-range">
-              <input id="queue-rating-min-range" class="range-min" type="range" min="0" max="100" step="1" value="0">
-              <input id="queue-rating-max-range" class="range-max" type="range" min="0" max="100" step="1" value="100">
-            </div>
-            <div class="reviews-row">
-              <input id="queue-reviews-min-input" type="number" min="0" step="1" value="0">
-              <span>to</span>
-              <input id="queue-reviews-max-input" type="number" min="0" step="1" value="" placeholder="max">
-            </div>
-          </div>
-        </details>
-
-        <details class="filter-group" open>
-          <summary>Price &amp; Discount</summary>
-          <div class="filter-content">
-            <div class="reviews-row">
-              <input id="queue-price-min-input" type="number" min="0" step="1" value="0">
-              <span>to</span>
-              <input id="queue-price-max-input" type="number" min="0" step="1" value="" placeholder="max">
-            </div>
-            <div class="range-header">
-              <span id="queue-discount-min-label">0%</span>
-              <span id="queue-discount-max-label">100%</span>
-            </div>
-            <div class="dual-range">
-              <input id="queue-discount-min-range" class="range-min" type="range" min="0" max="100" step="1" value="0">
-              <input id="queue-discount-max-range" class="range-max" type="range" min="0" max="100" step="1" value="100">
-            </div>
-          </div>
-        </details>
-
-        <details class="filter-group" open>
-          <summary>Release Year</summary>
-          <div class="filter-content">
-            <label class="inline-toggle switch-toggle">
-              <input id="queue-release-text-enabled" type="checkbox" checked>
-              <span>TBA/Soon</span>
-            </label>
-            <div class="release-year-range-row">
-              <label class="inline-toggle switch-toggle">
-                <input id="queue-release-year-range-enabled" type="checkbox" checked>
-              </label>
-              <div id="queue-release-year-range-panel" class="release-year-range-panel">
+          </details>
+          <div class="queue-filters-right-stack">
+            <details class="filter-group" open>
+              <summary>Rating &amp; Reviews</summary>
+              <div class="filter-content">
                 <div class="range-header">
-                  <span id="queue-release-year-min-label">2010</span>
-                  <span id="queue-release-year-max-label">2027</span>
+                  <span id="queue-rating-min-label">0%</span>
+                  <span id="queue-rating-max-label">100%</span>
                 </div>
                 <div class="dual-range">
-                  <input id="queue-release-year-min-range" class="range-min" type="range" min="2010" max="2027" step="1" value="2010">
-                  <input id="queue-release-year-max-range" class="range-max" type="range" min="2010" max="2027" step="1" value="2027">
+                  <input id="queue-rating-min-range" class="range-min" type="range" min="0" max="100" step="1" value="0">
+                  <input id="queue-rating-max-range" class="range-max" type="range" min="0" max="100" step="1" value="100">
+                </div>
+                <div class="reviews-row">
+                  <input id="queue-reviews-min-input" type="number" min="0" step="1" value="0">
+                  <span>to</span>
+                  <input id="queue-reviews-max-input" type="number" min="0" step="1" value="" placeholder="max">
                 </div>
               </div>
-            </div>
+            </details>
+
+            <details class="filter-group" open>
+              <summary>Price &amp; Discount</summary>
+              <div class="filter-content">
+                <div class="reviews-row">
+                  <input id="queue-price-min-input" type="number" min="0" step="1" value="0">
+                  <span>to</span>
+                  <input id="queue-price-max-input" type="number" min="0" step="1" value="" placeholder="max">
+                </div>
+                <div class="range-header">
+                  <span id="queue-discount-min-label">0%</span>
+                  <span id="queue-discount-max-label">100%</span>
+                </div>
+                <div class="dual-range">
+                  <input id="queue-discount-min-range" class="range-min" type="range" min="0" max="100" step="1" value="0">
+                  <input id="queue-discount-max-range" class="range-max" type="range" min="0" max="100" step="1" value="100">
+                </div>
+              </div>
+            </details>
+
+            <details class="filter-group" open>
+              <summary>Release Year</summary>
+              <div class="filter-content">
+                <label class="inline-toggle switch-toggle">
+                  <input id="queue-release-text-enabled" type="checkbox" checked>
+                  <span>TBA/Soon</span>
+                </label>
+                <div class="release-year-range-row">
+                  <label class="inline-toggle switch-toggle">
+                    <input id="queue-release-year-range-enabled" type="checkbox" checked>
+                  </label>
+                  <div id="queue-release-year-range-panel" class="release-year-range-panel">
+                    <div class="range-header">
+                      <span id="queue-release-year-min-label">2010</span>
+                      <span id="queue-release-year-max-label">2027</span>
+                    </div>
+                    <div class="dual-range">
+                      <input id="queue-release-year-min-range" class="range-min" type="range" min="2010" max="2027" step="1" value="2010">
+                      <input id="queue-release-year-max-range" class="range-max" type="range" min="2010" max="2027" step="1" value="2027">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
-        </details>
+        </div>
 
         <details class="filter-group" open>
           <summary>More Filters</summary>
           <div class="filter-content">
-            <div id="queue-extra-filters-root"></div>
+            <div class="queue-extra-filters-grid">
+              <div id="queue-extra-filters-left" class="queue-extra-filters-col"></div>
+              <div id="queue-extra-filters-right" class="queue-extra-filters-col"></div>
+            </div>
           </div>
         </details>
       </section>

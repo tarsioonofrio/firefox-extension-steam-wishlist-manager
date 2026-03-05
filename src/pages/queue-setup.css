@@ -30,8 +30,25 @@ body {
 .top-title-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   min-width: 0;
+}
+
+.top-title-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.top-title-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-left: auto;
 }
 
 h1 {
@@ -44,6 +61,13 @@ h1 {
   margin: 0;
   color: #9db5c9;
   font-size: 13px;
+}
+
+.queue-preview-count {
+  margin: 0;
+  color: #9db5c9;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .top-title-row #go-btn {
@@ -218,7 +242,30 @@ button.active {
   display: grid;
   width: 100%;
   max-width: 700px;
-  gap: 0;
+  gap: 10px;
+}
+
+.queue-filters-main-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.queue-filters-right-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.queue-extra-filters-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.queue-extra-filters-col {
+  display: grid;
+  gap: 10px;
 }
 
 .filter-group {
@@ -432,6 +479,13 @@ button.active {
 .extra-filter-title {
   font-size: 12px;
   color: #9db5c9;
+}
+
+@media (max-width: 900px) {
+  .queue-filters-main-grid,
+  .queue-extra-filters-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .capsule-image.hidden {
