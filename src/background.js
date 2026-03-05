@@ -1705,7 +1705,16 @@ function getSteamWriteErrorData(error) {
   };
 }
 
-async function setSteamWishlist(appId, enabled) {
+function normalizeSteamWriteOptions(rawOptions) {
+  const raw = rawOptions && typeof rawOptions === "object" ? rawOptions : {};
+  return {
+    allowCreateTab: raw.allowCreateTab !== false,
+    source: String(raw.source || "").trim() || "unknown"
+  };
+}
+
+async function setSteamWishlist(appId, enabled, writeOptions = {}) {
+  const opts = normalizeSteamWriteOptions(writeOptions);
   const diagnostics = createSteamWriteDiagnostics("wishlist", appId, enabled);
   try {
     addSteamWriteStage(diagnostics, "session-id", "start");
@@ -1764,7 +1773,7 @@ async function setSteamWishlist(appId, enabled) {
         type: "steam-proxy-write-action",
         action: enabled ? "wishlist-add" : "wishlist-remove",
         appId
-      }, { allowCreateTab: true });
+      }, { allowCreateTab: opts.allowCreateTab });
       if (!fallback?.ok) {
         throw makeSteamWriteError(
           "wishlist",
@@ -1794,7 +1803,8 @@ async function setSteamWishlist(appId, enabled) {
   }
 }
 
-async function setSteamFollow(appId, enabled) {
+async function setSteamFollow(appId, enabled, writeOptions = {}) {
+  const opts = normalizeSteamWriteOptions(writeOptions);
   const diagnostics = createSteamWriteDiagnostics("follow", appId, enabled);
   try {
     addSteamWriteStage(diagnostics, "session-id", "start");
@@ -1852,7 +1862,7 @@ async function setSteamFollow(appId, enabled) {
         type: "steam-proxy-write-action",
         action: enabled ? "follow-on" : "follow-off",
         appId
-      }, { allowCreateTab: true });
+      }, { allowCreateTab: opts.allowCreateTab });
       if (!fallback?.ok) {
         throw makeSteamWriteError(
           "follow",
@@ -1882,7 +1892,8 @@ async function setSteamFollow(appId, enabled) {
   }
 }
 
-async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent) {
+async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent, writeOptions = {}) {
+  const opts = normalizeSteamWriteOptions(writeOptions);
   const prev = previousIntent && typeof previousIntent === "object" ? previousIntent : {};
   const next = nextIntent && typeof nextIntent === "object" ? nextIntent : {};
   const prevBuyIntent = String(prev.buyIntent || "UNSET").toUpperCase();
@@ -1898,7 +1909,7 @@ async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent
     ? true
     : (nextBuyIntent === "NONE" ? false : null);
   if (prevWishlistDesired !== nextWishlistDesired && nextWishlistDesired !== null) {
-    actions.push(() => setSteamWishlist(appId, nextWishlistDesired));
+    actions.push(() => setSteamWishlist(appId, nextWishlistDesired, opts));
   }
   const prevFollowDesired = prevTrackIntent === "ON"
     ? true
@@ -1907,7 +1918,7 @@ async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent
     ? true
     : (nextTrackIntent === "OFF" ? false : null);
   if (prevFollowDesired !== nextFollowDesired && nextFollowDesired !== null) {
-    actions.push(() => setSteamFollow(appId, nextFollowDesired));
+    actions.push(() => setSteamFollow(appId, nextFollowDesired, opts));
   }
 
   if (actions.length === 0) {
@@ -1937,12 +1948,13 @@ async function syncSteamSignalsForIntentChange(appId, previousIntent, nextIntent
   };
 }
 
-async function logSteamWritePartialFailure(context, appId, steamWrite) {
+async function logSteamWritePartialFailure(context, appId, steamWrite, extraDetails = null) {
   if (!steamWrite || !Array.isArray(steamWrite.errors) || steamWrite.errors.length === 0) {
     return;
   }
   await logWarn(context, "Steam write finished with partial failure.", {
     appId,
+    ...(extraDetails && typeof extraDetails === "object" ? extraDetails : {}),
     errors: steamWrite.errors.slice(0, 3),
     errorDetails: Array.isArray(steamWrite.errorDetails) ? steamWrite.errorDetails.slice(0, 3) : []
   });
@@ -3168,6 +3180,10 @@ browser.runtime.onMessage.addListener((message, sender) => {
         }
 
         const previousItem = current;
+        const steamWriteOptions = {
+          allowCreateTab: message.steamProxyAllowCreateTab !== false,
+          source: String(message.source || "set-item-intent").trim() || "set-item-intent"
+        };
         const nextWithQueueTimers = applyQueueTimersForTransition(previousItem, {
           appId,
           title: String(message.title || current.title || "").slice(0, 200),
@@ -3191,19 +3207,37 @@ browser.runtime.onMessage.addListener((message, sender) => {
             const nextItem = { ...(state.items?.[appId] || {}) };
             Promise.resolve().then(async () => {
               try {
-                const deferredWrite = await syncSteamSignalsForIntentChange(appId, previousItem, nextItem);
-                await logSteamWritePartialFailure("set-item-intent.steam-write", appId, deferredWrite);
+                const deferredWrite = await syncSteamSignalsForIntentChange(
+                  appId,
+                  previousItem,
+                  nextItem,
+                  steamWriteOptions
+                );
+                await logSteamWritePartialFailure("set-item-intent.steam-write", appId, deferredWrite, {
+                  source: steamWriteOptions.source,
+                  allowCreateTab: steamWriteOptions.allowCreateTab
+                });
               } catch (error) {
                 await logWarn("set-item-intent.steam-write", "Deferred Steam write failed.", {
                   appId,
+                  source: steamWriteOptions.source,
+                  allowCreateTab: steamWriteOptions.allowCreateTab,
                   error: String(error?.message || error || "deferred steam write failed")
                 });
               }
             });
             steamWrite = { ok: true, deferred: true };
           } else {
-            steamWrite = await syncSteamSignalsForIntentChange(appId, previousItem, state.items[appId]);
-            await logSteamWritePartialFailure("set-item-intent.steam-write", appId, steamWrite);
+            steamWrite = await syncSteamSignalsForIntentChange(
+              appId,
+              previousItem,
+              state.items[appId],
+              steamWriteOptions
+            );
+            await logSteamWritePartialFailure("set-item-intent.steam-write", appId, steamWrite, {
+              source: steamWriteOptions.source,
+              allowCreateTab: steamWriteOptions.allowCreateTab
+            });
           }
         }
         return { ok: true, item: state.items[appId], state, steamWrite };

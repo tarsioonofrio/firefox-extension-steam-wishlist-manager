@@ -361,7 +361,10 @@ async function applyQueueIntentAction(appId, action) {
     type: "set-item-intent",
     appId: id,
     ...payload,
-    syncSteam: true
+    syncSteam: true,
+    deferSteam: true,
+    steamProxyAllowCreateTab: false,
+    source: "queue-app-page"
   });
   if (!response?.ok) {
     throw new Error(String(response?.error || "Could not update intent."));
@@ -387,7 +390,7 @@ async function advanceQueueMode(step = 1) {
     setQueueButtonsDisabled(true);
     return;
   }
-  window.location.href = buildQueueModeAppUrl(response.appId, sessionId, Number(response.index || nextIndex));
+  window.location.replace(buildQueueModeAppUrl(response.appId, sessionId, Number(response.index || nextIndex)));
 }
 
 async function initQueueMode() {

@@ -1598,6 +1598,8 @@ async function setIntent(appId, patch) {
     appId,
     title: String(state?.items?.[appId]?.title || ""),
     deferSteam: true,
+    steamProxyAllowCreateTab: false,
+    source: "queue-legacy-page",
     ...patch
   });
   const errs = Array.isArray(response?.steamWrite?.errors)
