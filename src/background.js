@@ -11,6 +11,7 @@ const BACKUP_HISTORY_KEY = "steamWishlistBackupHistoryV1";
 const LOGS_KEY = "steamWishlistLogsV1";
 const BACKUP_ALARM_NAME = "steamWishlistAutoBackup";
 const QUEUE_POLICY_KEY = "steamWishlistQueuePolicyV1";
+const STORE_QUEUE_SESSIONS_KEY = "steamWishlistStoreQueueSessionsV1";
 const QUEUE_AUTOMATION_ALARM_NAME = "steamWishlistQueueAutomation";
 const BACKUP_SCHEMA_VERSION = 1;
 const BACKUP_MAX_HISTORY = 20;
@@ -49,6 +50,8 @@ const DEFAULT_INBOX_DAYS = 7;
 const MIN_QUEUE_DAYS = 1;
 const MAX_QUEUE_DAYS = 365;
 const QUEUE_AUTOMATION_PERIOD_MINUTES = 360;
+const STORE_QUEUE_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+const STORE_QUEUE_SESSION_MAX = 30;
 const MAX_LOG_ENTRIES = 400;
 const DEV_RUNTIME_BOOT_ID = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 const DEV_RUNTIME_BOOT_AT = new Date().toISOString();
@@ -246,6 +249,85 @@ async function setQueuePolicy(rawPolicy) {
   await browser.storage.local.set({ [QUEUE_POLICY_KEY]: policy });
   await scheduleQueueAutomationAlarm();
   return policy;
+}
+
+function makeStoreQueueSessionId() {
+  return `sq_${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function normalizeStoreQueueSessionPayload(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const appIds = sanitizeAppIdList(src.appIds);
+  return {
+    id: String(src.id || "").trim(),
+    createdAt: Number.isFinite(Number(src.createdAt)) ? Number(src.createdAt) : Date.now(),
+    list: String(src.list || "inbox").trim().toLowerCase() || "inbox",
+    collection: String(src.collection || "__all__").trim() || "__all__",
+    appIds
+  };
+}
+
+function pruneStoreQueueSessionsMap(rawMap) {
+  const now = Date.now();
+  const map = rawMap && typeof rawMap === "object" ? rawMap : {};
+  const normalizedEntries = [];
+  for (const [key, value] of Object.entries(map)) {
+    const session = normalizeStoreQueueSessionPayload({
+      ...(value && typeof value === "object" ? value : {}),
+      id: String(value?.id || key || "").trim()
+    });
+    if (!session.id || session.appIds.length === 0) {
+      continue;
+    }
+    if (now - session.createdAt > STORE_QUEUE_SESSION_TTL_MS) {
+      continue;
+    }
+    normalizedEntries.push(session);
+  }
+  normalizedEntries.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  const trimmed = normalizedEntries.slice(0, STORE_QUEUE_SESSION_MAX);
+  const out = {};
+  for (const session of trimmed) {
+    out[session.id] = session;
+  }
+  return out;
+}
+
+async function getStoreQueueSessions() {
+  const stored = await browser.storage.local.get(STORE_QUEUE_SESSIONS_KEY);
+  const sessions = pruneStoreQueueSessionsMap(stored[STORE_QUEUE_SESSIONS_KEY]);
+  await browser.storage.local.set({ [STORE_QUEUE_SESSIONS_KEY]: sessions });
+  return sessions;
+}
+
+async function createStoreQueueSession(rawSession) {
+  const session = normalizeStoreQueueSessionPayload(rawSession);
+  if (session.appIds.length === 0) {
+    throw new Error("Queue has no games for the selected filters.");
+  }
+  const sessions = await getStoreQueueSessions();
+  const id = makeStoreQueueSessionId();
+  sessions[id] = {
+    ...session,
+    id,
+    createdAt: Date.now()
+  };
+  const pruned = pruneStoreQueueSessionsMap(sessions);
+  await browser.storage.local.set({ [STORE_QUEUE_SESSIONS_KEY]: pruned });
+  return pruned[id];
+}
+
+async function readStoreQueueSession(sessionId) {
+  const id = String(sessionId || "").trim();
+  if (!id) {
+    throw new Error("Missing queue session id.");
+  }
+  const sessions = await getStoreQueueSessions();
+  const session = normalizeStoreQueueSessionPayload(sessions[id] || {});
+  if (!session.id || session.appIds.length === 0) {
+    throw new Error("Queue session not found or expired.");
+  }
+  return session;
 }
 
 async function scheduleQueueAutomationAlarm() {
@@ -3361,6 +3443,42 @@ browser.runtime.onMessage.addListener((message, sender) => {
         const policy = await setQueuePolicy(message.policy || {});
         scheduleNativeBridgePublish("set-queue-policy");
         return { ok: true, policy };
+      }
+
+      case "start-store-queue-session": {
+        const session = await createStoreQueueSession({
+          appIds: Array.isArray(message.appIds) ? message.appIds : [],
+          list: message.list,
+          collection: message.collection
+        });
+        return {
+          ok: true,
+          sessionId: session.id,
+          total: session.appIds.length,
+          appId: session.appIds[0] || "",
+          index: 0
+        };
+      }
+
+      case "get-store-queue-item": {
+        const session = await readStoreQueueSession(message.sessionId);
+        const total = session.appIds.length;
+        const idxRaw = Number(message.index);
+        const index = Number.isFinite(idxRaw) ? Math.max(0, Math.min(total - 1, Math.floor(idxRaw))) : 0;
+        const appId = session.appIds[index] || "";
+        return {
+          ok: true,
+          sessionId: session.id,
+          list: session.list,
+          collection: session.collection,
+          total,
+          index,
+          appId,
+          hasPrev: index > 0,
+          hasNext: index + 1 < total,
+          prevAppId: index > 0 ? session.appIds[index - 1] : "",
+          nextAppId: index + 1 < total ? session.appIds[index + 1] : ""
+        };
       }
 
       case "run-queue-automation-now": {

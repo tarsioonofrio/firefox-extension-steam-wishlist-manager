@@ -500,11 +500,35 @@ function parseQueueRunQuery() {
   };
 }
 
-function openQueueRunWindow(listFilter, collection) {
-  const url = new URL(browser.runtime.getURL("src/pages/queue-run.html"));
-  url.searchParams.set("list", String(listFilter || "inbox"));
-  url.searchParams.set("collection", String(collection || "__all__"));
-  window.open(url.toString(), "_blank", "noopener,noreferrer");
+function buildStoreQueueAppUrl(appId, sessionId, index) {
+  const url = new URL(`https://store.steampowered.com/app/${encodeURIComponent(String(appId || "").trim())}/`);
+  url.searchParams.set("swm_queue", "1");
+  url.searchParams.set("sid", String(sessionId || "").trim());
+  url.searchParams.set("i", String(Math.max(0, Number(index) || 0)));
+  return url.toString();
+}
+
+async function openQueueRunWindow(listFilter, collection) {
+  const appIds = getFilteredIds(collection, listFilter);
+  if (!Array.isArray(appIds) || appIds.length === 0) {
+    setStatus("No games to run with current selection/filters.", true);
+    return;
+  }
+  const response = await browser.runtime.sendMessage({
+    type: "start-store-queue-session",
+    appIds,
+    list: String(listFilter || "inbox"),
+    collection: String(collection || "__all__")
+  });
+  if (!response?.ok || !response?.sessionId || !response?.appId) {
+    throw new Error(String(response?.error || "Could not start queue session."));
+  }
+  const url = buildStoreQueueAppUrl(response.appId, response.sessionId, Number(response.index || 0));
+  if (typeof browser?.tabs?.create === "function") {
+    await browser.tabs.create({ url, active: true });
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 }
 
 function persistUiState() {
@@ -1867,7 +1891,11 @@ function bindEvents() {
       await startQueue(collection, listFilter);
       return;
     }
-    openQueueRunWindow(listFilter, collection);
+    try {
+      await openQueueRunWindow(listFilter, collection);
+    } catch (error) {
+      setStatus(String(error?.message || error || "Could not start queue run."), true);
+    }
   });
 
   document.getElementById("queue-tag-search-input")?.addEventListener("input", (event) => {

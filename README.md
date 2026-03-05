@@ -50,12 +50,12 @@ This section is the user-facing map of current screens and capabilities.
 ### Rediscover Queue Page
 
 - Opens first in a setup screen (`queue-setup`) with `Collection` + `State` selectors, advanced filters, and a `Go!` action.
-- `Go!` opens a dedicated run screen (`queue-run`) focused on one game at a time triage.
+- `Go!` starts a queue session and opens Steam game pages directly (`/app/{appid}`) in queue mode, one game at a time.
+- Queue mode keeps only the Steam top area and demo purchase area visible, adds triage buttons under capstone, and a `Next` button beside the game title.
 - Queue filters follow the same dual-handle slider interaction standard used in `Collections` (rating/reviews, discount, release year ranges).
 - Queue order is randomized for each `Go!` run.
-- Includes media controls (videos/screenshots with previous/next navigation).
-- Shows card-style metadata (price, discount, reviews, release, tags) and quick actions (`Confirm`, `Maybe`, `Follow`, `Archive`, target price).
-- Run screen layout auto-fits viewport height to avoid page scrolling during triage.
+- Queue actions are applied directly from the Steam app page workflow (`Confirm`, `Follow`, `C*F`, `None`) before advancing.
+- Game title and capstone remain linked to the original game page URL.
 
 ### Collections Page
 
