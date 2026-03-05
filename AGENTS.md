@@ -92,6 +92,16 @@ Required fields:
   - Local state
   - Rendering/UI actions
 - Prefer resilient adapters around Steam endpoints.
+- Keep range/filter interaction behavior shared between `Collections` and `Queue`; avoid duplicating slider/filter mechanics across pages.
+- When fixing dual-range behavior (rating/discount/release year), update shared modules first, then page adapters.
+
+## Shared Range/Filter Pattern
+- Canonical dual-range interaction module: `src/pages/shared-range-controls.js`.
+- `Collections` adapter: `src/pages/collections-range-controls.js`.
+- `Queue` adapter/bindings: `src/pages/queue-run.js`.
+- Canonical filtering engine: `src/pages/collections-filters.js` (reused by `Collections` and `Queue`).
+- Rule: new fixes for range pointer/z-index/handle selection must land in shared logic before page-specific overrides.
+- Rule: page-specific CSS may differ visually, but slider interaction semantics must stay equivalent in `Collections` and `Queue`.
 
 ## Performance and Reliability
 - Must handle ~2000 items smoothly.
@@ -144,3 +154,4 @@ When MCP transport issues occur, prefer runbook flow over ad-hoc retries.
 - Keep the user-facing section `User Screens and Features` in `README.md` always updated.
 - Any change in page layout, screen names, entry points, or user-visible behavior must update this section in the same workstream/PR.
 - Do not ship user-facing UI/flow changes without reflecting them in that README section.
+- Any user-visible filter/range behavior change in `Collections` or `Queue` must document parity expectations between both pages.

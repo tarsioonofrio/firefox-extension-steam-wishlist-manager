@@ -51,6 +51,7 @@ This section is the user-facing map of current screens and capabilities.
 
 - Opens first in a setup screen (`queue-setup`) with `Collection` + `State` selectors, advanced filters, and a `Go!` action.
 - `Go!` opens a dedicated run screen (`queue-run`) focused on one game at a time triage.
+- Queue filters follow the same dual-handle slider interaction standard used in `Collections` (rating/reviews, discount, release year ranges).
 - Queue order is randomized for each `Go!` run.
 - Includes media controls (videos/screenshots with previous/next navigation).
 - Shows card-style metadata (price, discount, reviews, release, tags) and quick actions (`Confirm`, `Maybe`, `Follow`, `Archive`, target price).
@@ -304,6 +305,10 @@ Implementation guidance:
 - Full test suite: `npm test`
 - Centralized developer workflows:
   - `docs/dev/DEV_WORKFLOWS.md`
+- When changing slider/filter behavior:
+  - update shared range logic in `src/pages/shared-range-controls.js`,
+  - validate both `Collections` and `Queue` flows,
+  - update `User Screens and Features` if user-visible behavior changed.
 
 Manual load alternative:
 - `about:debugging` -> **This Firefox** -> **Load Temporary Add-on...** -> `manifest.json`
@@ -344,9 +349,10 @@ Notes:
 - `wishlist-sort.js`: sorting strategies (`position`, `title`, `price`, etc.).
 - `meta-parsers.js`: metadata parsing helpers (type, languages, price text).
 - `collections-filters.js`: filter predicates plus filtered/sorted list assembly.
+- `shared-range-controls.js`: shared dual-range pointer/handle interaction logic used by `Collections` and `Queue`.
 - `collections-ui-controls.js`: renderers for collection selector, sort menu, pager.
 - `collections-panels.js`: dropdown/panel toggle and outside-click close behavior.
-- `collections-range-controls.js`: rating/review/discount/price control rendering and bindings.
+- `collections-range-controls.js`: `Collections` adapter for rating/review/discount/price controls and bindings.
 - `collections-filter-state.js`: reset/clear helpers for filter UI state.
 - `collections-actions.js`: pure transition rules for source/sort selection.
 - `collections-crud.js`: create/rename/delete collection flows.
@@ -355,6 +361,12 @@ Notes:
 - `collections-general-bindings.js`: search, pagination, textual filter, refresh bindings.
 - `collections-menu-bindings.js`: collection menu and form submit bindings.
 - `collections-card-render.js`: card node creation, static render, card actions, async hydration.
+
+### Queue/Collections Filter Parity
+
+- `Queue` and `Collections` share the same filter engine (`collections-filters.js`) and dual-range interaction module (`shared-range-controls.js`).
+- Behavioral parity is expected for rating/reviews, discount, and release-year range controls.
+- Page-specific styling may differ, but slider semantics (min/max handle behavior and filtering effect) should remain equivalent.
 
 ## Dynamic Collections UX
 
