@@ -28,11 +28,12 @@ body {
 }
 
 .top-title-row {
-  display: flex;
+  display: grid;
+  width: 100%;
+  max-width: 700px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -48,7 +49,7 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  margin-left: auto;
+  min-width: 0;
 }
 
 h1 {
@@ -482,6 +483,14 @@ button.active {
 }
 
 @media (max-width: 900px) {
+  .top-title-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .top-title-right {
+    justify-content: flex-start;
+  }
+
   .queue-filters-main-grid,
   .queue-extra-filters-grid {
     grid-template-columns: minmax(0, 1fr);
